@@ -1,256 +1,952 @@
 "use client";
 
+import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
+import "leaflet/dist/leaflet.css";
 
-const htmlContent = `<div id="p4" class="page">
-  <div class="hm-wrap">
+const MapContainer = dynamic(
+  () => import("react-leaflet").then((m) => m.MapContainer),
+  { ssr: false }
+);
+const TileLayer = dynamic(
+  () => import("react-leaflet").then((m) => m.TileLayer),
+  { ssr: false }
+);
+const Polygon = dynamic(
+  () => import("react-leaflet").then((m) => m.Polygon),
+  { ssr: false }
+);
+const CircleMarker = dynamic(
+  () => import("react-leaflet").then((m) => m.CircleMarker),
+  { ssr: false }
+);
+const Popup = dynamic(
+  () => import("react-leaflet").then((m) => m.Popup),
+  { ssr: false }
+);
 
-    <!-- ════ LEFT: MAP ════ -->
-    <div class="hm-left">
+function num(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
 
-      <!-- Map area -->
-      <div class="hm-map-area" id="hmMapOuter">
-        <div class="hm-map-bg"></div>
-        <svg class="hm-wind-svg" viewBox="0 0 900 520" preserveAspectRatio="xMidYMid slice">
-          <defs><filter id="glow"><feGaussianBlur stdDeviation="1.5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
-          <g stroke="rgba(255,255,255,0.22)" stroke-width="1.1" fill="none" filter="url(#glow)">
-            <path d="M0,80 C60,60 120,100 180,80 S300,60 360,80 S480,100 540,75 S660,50 720,70 S840,90 900,70"/>
-            <path d="M0,130 C50,110 110,150 170,130 S290,110 350,135 S470,155 530,130 S650,105 710,125 S830,145 900,120"/>
-            <path d="M0,190 C70,170 140,210 200,185 S320,160 380,190 S500,215 560,188 S680,162 740,185 S860,210 900,185"/>
-            <path d="M0,250 C55,230 115,265 175,248 S295,228 355,255 S475,278 535,250 S655,222 715,248 S835,272 900,248"/>
-            <path d="M0,315 C65,295 125,330 185,310 S305,285 365,315 S485,340 545,310 S665,280 725,308 S845,335 900,312"/>
-            <path d="M0,375 C70,355 130,390 190,372 S310,350 370,378 S490,402 550,375 S670,348 730,372 S850,398 900,374"/>
-            <path d="M0,435 C60,415 120,448 180,432 S300,412 360,438 S480,460 540,435 S660,408 720,433 S840,458 900,434"/>
-            <path d="M150,0 C130,60 170,120 145,180 S115,240 150,300 S180,360 148,420 S120,480 150,520"/>
-            <path d="M320,0 C300,55 340,115 315,175 S285,235 320,295 S350,355 318,415 S290,475 320,520"/>
-            <path d="M490,0 C470,58 510,118 485,178 S455,238 490,298 S520,358 488,418 S460,478 490,520"/>
-            <path d="M660,0 C640,62 680,122 655,182 S625,242 660,302 S690,362 658,422 S630,482 660,520"/>
-            <path d="M830,0 C810,60 850,120 825,180 S795,240 830,300 S860,360 828,420 S800,480 830,520"/>
-            <ellipse cx="420" cy="260" rx="80" ry="55" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
-            <ellipse cx="420" cy="260" rx="50" ry="34" stroke="rgba(255,255,255,0.09)" stroke-width="1"/>
-            <ellipse cx="750" cy="400" rx="70" ry="48" stroke="rgba(255,255,255,0.12)" stroke-width="1.5"/>
-            <ellipse cx="120" cy="350" rx="60" ry="42" stroke="rgba(255,255,255,0.10)" stroke-width="1.2"/>
-          </g>
-          <g fill="rgba(255,255,255,0.28)" stroke="none">
-            <polygon points="180,78 172,82 172,74"/><polygon points="360,78 352,82 352,74"/>
-            <polygon points="540,73 532,77 532,69"/><polygon points="720,68 712,72 712,64"/>
-            <polygon points="355,133 347,137 347,129"/><polygon points="535,128 527,132 527,124"/>
-            <polygon points="380,188 372,192 372,184"/><polygon points="560,186 552,190 552,182"/>
-            <polygon points="370,253 362,257 362,249"/><polygon points="550,248 542,252 542,244"/>
-          </g>
-          <g stroke="rgba(255,255,255,0.28)" stroke-width="1.2" fill="none">
-            <path d="M200,20 Q260,30 310,55 Q350,75 370,90 Q400,100 430,85 Q470,68 520,72 Q570,78 610,60 Q650,42 690,38 Q740,32 800,20"/>
-            <path d="M370,95 Q380,120 375,150 Q368,175 380,195 Q395,215 405,240 Q415,265 410,285 Q400,305 410,325"/>
-            <path d="M520,280 Q560,268 610,275 Q660,282 700,310 Q735,338 745,375 Q752,408 738,440 Q720,468 690,480 Q655,490 618,485 Q580,478 548,460 Q515,440 498,410 Q482,378 488,345 Q495,312 520,280"/>
-            <path d="M270,105 Q280,130 275,160 Q265,190 270,215 Q280,240 295,250"/>
-            <path d="M155,140 Q148,175 152,210 Q158,245 165,278 Q170,310 165,345 Q158,375 152,400"/>
-          </g>
-          <g fill="rgba(255,255,255,0.55)" stroke="none">
-            <circle cx="300" cy="100" r="2.5"/><circle cx="235" cy="140" r="2"/>
-            <circle cx="175" cy="115" r="2"/><circle cx="380" cy="200" r="2"/>
-            <circle cx="395" cy="225" r="2"/><circle cx="150" cy="310" r="2"/>
-            <circle cx="665" cy="430" r="2.5"/><circle cx="50" cy="95" r="2"/>
-          </g>
-        </svg>
-        <div class="hm-temp-overlay" id="hmTempOverlay"></div>
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
 
-        <!-- sensor badge top-left -->
-        <div class="hm-sensor-badge" id="hmSensorBadge">
-          <span style="font-size:16px" id="hmSensorEmoji">🌡</span>
-          <div>
-            <div id="hmSensorLabel" style="font-size:12px;font-weight:700">Temperature</div>
-            <div style="font-size:10px;opacity:.75">°F · ICON</div>
-          </div>
-        </div>
+function formatDateInput(date) {
+  if (!date) return "";
+  const d = new Date(date);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
 
-        <!-- top-left city -->
-        <div style="position:absolute;top:60px;left:14px;z-index:6;font-size:10px;color:rgba(255,255,255,.58)">Istanbul</div>
+function formatDateThai(date) {
+  if (!date) return "-";
+  const d = new Date(date);
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear() + 543}`;
+}
 
-        <!-- ventusky logo -->
-        <div style="position:absolute;top:12px;right:14px;z-index:6;display:flex;align-items:center;gap:5px">
-          <span style="font-size:13px;color:#fff;opacity:.80">▼</span>
-          <span style="font-size:14px;font-weight:700;color:#fff;letter-spacing:.5px;font-family:'Space Mono',monospace">ventusky</span>
-        </div>
+function formatTime(date) {
+  if (!date) return "-";
+  const d = new Date(date);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
-        <!-- zoom -->
-        <div style="position:absolute;top:55px;right:14px;z-index:6;display:flex;flex-direction:column;gap:3px">
-          <button class="hm-zoom-btn">+</button>
-          <button class="hm-zoom-btn">−</button>
-        </div>
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
 
-        <!-- city labels -->
-        <div class="hm-city" style="top:82px;left:158px">成都市<br><span style="font-size:8px;opacity:.65">(Chengdu)</span></div>
-        <div class="hm-city" style="top:50px;left:262px">上海市<br><span style="font-size:8px;opacity:.65">(Shanghai)</span></div>
-        <div class="hm-city" style="top:82px;left:218px">广州市<br><span style="font-size:8px;opacity:.65">(Guangzhou)</span></div>
-        <div class="hm-city" style="top:88px;left:90px">Delhi</div>
-        <div class="hm-city" style="top:98px;left:138px">Dhaka<br><span style="font-size:8px;opacity:.65">(ঢাকা)</span></div>
-        <div class="hm-city" style="top:168px;left:210px">Thành phố<br>Hồ Chí Minh</div>
-        <div class="hm-city" style="top:225px;left:230px">Jakarta</div>
-        <div class="hm-city" style="top:205px;left:132px">Bengaluru</div>
-        <div class="hm-city" style="bottom:100px;right:120px">Melbourne</div>
-        <div style="position:absolute;top:52px;left:12px;z-index:5;font-size:9px;color:rgba(255,255,255,.55)">(東京都)<br>Tokyo</div>
+function normalizeCoords(input) {
+  if (!input) return [];
 
-        <!-- scale bar -->
-        <div class="hm-scale-wrap">
-          <div class="hm-scale-unit">°F</div>
-          <div class="hm-scale-bar-wrap">
-            <div class="hm-scale-bar"></div>
-            <div class="hm-scale-ticks">
-              <span>120</span><span>100</span><span>90</span>
-              <span class="hm-tick-red">80</span>
-              <span>70</span><span>60</span><span>50</span>
-              <span class="hm-tick-green">40</span>
-              <span>30</span><span>20</span><span>10</span>
-              <span class="hm-tick-blue">0</span>
-              <span>−10</span><span>−20</span><span>−40</span>
-            </div>
-          </div>
-        </div>
+  if (Array.isArray(input)) {
+    return input
+      .map((pt) => {
+        if (Array.isArray(pt) && pt.length >= 2) {
+          const lat = num(pt[0]);
+          const lng = num(pt[1]);
+          if (lat !== null && lng !== null) return [lat, lng];
+        }
 
-        <!-- 12 AM label -->
-        <div style="position:absolute;bottom:58px;left:50%;transform:translateX(-50%);z-index:6;font-size:9px;color:rgba(255,255,255,.60);font-family:'Space Mono',monospace;background:rgba(0,0,0,.30);padding:1px 6px;border-radius:4px">12 AM</div>
+        if (pt && typeof pt === "object") {
+          const lat = num(pt.lat ?? pt.latitude);
+          const lng = num(pt.lng ?? pt.lon ?? pt.longitude);
+          if (lat !== null && lng !== null) return [lat, lng];
+        }
 
-      </div><!-- /hm-map-area -->
+        return null;
+      })
+      .filter(Boolean);
+  }
 
-      <!-- Date strip -->
-      <div class="hm-date-strip">
-        <div>
-          <div class="hm-date-lbl">วันที่เริ่มต้น</div>
-          <label class="hm-date-pill" onclick="this.querySelector('input').showPicker?.()">
-            <span id="hmStartDateDisplay">20/11/2565</span>
-            <span>📅</span>
-            <input type="date" id="hmStartDateInput" value="2022-11-20" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none" onchange="hmDateChange('start',this)">
-          </label>
-        </div>
-        <div>
-          <div class="hm-date-lbl">วันที่สิ้นสุด</div>
-          <label class="hm-date-pill" onclick="this.querySelector('input').showPicker?.()">
-            <span id="hmEndDateDisplay">20/11/2565</span>
-            <span>📅</span>
-            <input type="date" id="hmEndDateInput" value="2022-11-20" style="position:absolute;opacity:0;width:0;height:0;pointer-events:none" onchange="hmDateChange('end',this)">
-          </label>
-        </div>
-      </div>
+  if (typeof input === "object") {
+    return normalizeCoords(
+      input.coords || input.coordinates || input.points || input.path || []
+    );
+  }
 
-      <!-- Controls bar -->
-      <div class="hm-controls-bar">
-        <div class="hm-timeline-row">
-          <button class="hm-play-btn" id="hmPlayBtn" onclick="toggleHmPlay(this)">▶</button>
-          <div class="hm-tl-wrap">
-            <div class="hm-timeline-track" id="hmTrack" onclick="hmTrackClick(event)">
-              <div class="hm-timeline-thumb" id="hmThumb" style="left:20%"></div>
-            </div>
-            <div class="hm-timeline-labels">
-              <span>1:00<br><span style="opacity:.5">AM</span></span>
-              <span>7:00<br><span style="opacity:.5">AM</span></span>
-              <span>1:00<br><span style="opacity:.5">PM</span></span>
-              <span>7:00<br><span style="opacity:.5">PM</span></span>
-            </div>
-          </div>
-        </div>
-        <div class="hm-date-row">
-          <span style="font-size:11px;color:rgba(165,214,167,.72);font-weight:600;font-family:'Space Mono',monospace">Sunday, 2026/03/22</span>
-          <button class="hm-change-date-btn">Change date</button>
-          <span style="font-size:10px;color:rgba(165,214,167,.45);margin-left:4px">▾</span>
-        </div>
-      </div>
+  return [];
+}
 
-    </div><!-- /hm-left -->
+function getPlotCoords(plot) {
+  const candidates = [
+    plot?.polygon,
+    plot?.polygon?.coords,
+    plot?.polygon?.coordinates,
+    plot?.coords,
+    plot?.coordinates,
+    plot?.area,
+    plot?.shape,
+  ];
 
-    <!-- ════ RIGHT: LEGEND PANEL ════ -->
-    <div class="hm-right">
-      <div class="hm-right-inner">
+  for (const item of candidates) {
+    const out = normalizeCoords(item);
+    if (out.length >= 3) return out;
+  }
+  return [];
+}
 
-        <!-- Plot dropdown -->
-        <div style="margin-bottom:14px">
-          <div style="font-size:10px;font-weight:700;color:#5a6b4a;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">🌿 เลือกแปลง</div>
-          <select class="hm-plot-dd" onchange="selectHmPlotDd(this)">
-            <option value="all">ทุกแปลง</option>
-            <option value="1">แปลง 1</option>
-            <option value="2">แปลง 2</option>
-            <option value="3">แปลง 3</option>
-            <option value="4">แปลง 4</option>
-          </select>
-        </div>
+function getPlotId(plot, i) {
+  return String(plot?.id || plot?._id || plot?.plotId || `plot-${i + 1}`);
+}
 
-        <!-- Legend title -->
-        <div class="hm-legend-title">Legend (Rain Intensity)</div>
+function getPlotName(plot, i) {
+  return plot?.plotName || plot?.name || plot?.alias || plot?.title || `แปลง ${i + 1}`;
+}
 
-        <!-- Gradient bar -->
-        <div class="hm-legend-grad"></div>
-        <div class="hm-legend-grad-labels"><span>น้อย</span><span>มาก</span></div>
+const SENSOR_META = {
+  soil_moisture: {
+    label: "Rain Intensity",
+    unit: "%",
+    min: 65,
+    max: 80,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+  temp_rh_temp: {
+    label: "Temperature",
+    unit: "°C",
+    min: 20,
+    max: 35,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+  temp_rh_humidity: {
+    label: "Humidity",
+    unit: "%",
+    min: 75,
+    max: 85,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+  wind_speed: {
+    label: "Wind Speed",
+    unit: "m/s",
+    min: 0.56,
+    max: 1.39,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+  light: {
+    label: "Light",
+    unit: "lux",
+    min: 40000,
+    max: 60000,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+  rain: {
+    label: "Rain",
+    unit: "mm/day",
+    min: 4,
+    max: 8,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+  n: {
+    label: "N",
+    unit: "%",
+    min: 0.1,
+    max: 1.0,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+  p: {
+    label: "P",
+    unit: "ppm",
+    min: 25,
+    max: 45,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+  k: {
+    label: "K",
+    unit: "cmol/kg",
+    min: 0.8,
+    max: 1.4,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+  water_level: {
+    label: "Water Level",
+    unit: "%",
+    min: 50,
+    max: 80,
+    colors: ["#ddd6fe", "#c4b5fd", "#8b5cf6", "#4f46e5"],
+  },
+};
 
-        <!-- Sensor list -->
-        <div class="hm-legend-section-title">จุดข้อมูลตัวอย่าง</div>
-        <div class="hm-sensor-list">
+const SENSOR_KEYS = Object.keys(SENSOR_META);
 
-          <div class="hm-sensor-item active" onclick="selectHmSensor(this,'temp','🌡','Temperature','#ff7043')">
-            <div class="hm-si-dot" style="background:#ff7043"></div>
-            <div class="hm-si-info"><div class="hm-si-name">อุณหภูมิ</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check">✓</div>
-          </div>
+function getColor(sensorKey, value) {
+  const meta = SENSOR_META[sensorKey];
+  if (!meta || value == null || Number.isNaN(value)) return "#cbd5e1";
+  const t = clamp((value - meta.min) / (meta.max - meta.min || 1), 0, 0.9999);
+  const idx = Math.floor(t * meta.colors.length);
+  return meta.colors[Math.min(idx, meta.colors.length - 1)];
+}
 
-          <div class="hm-sensor-item" onclick="selectHmSensor(this,'humidity','💧','ความชื้นสัมพัทธ์','#42a5f5')">
-            <div class="hm-si-dot" style="background:#42a5f5"></div>
-            <div class="hm-si-info"><div class="hm-si-name">ความชื้นสัมพัทธ์</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check"></div>
-          </div>
+function getStatus(sensorKey, value) {
+  const meta = SENSOR_META[sensorKey];
+  if (!meta || value == null || Number.isNaN(value)) {
+    return { type: "unknown", text: "ไม่มีข้อมูล" };
+  }
+  if (value < meta.min) {
+    return { type: "low", text: `ต่ำกว่าปกติ (< ${meta.min} ${meta.unit})` };
+  }
+  if (value > meta.max) {
+    return { type: "high", text: `สูงกว่าปกติ (> ${meta.max} ${meta.unit})` };
+  }
+  return { type: "normal", text: `ปกติ (${meta.min} - ${meta.max} ${meta.unit})` };
+}
 
-          <div class="hm-sensor-item" onclick="selectHmSensor(this,'wind','🌬','ความเร็วลม','#81d4fa')">
-            <div class="hm-si-dot" style="background:#81d4fa"></div>
-            <div class="hm-si-info"><div class="hm-si-name">วัดความเร็วลม</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check"></div>
-          </div>
+function extractValue(sensorKey, sensor) {
+  const st = String(sensor?.sensorType || "").toLowerCase();
+  const raw = sensor?.value ?? sensor?.lastReading?.value ?? null;
 
-          <div class="hm-sensor-item" onclick="selectHmSensor(this,'light','☀️','ความเข้มแสง','#ffd54f')">
-            <div class="hm-si-dot" style="background:#ffd54f"></div>
-            <div class="hm-si-info"><div class="hm-si-name">ความเข้มแสง</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check"></div>
-          </div>
+  if (sensorKey === "soil_moisture") {
+    if (st === "soil_moisture" || st === "soilmoisture" || st === "moisture") {
+      return num(raw);
+    }
+  }
 
-          <div class="hm-sensor-item" onclick="selectHmSensor(this,'rain','🌧','ปริมาณน้ำฝน','#26c6da')">
-            <div class="hm-si-dot" style="background:#26c6da"></div>
-            <div class="hm-si-info"><div class="hm-si-name">ปริมาณน้ำฝน</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check"></div>
-          </div>
+  if (sensorKey === "temp_rh_temp") {
+    if (st === "temp_rh" || st === "temperature_humidity" || st === "temphumidity") {
+      if (raw && typeof raw === "object") return num(raw.temperature ?? raw.temp ?? raw.t);
+    }
+    if (st === "temp" || st === "temperature") return num(raw);
+  }
 
-          <div class="hm-sensor-item" onclick="selectHmSensor(this,'soil','🌱','ความชื้นในดิน','#66bb6a')">
-            <div class="hm-si-dot" style="background:#66bb6a"></div>
-            <div class="hm-si-info"><div class="hm-si-name">ความชื้นในดิน</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check"></div>
-          </div>
+  if (sensorKey === "temp_rh_humidity") {
+    if (st === "temp_rh" || st === "temperature_humidity" || st === "temphumidity") {
+      if (raw && typeof raw === "object") return num(raw.humidity ?? raw.rh ?? raw.h);
+    }
+    if (st === "humidity" || st === "rh") return num(raw);
+  }
 
-          <div class="hm-sensor-item" onclick="selectHmSensor(this,'n','🧪','N (ไนโตรเจน)','#8d6e63')">
-            <div class="hm-si-dot" style="background:#8d6e63"></div>
-            <div class="hm-si-info"><div class="hm-si-name">N</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check"></div>
-          </div>
+  if (sensorKey === "wind_speed") {
+    if (st === "wind_speed" || st === "wind" || st === "windspeed") return num(raw);
+  }
 
-          <div class="hm-sensor-item" onclick="selectHmSensor(this,'p','🧪','P (ฟอสฟอรัส)','#ef5350')">
-            <div class="hm-si-dot" style="background:#ef5350"></div>
-            <div class="hm-si-info"><div class="hm-si-name">P</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check"></div>
-          </div>
+  if (sensorKey === "light") {
+    if (st === "light" || st === "lux" || st === "light_sensor") return num(raw);
+  }
 
-          <div class="hm-sensor-item" onclick="selectHmSensor(this,'k','🧪','K (โพแทสเซียม)','#ffee58')">
-            <div class="hm-si-dot" style="background:#ffee58"></div>
-            <div class="hm-si-info"><div class="hm-si-name">K</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check"></div>
-          </div>
+  if (sensorKey === "rain") {
+    if (st === "rain" || st === "rainfall" || st === "rain_fall") return num(raw);
+  }
 
-          <div class="hm-sensor-item" onclick="selectHmSensor(this,'water','🚿','ความพร้อมใช้น้ำ','#26a69a')">
-            <div class="hm-si-dot" style="background:#26a69a"></div>
-            <div class="hm-si-info"><div class="hm-si-name">การให้น้ำ / ความพร้อมใช้น้ำ</div><div class="hm-si-range">ช่วงเฉลี่ย 58/100</div></div>
-            <div class="hm-si-check"></div>
-          </div>
+  if (sensorKey === "water_level") {
+    if (st === "water_level" || st === "waterlevel" || st === "irrigation") return num(raw);
+  }
 
-        </div><!-- /hm-sensor-list -->
-      </div>
-    </div><!-- /hm-right -->
+  if (sensorKey === "n" || sensorKey === "p" || sensorKey === "k") {
+    if (st === "npk") {
+      if (raw && typeof raw === "object") {
+        return num(raw[sensorKey.toUpperCase()] ?? raw[sensorKey]);
+      }
+    }
+    if (st === sensorKey) return num(raw);
+  }
 
-  </div><!-- /hm-wrap -->
-</div>`;
+  return null;
+}
+
+function hashStr(s) {
+  let h = 0;
+  const x = String(s || "");
+  for (let i = 0; i < x.length; i++) h = (h * 31 + x.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function makeTimeline(baseValue, seedText, count = 24) {
+  const seed = hashStr(seedText) % 1000;
+  const out = [];
+  const base = baseValue == null || Number.isNaN(baseValue) ? 70 : Number(baseValue);
+  const now = Date.now();
+
+  for (let i = 0; i < count; i++) {
+    const t = i / Math.max(1, count - 1);
+    const wave = Math.sin(t * Math.PI * 2 + seed / 50) * 4;
+    const drift = Math.cos(t * Math.PI * 1.3 + seed / 20) * 2;
+    const pulse = seed % 6 === 0 && i > 15 ? 7 : 0;
+
+    out.push({
+      ts: now - (count - 1 - i) * 60 * 60 * 1000,
+      value: Number((base + wave + drift + pulse).toFixed(2)),
+    });
+  }
+
+  return out;
+}
+
+function FitToSelection({ polygons, selectedPlotId }) {
+  const { useMap } = require("react-leaflet");
+  const L = require("leaflet");
+  const map = useMap();
+
+  useEffect(() => {
+    const targets =
+      selectedPlotId === "all"
+        ? polygons.filter((p) => p.coords.length >= 3)
+        : polygons.filter((p) => p.id === selectedPlotId && p.coords.length >= 3);
+
+    if (!targets.length) {
+      map.setView([13.736717, 100.523186], 6);
+      return;
+    }
+
+    const points = targets.flatMap((p) => p.coords);
+    const bounds = L.latLngBounds(points);
+    if (bounds.isValid()) {
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+  }, [map, polygons, selectedPlotId]);
+
+  return null;
+}
 
 export default function Page() {
-  return <DuwimsStaticPage current="heatmap" htmlContent={htmlContent} />;
+  const [plots, setPlots] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selectedPlotId, setSelectedPlotId] = useState("all");
+  const [selectedSensor] = useState("soil_moisture");
+  const [frameIndex, setFrameIndex] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const timerRef = useRef(null);
+
+  const [startDate, setStartDate] = useState(() =>
+    formatDateInput(new Date(Date.now() - 2 * 24 * 60 * 60 * 1000))
+  );
+  const [endDate, setEndDate] = useState(() => formatDateInput(new Date()));
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadPlots() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const res = await fetch("/api/plots", {
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+
+        if (!res.ok) throw new Error(`โหลดข้อมูลแปลงไม่สำเร็จ (${res.status})`);
+
+        const json = await res.json();
+        const rawPlots = Array.isArray(json)
+          ? json
+          : Array.isArray(json?.data)
+          ? json.data
+          : Array.isArray(json?.plots)
+          ? json.plots
+          : [];
+
+        const normalized = rawPlots.map((plot, i) => {
+          const coords = getPlotCoords(plot);
+          const pins = Array.isArray(plot?.polygon?.pins)
+            ? plot.polygon.pins
+            : Array.isArray(plot?.pins)
+            ? plot.pins
+            : [];
+
+          const sensorPoints = [];
+
+          pins.forEach((pin, pinIndex) => {
+            const lat = num(pin?.lat);
+            const lng = num(pin?.lng);
+            if (lat == null || lng == null) return;
+
+            const nodes = [
+              ...(Array.isArray(pin?.node_air) ? pin.node_air : []),
+              ...(Array.isArray(pin?.node_soil) ? pin.node_soil : []),
+              ...(Array.isArray(pin?.nodes) ? pin.nodes : []),
+            ];
+
+            nodes.forEach((node, nodeIndex) => {
+              const sensors = Array.isArray(node?.sensors) ? node.sensors : [];
+              sensors.forEach((sensor, sensorIndex) => {
+                const sensorKey = SENSOR_KEYS.find((key) => extractValue(key, sensor) != null);
+                if (!sensorKey) return;
+
+                const baseValue = extractValue(sensorKey, sensor);
+
+                sensorPoints.push({
+                  id: `${i}-${pinIndex}-${nodeIndex}-${sensorIndex}`,
+                  lat,
+                  lng,
+                  plotId: getPlotId(plot, i),
+                  plotName: getPlotName(plot, i),
+                  nodeName: node?.nodeName || node?.uid || `Node ${nodeIndex + 1}`,
+                  sensorName: sensor?.name || sensor?.sensorType || `Sensor ${sensorIndex + 1}`,
+                  sensorType: sensor?.sensorType || "-",
+                  sensorKey,
+                  timeline: makeTimeline(
+                    baseValue,
+                    `${plot?.id}-${pinIndex}-${nodeIndex}-${sensorIndex}`
+                  ),
+                });
+              });
+            });
+          });
+
+          return {
+            id: getPlotId(plot, i),
+            name: getPlotName(plot, i),
+            coords,
+            sensorPoints,
+          };
+        });
+
+        if (!alive) return;
+        setPlots(normalized.filter((p) => p.coords.length >= 3));
+      } catch (err) {
+        if (!alive) return;
+        setError(err?.message || "โหลดข้อมูลไม่สำเร็จ");
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }
+
+    loadPlots();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const visiblePlots = useMemo(() => {
+    if (selectedPlotId === "all") return plots;
+    return plots.filter((p) => p.id === selectedPlotId);
+  }, [plots, selectedPlotId]);
+
+  const visiblePoints = useMemo(() => {
+    return visiblePlots
+      .flatMap((p) => p.sensorPoints || [])
+      .filter((p) => p.sensorKey === selectedSensor);
+  }, [visiblePlots, selectedSensor]);
+
+  const maxFrames = useMemo(() => visiblePoints[0]?.timeline?.length || 24, [visiblePoints]);
+
+  useEffect(() => {
+    if (!playing) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = null;
+      return;
+    }
+
+    timerRef.current = setInterval(() => {
+      setFrameIndex((prev) => (prev >= maxFrames - 1 ? 0 : prev + 1));
+    }, 700);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      timerRef.current = null;
+    };
+  }, [playing, maxFrames]);
+
+  const renderedPoints = useMemo(() => {
+    return visiblePoints.map((p) => {
+      const current = p.timeline?.[frameIndex] || null;
+      const value = current?.value ?? null;
+      const status = getStatus(selectedSensor, value);
+      return {
+        ...p,
+        value,
+        ts: current?.ts ?? null,
+        status,
+        color: getColor(selectedSensor, value),
+      };
+    });
+  }, [visiblePoints, frameIndex, selectedSensor]);
+
+  const currentTs = renderedPoints[0]?.ts || null;
+
+  const legendExampleItems = [
+    { key: "rain-intensity", title: "Rain Intensity", subtitle: "ช่วงเฉลี่ย 58/100", color: "#8b5cf6" },
+    { key: "temperature", title: "Temperature", subtitle: "ช่วงเฉลี่ย 58/100", color: "#c4b5fd" },
+    { key: "humidity", title: "Humidity", subtitle: "ช่วงเฉลี่ย 58/100", color: "#c4b5fd" },
+    { key: "wind-speed", title: "Wind Speed", subtitle: "ช่วงเฉลี่ย 58/100", color: "#c4b5fd" },
+    { key: "light", title: "Light", subtitle: "ช่วงเฉลี่ย 58/100", color: "#c4b5fd" },
+    { key: "rain", title: "Rain", subtitle: "ช่วงเฉลี่ย 58/100", color: "#c4b5fd" },
+    { key: "n", title: "N", subtitle: "ช่วงเฉลี่ย 58/100", color: "#c4b5fd" },
+    { key: "p", title: "P", subtitle: "ช่วงเฉลี่ย 58/100", color: "#c4b5fd" },
+    { key: "k", title: "K", subtitle: "ช่วงเฉลี่ย 58/100", color: "#8b5cf6" },
+    { key: "water-level", title: "Water Level", subtitle: "ช่วงเฉลี่ย 58/100", color: "#c4b5fd" },
+  ];
+
+  return (
+    <DuwimsStaticPage current="heatmap">
+      <div className="heat-page">
+        <div className="heat-shell">
+          <div className="heat-left">
+            <div className="map-card">
+              <div className="map-wrap">
+                <MapContainer
+                  center={[13.736717, 100.523186]}
+                  zoom={6}
+                  scrollWheelZoom
+                  style={{ width: "100%", height: "100%" }}
+                >
+                  <TileLayer
+                    attribution="&copy; OpenStreetMap contributors"
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+
+                  <FitToSelection polygons={plots} selectedPlotId={selectedPlotId} />
+
+                  {visiblePlots.map((plot) => (
+                    <Polygon
+                      key={plot.id}
+                      positions={plot.coords}
+                      pathOptions={{
+                        color: "#ffffff",
+                        weight: 2,
+                        fillColor: "#ffffff",
+                        fillOpacity: 0.04,
+                      }}
+                    >
+                      <Popup>{plot.name}</Popup>
+                    </Polygon>
+                  ))}
+
+                  {renderedPoints.map((p) => (
+                    <CircleMarker
+                      key={`${p.id}-${frameIndex}`}
+                      center={[p.lat, p.lng]}
+                      radius={10}
+                      pathOptions={{
+                        color: "#ffffff",
+                        weight: 1.5,
+                        fillColor: p.color,
+                        fillOpacity: 0.95,
+                      }}
+                    >
+                      <Popup>
+                        <div style={{ minWidth: 220 }}>
+                          <div style={{ fontWeight: 800 }}>{p.sensorName}</div>
+                          <div>แปลง: {p.plotName}</div>
+                          <div>Node: {p.nodeName}</div>
+                          <div>
+                            ค่า: <strong>{p.value != null ? `${p.value} %` : "-"}</strong>
+                          </div>
+                          <div>สถานะ: {p.status.text}</div>
+                          <div>เวลา: {p.ts ? formatTime(p.ts) : "-"}</div>
+                        </div>
+                      </Popup>
+                    </CircleMarker>
+                  ))}
+                </MapContainer>
+
+                {loading && <div className="overlay-msg">กำลังโหลดข้อมูล...</div>}
+                {!loading && error && <div className="overlay-msg error">{error}</div>}
+
+                <div className="bottom-overlay">
+                  <div className="date-row">
+                    <div className="date-field">
+                      <label>วันที่เริ่มต้น</label>
+                      <input
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="date-input"
+                      />
+                      <div className="date-chip">{formatDateThai(startDate)}</div>
+                    </div>
+
+                    <div className="date-field">
+                      <label>วันที่สิ้นสุด</label>
+                      <input
+                        type="date"
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="date-input"
+                      />
+                      <div className="date-chip">{formatDateThai(endDate)}</div>
+                    </div>
+                  </div>
+
+                  <div className="player-row">
+                    <button
+                      type="button"
+                      className="play-btn"
+                      onClick={() => setPlaying((v) => !v)}
+                    >
+                      {playing ? "❚❚" : "▶"}
+                    </button>
+
+                    <div className="player-main">
+                      <div className="player-top">
+                        <span>{playing ? "Play" : "Pause"}</span>
+                        <span>{currentTs ? formatTime(currentTs) : "-"}</span>
+                      </div>
+
+                      <input
+                        className="range"
+                        type="range"
+                        min={0}
+                        max={Math.max(0, maxFrames - 1)}
+                        value={frameIndex}
+                        onChange={(e) => {
+                          setPlaying(false);
+                          setFrameIndex(Number(e.target.value));
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="heat-right">
+            <div className="side-card">
+              <div className="side-section">
+                <div className="side-label">เลือกแปลง</div>
+                <select
+                  className="plot-select"
+                  value={selectedPlotId}
+                  onChange={(e) => setSelectedPlotId(e.target.value)}
+                >
+                  <option value="all">ทุกแปลง</option>
+                  {plots.map((plot, i) => (
+                    <option key={plot.id} value={plot.id}>
+                      {i + 1}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="side-title">Legend (Rain Intensity)</div>
+              <div className="legend-bar" />
+              <div className="legend-scale">
+                <span>น้อย</span>
+                <span>มาก</span>
+              </div>
+
+              <div className="side-subtitle">จุดข้อมูลตัวอย่าง</div>
+
+              <div className="sample-list">
+                {legendExampleItems.map((item) => (
+                  <div key={item.key} className="sample-item">
+                    <span className="sample-dot" style={{ background: item.color }} />
+                    <div className="sample-text">
+                      <div className={`sample-title ${item.key === "k" ? "sample-title-active" : ""}`}>
+                        {item.title}
+                      </div>
+                      <div className="sample-subtitle">{item.subtitle}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <style jsx>{`
+          .heat-page {
+            width: 100%;
+          }
+
+          .heat-shell {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 330px;
+            gap: 14px;
+            align-items: stretch;
+          }
+
+          .heat-left,
+          .heat-right {
+            min-width: 0;
+          }
+
+          .map-card,
+          .side-card {
+            background: #dbeceb;
+            border: 1px solid #cfe0df;
+            border-radius: 16px;
+          }
+
+          .map-card {
+            padding: 10px;
+            height: 100%;
+          }
+
+          .map-wrap {
+            position: relative;
+            height: 520px;
+            overflow: hidden;
+            border-radius: 14px;
+            background: #cedddb;
+          }
+
+          .overlay-msg {
+            position: absolute;
+            top: 14px;
+            left: 14px;
+            z-index: 600;
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.96);
+            font-size: 12px;
+            font-weight: 700;
+            color: #16302a;
+          }
+
+          .overlay-msg.error {
+            color: #9d2323;
+          }
+
+          .bottom-overlay {
+            position: absolute;
+            left: 14px;
+            right: 14px;
+            bottom: 14px;
+            z-index: 500;
+            background: linear-gradient(
+              180deg,
+              rgba(34, 41, 53, 0.12) 0%,
+              rgba(34, 41, 53, 0.38) 30%,
+              rgba(34, 41, 53, 0.58) 100%
+            );
+            backdrop-filter: blur(6px);
+            border-radius: 14px;
+            padding: 12px;
+          }
+
+          .date-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 12px;
+          }
+
+          .date-field label {
+            display: block;
+            font-size: 13px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 6px;
+          }
+
+          .date-input {
+            width: 100%;
+            height: 38px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            background: rgba(255, 255, 255, 0.96);
+            padding: 0 10px;
+            font-size: 13px;
+            color: #233933;
+            outline: none;
+          }
+
+          .date-chip {
+            margin-top: 6px;
+            display: inline-flex;
+            align-items: center;
+            min-height: 32px;
+            padding: 0 10px;
+            border-radius: 10px;
+            background: #dbe3ff;
+            color: #30429f;
+            font-size: 12px;
+            font-weight: 700;
+          }
+
+          .player-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+          }
+
+          .play-btn {
+            width: 38px;
+            height: 38px;
+            border: 0;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #5a6dff;
+            font-size: 14px;
+            cursor: pointer;
+            flex: 0 0 38px;
+            font-weight: 700;
+          }
+
+          .player-main {
+            flex: 1;
+            min-width: 0;
+          }
+
+          .player-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 12px;
+            color: #ffffff;
+            font-weight: 700;
+            margin-bottom: 5px;
+          }
+
+          .range {
+            width: 100%;
+            accent-color: #ffffff;
+          }
+
+          .side-card {
+            padding: 16px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+          }
+
+          .side-section {
+            margin-bottom: 14px;
+          }
+
+          .side-label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #29403b;
+            margin-bottom: 8px;
+          }
+
+          .plot-select {
+            width: 100%;
+            height: 42px;
+            border-radius: 10px;
+            border: 1px solid #c9d8d6;
+            background: #ffffff;
+            padding: 0 12px;
+            font-size: 14px;
+            color: #233934;
+            outline: none;
+          }
+
+          .side-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: #203732;
+            margin-bottom: 10px;
+          }
+
+          .legend-bar {
+            width: 100%;
+            height: 7px;
+            border-radius: 999px;
+            background: linear-gradient(
+              90deg,
+              #ddd6fe 0%,
+              #c4b5fd 35%,
+              #8b5cf6 65%,
+              #4f46e5 100%
+            );
+            margin-bottom: 6px;
+          }
+
+          .legend-scale {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #4b605b;
+            margin-bottom: 14px;
+          }
+
+          .side-subtitle {
+            font-size: 12px;
+            font-weight: 700;
+            color: #2a423d;
+            margin: 6px 0 10px;
+          }
+
+          .sample-list {
+            display: grid;
+            gap: 8px;
+            margin-bottom: 14px;
+          }
+
+          .sample-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            background: #f4f6f6;
+            border: 1px solid #d7e1df;
+            border-radius: 10px;
+            padding: 10px 12px;
+          }
+
+          .sample-dot {
+            width: 11px;
+            height: 11px;
+            border-radius: 999px;
+            display: inline-block;
+            flex: 0 0 11px;
+            margin-top: 3px;
+          }
+
+          .sample-text {
+            min-width: 0;
+          }
+
+          .sample-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #253a35;
+            line-height: 1.2;
+          }
+
+          .sample-title-active {
+            color: #4f46e5;
+          }
+
+          .sample-subtitle {
+            font-size: 11px;
+            color: #677872;
+            margin-top: 2px;
+          }
+
+          :global(.leaflet-container) {
+            width: 100%;
+            height: 100%;
+            font-family: inherit;
+          }
+
+          @media (max-width: 1100px) {
+            .heat-shell {
+              grid-template-columns: 1fr;
+            }
+
+            .map-wrap {
+              height: 480px;
+            }
+          }
+
+          @media (max-width: 700px) {
+            .map-wrap {
+              height: 400px;
+            }
+
+            .date-row {
+              grid-template-columns: 1fr;
+              gap: 12px;
+            }
+          }
+        `}</style>
+      </div>
+    </DuwimsStaticPage>
+  );
 }

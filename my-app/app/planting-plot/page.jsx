@@ -124,6 +124,9 @@ function normalizePlot(plot = {}) {
     name: safeText(plot.name || plot.plotName || ""),
     caretaker: safeText(plot.caretaker || plot.ownerName || ""),
     ownerName: safeText(plot.ownerName || plot.caretaker || ""),
+    plantType: safeText(plot.plantType || plot.cropType || ""),
+    status: safeText(plot.status || ""),
+    plantedAt: safeText(plot.plantedAt || ""),
   };
 }
 
@@ -144,17 +147,20 @@ function normalizeEmployee(user = {}) {
   return { value: label, label };
 }
 
-function PolyLayer({ leaflet, poly }) {
+function PolyLayer({ leaflet, poly, active = false }) {
   if (!leaflet?.RL) return null;
+
+  const coords = normalizeCoords(poly?.coords || []);
+  if (coords.length < 3) return null;
 
   return (
     <leaflet.RL.Polygon
-      positions={normalizeCoords(poly?.coords || [])}
+      positions={coords}
       pathOptions={{
-        color: poly?.color || "#d92d2a",
-        fillColor: poly?.color || "#d92d2a",
-        fillOpacity: 0.24,
-        weight: 3,
+        color: active ? "#0f766e" : poly?.color || "#d92d2a",
+        fillColor: active ? "#0f766e" : poly?.color || "#d92d2a",
+        fillOpacity: active ? 0.28 : 0.22,
+        weight: active ? 4 : 3,
       }}
     />
   );
@@ -226,6 +232,20 @@ function CurrentLocationLayer({ leaflet, locateTick, onStatus }) {
   );
 }
 
+function DrawGuide({ leaflet }) {
+  const map = leaflet.RL.useMap();
+
+  useEffect(() => {
+    if (!map) return;
+    map.doubleClickZoom.disable();
+    return () => {
+      map.doubleClickZoom.enable();
+    };
+  }, [map]);
+
+  return null;
+}
+
 export default function Page() {
   const leaflet = useLeafletBundle();
   const featureGroupRef = useRef(null);
@@ -234,6 +254,7 @@ export default function Page() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [locateStatus, setLocateStatus] = useState("");
   const [locateTick, setLocateTick] = useState(0);
 
@@ -242,10 +263,11 @@ export default function Page() {
   const [polygonsByPlot, setPolygonsByPlot] = useState({});
   const [employeeOptions, setEmployeeOptions] = useState([]);
 
-  const [editMode, setEditMode] = useState(false);
-  const [plotAlias, setPlotAlias] = useState("");
-  const [plotName, setPlotName] = useState("");
-  const [caretaker, setCaretaker] = useState("");
+  const [mode, setMode] = useState("view"); // view | create | edit
+
+  const [draftPlotName, setDraftPlotName] = useState("");
+  const [draftCaretaker, setDraftCaretaker] = useState("");
+  const [draftPolygon, setDraftPolygon] = useState([]);
 
   useEffect(() => setMounted(true), []);
 
@@ -254,19 +276,50 @@ export default function Page() {
     [plots, selectedPlotId]
   );
 
-  const currentPolygon = (polygonsByPlot[selectedPlotId] || [])[0] || null;
-  const plotPolygons = polygonsByPlot[selectedPlotId] || [];
-  const readOnly = !editMode;
-
   const caretakerOptions = useMemo(() => {
     const map = new Map();
+
+    const seeded = [
+      "สมกิด จริงจัง",
+      "สมชาย ใจดี",
+      "Siriwimon SANGTHONG",
+    ];
+
+    for (const item of seeded) {
+      map.set(item, { value: item, label: item });
+    }
+
     for (const item of employeeOptions) {
       const key = safeText(item.value, "").trim();
       if (!key) continue;
       map.set(key, item);
     }
+
     return Array.from(map.values());
   }, [employeeOptions]);
+
+  const isCreateMode = mode === "create";
+  const isEditMode = mode === "edit";
+  const isEditable = isCreateMode || isEditMode;
+
+  const displayedPolygons = useMemo(() => {
+    if (isCreateMode) {
+      return draftPolygon.length >= 3
+        ? [{ id: "draft-poly", color: "#d92d2a", coords: draftPolygon }]
+        : [];
+    }
+
+    if (isEditMode) {
+      return draftPolygon.length >= 3
+        ? [{ id: "edit-poly", color: "#d92d2a", coords: draftPolygon }]
+        : [];
+    }
+
+    return polygonsByPlot[selectedPlotId] || [];
+  }, [isCreateMode, isEditMode, draftPolygon, polygonsByPlot, selectedPlotId]);
+
+  const currentPolygon =
+    displayedPolygons && displayedPolygons.length ? displayedPolygons[0] : null;
 
   useEffect(() => {
     if (!mounted) return;
@@ -274,24 +327,26 @@ export default function Page() {
   }, [mounted]);
 
   useEffect(() => {
-    if (!selectedPlotId) return;
+    if (!selectedPlotId || isCreateMode) return;
     loadPolygon(selectedPlotId).catch(() => {});
-    setEditMode(false);
-  }, [selectedPlotId]);
+  }, [selectedPlotId, isCreateMode]);
 
   useEffect(() => {
-    if (!selectedPlot) return;
-    setPlotAlias(
+    if (!selectedPlot || isCreateMode || isEditMode) return;
+
+    setDraftPlotName(
       safeText(
-        selectedPlot.alias || selectedPlot.plotName || selectedPlot.name || "",
+        selectedPlot.plotName || selectedPlot.name || selectedPlot.alias || "",
         ""
       )
     );
-    setPlotName(safeText(selectedPlot.plotName || selectedPlot.name || "", ""));
-    setCaretaker(
+    setDraftCaretaker(
       safeText(selectedPlot.caretaker || selectedPlot.ownerName || "", "")
     );
-  }, [selectedPlot]);
+    setDraftPolygon(
+      normalizeCoords((polygonsByPlot[selectedPlot.id] || [])[0]?.coords || [])
+    );
+  }, [selectedPlot, polygonsByPlot, isCreateMode, isEditMode]);
 
   async function loadEmployees() {
     try {
@@ -307,6 +362,7 @@ export default function Page() {
     const res = await apiFetch("/api/plots");
     const items = (res?.items || []).map(normalizePlot);
     setPlots(items);
+
     const firstId = items?.[0]?.id || "";
     setSelectedPlotId((prev) => prev || firstId);
     return firstId || "";
@@ -332,10 +388,14 @@ export default function Page() {
   async function loadAll() {
     setLoading(true);
     setError("");
+    setSuccess("");
+
     try {
       await loadEmployees();
       const firstPlotId = await loadPlots();
-      if (firstPlotId) await loadPolygon(firstPlotId);
+      if (firstPlotId) {
+        await loadPolygon(firstPlotId);
+      }
     } catch (e) {
       setError(e?.message || "โหลดข้อมูลไม่สำเร็จ");
     } finally {
@@ -345,72 +405,197 @@ export default function Page() {
 
   function getPlotDisplayName(plot) {
     return (
-      safeText(plot?.alias || plot?.plotName || plot?.name || "", "").trim() ||
+      safeText(plot?.plotName || plot?.name || plot?.alias || "", "").trim() ||
       "แปลง"
     );
   }
 
-  function ensureEditMode(message) {
-    if (editMode) return true;
-    setError(message || 'ต้องกด "ลบ / แก้ไข" ก่อน');
-    return false;
+  function resetDraft() {
+    setDraftPlotName("");
+    setDraftCaretaker("");
+    setDraftPolygon([]);
   }
 
-  async function addPlot() {
+  function enterCreateMode() {
+    setError("");
+    setSuccess("");
+    resetDraft();
+    setMode("create");
+  }
+
+  function enterEditMode() {
+    if (!selectedPlotId || !selectedPlot) {
+      setError("กรุณาเลือกแปลงก่อน");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setDraftPlotName(
+      safeText(
+        selectedPlot.plotName || selectedPlot.name || selectedPlot.alias || "",
+        ""
+      )
+    );
+    setDraftCaretaker(
+      safeText(selectedPlot.caretaker || selectedPlot.ownerName || "", "")
+    );
+    setDraftPolygon(
+      normalizeCoords((polygonsByPlot[selectedPlotId] || [])[0]?.coords || [])
+    );
+    setMode("edit");
+  }
+
+  function cancelEditOrCreate() {
+    setError("");
+    setSuccess("");
+    setMode("view");
+
+    if (selectedPlot) {
+      setDraftPlotName(
+        safeText(
+          selectedPlot.plotName || selectedPlot.name || selectedPlot.alias || "",
+          ""
+        )
+      );
+      setDraftCaretaker(
+        safeText(selectedPlot.caretaker || selectedPlot.ownerName || "", "")
+      );
+      setDraftPolygon(
+        normalizeCoords((polygonsByPlot[selectedPlotId] || [])[0]?.coords || [])
+      );
+    } else {
+      resetDraft();
+    }
+  }
+
+  function validateBeforeSave() {
+    const plotName = draftPlotName.trim();
+    const caretaker = draftCaretaker.trim();
+    const coords = normalizeCoords(draftPolygon);
+
+    if (!plotName) {
+      setError("กรุณากรอกข้อมูลแปลง");
+      return false;
+    }
+
+    if (!caretaker) {
+      setError("กรุณากรอกข้อมูลผู้ดูแลแปลงใหม่");
+      return false;
+    }
+
+    if (coords.length < 3) {
+      setError("กรุณา Draw Polygons on a Map ก่อนกด Save");
+      return false;
+    }
+
+    return true;
+  }
+
+  async function saveNewPlot() {
+    if (!validateBeforeSave()) return;
+
     setBusy(true);
     setError("");
+    setSuccess("");
 
     try {
-      const newName = `แปลงใหม่ ${new Date().toISOString().slice(0, 10)}`;
-      const res = await apiFetch("/api/plots", {
+      const safePlotName = draftPlotName.trim();
+      const safeCaretaker = draftCaretaker.trim();
+      const safeCoords = normalizeCoords(draftPolygon);
+
+      const payload = {
+        alias: safePlotName,
+        plotName: safePlotName,
+        name: safePlotName,
+        caretaker: safeCaretaker,
+        ownerName: safeCaretaker,
+        plantType: "",
+        polygon: {
+          color: "#d92d2a",
+          coords: [],
+          pins: [],
+        },
+      };
+
+      const createdRes = await apiFetch("/api/plots", {
         method: "POST",
+        body: payload,
+      });
+
+      const created = normalizePlot(createdRes?.item || {});
+      if (!created?.id) {
+        throw new Error("สร้างแปลงไม่สำเร็จ");
+      }
+
+      await apiFetch(`/api/plots/${created.id}/polygon`, {
+        method: "PUT",
         body: {
-          plotName: newName,
-          name: newName,
-          alias: newName,
-          caretaker: "",
-          ownerName: "",
-          plantType: "",
-          polygon: {
-            color: "#d92d2a",
-            coords: [],
-            pins: [],
-          },
+          color: "#d92d2a",
+          coords: safeCoords,
         },
       });
 
-      const item = normalizePlot(res?.item || {});
-      if (item?.id) {
-        setPlots((prev) => [item, ...prev]);
-        setSelectedPlotId(item.id);
-        setPolygonsByPlot((prev) => ({ ...prev, [item.id]: [] }));
-        setPlotAlias(item.alias || item.plotName || item.name || "");
-        setPlotName(item.plotName || item.name || "");
-        setCaretaker(item.caretaker || "");
-        setEditMode(true);
-      }
+      const createdPlot = {
+        ...created,
+        id: String(created.id),
+        alias: safePlotName,
+        plotName: safePlotName,
+        name: safePlotName,
+        caretaker: safeCaretaker,
+        ownerName: safeCaretaker,
+      };
+
+      setPlots((prev) => {
+        const next = [createdPlot, ...prev];
+        return next;
+      });
+
+      setPolygonsByPlot((prev) => ({
+        ...prev,
+        [created.id]: [
+          {
+            id: `poly-${created.id}`,
+            color: "#d92d2a",
+            coords: safeCoords,
+          },
+        ],
+      }));
+
+      setSelectedPlotId(String(created.id));
+      setDraftPlotName(safePlotName);
+      setDraftCaretaker(safeCaretaker);
+      setDraftPolygon(safeCoords);
+      setMode("view");
+      setSuccess("บันทึกแปลงใหม่สำเร็จ");
     } catch (e) {
-      setError(e?.message || "เพิ่มแปลงไม่สำเร็จ");
+      setError(e?.message || "บันทึกแปลงใหม่ไม่สำเร็จ");
     } finally {
       setBusy(false);
     }
   }
 
-  async function savePlotInfo() {
-    if (!selectedPlotId) return;
+  async function saveExistingPlot() {
+    if (!selectedPlotId) {
+      setError("กรุณาเลือกแปลงก่อน");
+      return;
+    }
+
+    if (!validateBeforeSave()) return;
 
     setBusy(true);
     setError("");
+    setSuccess("");
 
     try {
-      const safeAlias = plotAlias.trim();
-      const safePlotName = plotName.trim();
-      const safeCaretaker = caretaker.trim();
+      const safePlotName = draftPlotName.trim();
+      const safeCaretaker = draftCaretaker.trim();
+      const safeCoords = normalizeCoords(draftPolygon);
 
       const res = await apiFetch(`/api/plots/${selectedPlotId}`, {
         method: "PATCH",
         body: {
-          alias: safeAlias,
+          alias: safePlotName,
           plotName: safePlotName,
           name: safePlotName,
           caretaker: safeCaretaker,
@@ -418,88 +603,78 @@ export default function Page() {
         },
       });
 
-      const updated = normalizePlot(res?.item || {});
-      if (updated?.id) {
-        setPlots((prev) =>
-          prev.map((p) => (String(p.id) === String(updated.id) ? updated : p))
-        );
-      } else {
-        setPlots((prev) =>
-          prev.map((p) =>
-            String(p.id) === String(selectedPlotId)
-              ? {
-                  ...p,
-                  alias: safeAlias,
-                  plotName: safePlotName,
-                  name: safePlotName,
-                  caretaker: safeCaretaker,
-                  ownerName: safeCaretaker,
-                }
-              : p
-          )
-        );
-      }
-    } catch (e) {
-      setError(e?.message || "บันทึกข้อมูลแปลงไม่สำเร็จ");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function savePolygon(coords, color = "#d92d2a") {
-    if (!selectedPlotId) return;
-
-    setBusy(true);
-    setError("");
-
-    try {
-      await apiFetch(`/api/plots/${selectedPlotId}/polygon`, {
-        method: "PUT",
-        body: {
-          color,
-          coords: normalizeCoords(coords),
-        },
-      });
-
-      await loadPolygon(selectedPlotId);
-    } catch (e) {
-      setError(e?.message || "บันทึก polygon ไม่สำเร็จ");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function clearPolygon() {
-    if (!selectedPlotId) return;
-
-    setBusy(true);
-    setError("");
-
-    try {
       await apiFetch(`/api/plots/${selectedPlotId}/polygon`, {
         method: "PUT",
         body: {
           color: "#d92d2a",
-          coords: [],
+          coords: safeCoords,
         },
       });
 
-      await loadPolygon(selectedPlotId);
+      const updated = normalizePlot(res?.item || {});
+      const updatedPlot = {
+        ...updated,
+        id: String(selectedPlotId),
+        alias: safePlotName,
+        plotName: safePlotName,
+        name: safePlotName,
+        caretaker: safeCaretaker,
+        ownerName: safeCaretaker,
+      };
+
+      setPlots((prev) =>
+        prev.map((p) =>
+          String(p.id) === String(selectedPlotId) ? updatedPlot : p
+        )
+      );
+
+      setPolygonsByPlot((prev) => ({
+        ...prev,
+        [selectedPlotId]: [
+          {
+            id: `poly-${selectedPlotId}`,
+            color: "#d92d2a",
+            coords: safeCoords,
+          },
+        ],
+      }));
+
+      setSelectedPlotId(String(selectedPlotId));
+      setDraftPlotName(safePlotName);
+      setDraftCaretaker(safeCaretaker);
+      setDraftPolygon(safeCoords);
+      setMode("view");
+      setSuccess("บันทึกการแก้ไขสำเร็จ");
     } catch (e) {
-      setError(e?.message || "ลบ polygon ไม่สำเร็จ");
+      setError(e?.message || "บันทึกข้อมูลไม่สำเร็จ");
     } finally {
       setBusy(false);
     }
   }
 
-  async function deletePolygon() {
-    if (!ensureEditMode('ต้องกด "ลบ / แก้ไข" ก่อนถึงจะลบ polygon ได้')) return;
-    if (!window.confirm("ต้องการลบ polygon นี้ใช่ไหม?")) return;
-    await clearPolygon();
+  async function handleSave() {
+    if (isCreateMode) {
+      await saveNewPlot();
+      return;
+    }
+
+    if (isEditMode) {
+      await saveExistingPlot();
+      return;
+    }
+
+    setError('กรุณากด "+ เพิ่มแปลง" หรือ "ลบ / แก้ไข" ก่อน');
   }
 
-  async function onCreated(e) {
-    if (!ensureEditMode('ต้องกด "ลบ / แก้ไข" ก่อนถึงจะวาด polygon ได้')) return;
+  function requireEditable(actionText) {
+    if (isEditable) return true;
+    setError(`🔒 กด "ลบ / แก้ไข" หรือ "+ เพิ่มแปลง" ก่อน${actionText}`);
+    return false;
+  }
+
+  function onCreated(e) {
+    if (!requireEditable("เพื่อวาด polygon")) return;
+
     const layer = e?.layer;
     if (!layer) return;
 
@@ -509,12 +684,14 @@ export default function Page() {
     ]);
 
     if (points.length >= 3) {
-      await savePolygon(points, "#d92d2a");
+      setDraftPolygon(points);
+      setError("");
     }
   }
 
-  async function onEdited(e) {
-    if (!ensureEditMode('ต้องกด "ลบ / แก้ไข" ก่อนถึงจะแก้ polygon ได้')) return;
+  function onEdited(e) {
+    if (!requireEditable("เพื่อแก้ polygon")) return;
+
     const layers = e?.layers;
     if (!layers) return;
 
@@ -528,69 +705,24 @@ export default function Page() {
       if (safe.length >= 3) coords = safe;
     });
 
-    if (coords) await savePolygon(coords, "#d92d2a");
+    if (coords) {
+      setDraftPolygon(coords);
+      setError("");
+    }
   }
 
-  async function onDeleted() {
-    if (!ensureEditMode('ต้องกด "ลบ / แก้ไข" ก่อนถึงจะลบ polygon ได้')) return;
-    await clearPolygon();
+  function onDeleted() {
+    if (!requireEditable("เพื่อลบ polygon")) return;
+    setDraftPolygon([]);
   }
 
-  async function handleAliasChange(value) {
-    setPlotAlias(value);
+  const formTitle = isCreateMode
+    ? "กรุณากรอกข้อมูลผู้ดูแลแปลงใหม่"
+    : isEditMode
+    ? "แก้ไขข้อมูลแปลงและ Polygon"
+    : "ข้อมูลแปลงปลูก";
 
-    if (!selectedPlotId) return;
-    if (!editMode) return;
-
-    try {
-      await apiFetch(`/api/plots/${selectedPlotId}`, {
-        method: "PATCH",
-        body: {
-          alias: value.trim(),
-          plotName: plotName.trim(),
-          name: plotName.trim(),
-          caretaker: caretaker.trim(),
-          ownerName: caretaker.trim(),
-        },
-      });
-
-      setPlots((prev) =>
-        prev.map((p) =>
-          String(p.id) === String(selectedPlotId)
-            ? { ...p, alias: value.trim() }
-            : p
-        )
-      );
-    } catch {}
-  }
-
-  async function handleCaretakerChange(value) {
-    setCaretaker(value);
-
-    if (!selectedPlotId) return;
-    if (!editMode) return;
-
-    try {
-      await apiFetch(`/api/plots/${selectedPlotId}`, {
-        method: "PATCH",
-        body: {
-          alias: plotAlias.trim(),
-          plotName: plotName.trim(),
-          name: plotName.trim(),
-          caretaker: value.trim(),
-          ownerName: value.trim(),
-        },
-      });
-
-      setPlots((prev) =>
-        prev.map((p) =>
-          String(p.id) === String(selectedPlotId)
-            ? { ...p, caretaker: value.trim(), ownerName: value.trim() }
-            : p
-        )
-      );
-    } catch {}
-  }
+  const infoPlotLabel = draftPlotName || "แปลง A";
 
   if (!mounted) return null;
 
@@ -598,33 +730,64 @@ export default function Page() {
     <DuwimsStaticPage current="planting-plot" htmlContent="">
       <div className="polygon-page">
         {error ? (
-          <div className="alert-box">
+          <div className="alert-box error">
             <div className="alert-title">แจ้งเตือน</div>
             <div className="alert-text">{error}</div>
           </div>
         ) : null}
 
+        {success ? (
+          <div className="alert-box success">
+            <div className="alert-title">สำเร็จ</div>
+            <div className="alert-text">{success}</div>
+          </div>
+        ) : null}
+
         <div className="top-head">
           <div className="page-title">การจัดการ Polygons</div>
-          <button
-            type="button"
-            className="add-btn"
-            onClick={addPlot}
-            disabled={busy}
-          >
-            + เพิ่มแปลง
-          </button>
+
+          <div className="head-actions">
+            {(isCreateMode || isEditMode) && (
+              <button
+                type="button"
+                className="cancel-btn"
+                onClick={cancelEditOrCreate}
+                disabled={busy}
+              >
+                ยกเลิก
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="add-btn"
+              onClick={enterCreateMode}
+              disabled={busy}
+            >
+              + เพิ่มแปลง
+            </button>
+          </div>
         </div>
 
         <div className="top-select-wrap">
           <div className="top-label">แปลง</div>
           <select
             className="top-select"
-            value={selectedPlotId}
-            onChange={(e) => setSelectedPlotId(e.target.value)}
-            disabled={busy || loading || !plots.length}
+            value={isCreateMode ? "__creating__" : selectedPlotId}
+            onChange={(e) => {
+              if (e.target.value === "__creating__") return;
+              setMode("view");
+              setError("");
+              setSuccess("");
+              setSelectedPlotId(String(e.target.value));
+            }}
+            disabled={busy || loading || (!plots.length && !isCreateMode)}
           >
-            {!plots.length ? (
+            {isCreateMode ? (
+              <option value="__creating__">กำลังสร้างแปลงใหม่...</option>
+            ) : null}
+
+            {!plots.length && !isCreateMode ? (
               <option value="">ไม่มีข้อมูลแปลง</option>
             ) : (
               plots.map((plot) => (
@@ -639,59 +802,61 @@ export default function Page() {
         <div className="edit-row">
           <button
             type="button"
-            className={`edit-btn ${editMode ? "active" : ""}`}
-            onClick={() => setEditMode((v) => !v)}
-            disabled={busy || !selectedPlotId}
+            className={`edit-btn ${isEditMode ? "active" : ""}`}
+            onClick={enterEditMode}
+            disabled={busy || isCreateMode || !selectedPlotId}
           >
             ลบ / แก้ไข
           </button>
         </div>
 
         <div className="info-card">
-          <div className="info-title">กรุณากรอกข้อมูลผู้ดูแลแปลงใหม่</div>
+          <div className="info-title">{formTitle}</div>
 
           <div className="form-grid">
             <div className="field">
               <div className="field-label">
-                ข้อมูลแปลง <span className="field-sub">{plotName || "แปลง A"}</span>
+                ข้อมูลแปลง <span className="field-sub">{infoPlotLabel}</span>
               </div>
               <input
                 className="field-input"
-                value={plotAlias}
-                onChange={(e) => handleAliasChange(e.target.value)}
+                value={draftPlotName}
+                onChange={(e) => setDraftPlotName(e.target.value)}
                 placeholder="แปลง A"
-                readOnly={!editMode}
-                disabled={busy || !selectedPlotId}
+                readOnly={!isEditable}
+                disabled={busy}
               />
             </div>
 
-            <div className="field">
+            <div className="field field-full">
               <div className="field-label">ข้อมูลผู้ดูแล</div>
               <select
                 className="field-select"
-                value={caretaker}
-                onChange={(e) => handleCaretakerChange(e.target.value)}
-                disabled={
-                  busy || !selectedPlotId || !editMode || !caretakerOptions.length
-                }
+                value={draftCaretaker}
+                onChange={(e) => setDraftCaretaker(e.target.value)}
+                disabled={busy || !isEditable}
               >
-                {!caretaker ? <option value="">เลือกผู้ดูแล</option> : null}
-                {caretakerOptions.length ? (
-                  caretakerOptions.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">ยังไม่พบรายชื่อพนักงาน</option>
-                )}
+                <option value="">เลือกผู้ดูแล</option>
+                {caretakerOptions.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
               </select>
             </div>
           </div>
         </div>
 
         <div className="map-card">
-          <div className="map-title">Draw Polygons on a Map</div>
+          <div className="map-head">
+            <div className="map-title">Draw Polygons on a Map</div>
+
+            <div className={`lock-hint ${isEditable ? "unlock" : "lock"}`}>
+              {isEditable
+                ? "✏️ โหมดแก้ไข เปิดอยู่"
+                : '🔒 กด "ลบ / แก้ไข" หรือ "+ เพิ่มแปลง" ก่อน'}
+            </div>
+          </div>
 
           <div className="map-shell">
             <div className="map-box">
@@ -699,7 +864,13 @@ export default function Page() {
                 <div className="map-loading">กำลังโหลดแผนที่...</div>
               ) : (
                 <leaflet.RL.MapContainer
-                  key={selectedPlotId || "plot-map"}
+                  key={
+                    isCreateMode
+                      ? "create-map"
+                      : isEditMode
+                      ? `edit-${selectedPlotId || "none"}`
+                      : `plot-map-${selectedPlotId || "none"}`
+                  }
                   center={[13.7563, 100.5018]}
                   zoom={13}
                   style={{ height: "100%", width: "100%" }}
@@ -715,13 +886,20 @@ export default function Page() {
                     onStatus={setLocateStatus}
                   />
 
+                  <DrawGuide leaflet={leaflet} />
+
                   {currentPolygon?.coords?.length ? (
                     <FitBounds leaflet={leaflet} coords={currentPolygon.coords} />
                   ) : null}
 
                   <leaflet.RL.FeatureGroup ref={featureGroupRef}>
-                    {plotPolygons.map((poly) => (
-                      <PolyLayer key={poly.id} leaflet={leaflet} poly={poly} />
+                    {displayedPolygons.map((poly) => (
+                      <PolyLayer
+                        key={poly.id}
+                        leaflet={leaflet}
+                        poly={poly}
+                        active={isEditable}
+                      />
                     ))}
 
                     <leaflet.Draw.EditControl
@@ -735,11 +913,11 @@ export default function Page() {
                         circlemarker: false,
                         marker: false,
                         polyline: false,
-                        polygon: !readOnly && plotPolygons.length === 0,
+                        polygon: isEditable && displayedPolygons.length === 0,
                       }}
                       edit={{
-                        edit: !readOnly && plotPolygons.length > 0,
-                        remove: !readOnly && plotPolygons.length > 0,
+                        edit: isEditable && displayedPolygons.length > 0,
+                        remove: isEditable && displayedPolygons.length > 0,
                       }}
                     />
                   </leaflet.RL.FeatureGroup>
@@ -759,6 +937,19 @@ export default function Page() {
           {locateStatus ? <div className="locate-status">{locateStatus}</div> : null}
         </div>
 
+        {(isCreateMode || isEditMode) && (
+          <div className="save-row">
+            <button
+              type="button"
+              className="save-btn"
+              onClick={handleSave}
+              disabled={busy}
+            >
+              Save
+            </button>
+          </div>
+        )}
+
         <style jsx>{`
           .polygon-page {
             min-height: 100vh;
@@ -776,22 +967,54 @@ export default function Page() {
             margin-bottom: 12px;
           }
 
+          .head-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+          }
+
           .page-title {
             font-size: 18px;
             font-weight: 800;
             color: #123f0f;
           }
 
-          .add-btn {
+          .add-btn,
+          .cancel-btn,
+          .save-btn {
             border: none;
             border-radius: 999px;
-            background: #164d0c;
-            color: #fff;
             padding: 11px 24px;
             font-size: 13px;
             font-weight: 800;
             cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+          }
+
+          .add-btn:hover,
+          .cancel-btn:hover,
+          .save-btn:hover {
+            transform: translateY(-1px);
+          }
+
+          .add-btn {
+            background: #164d0c;
+            color: #fff;
             box-shadow: 0 6px 16px rgba(22, 77, 12, 0.25);
+          }
+
+          .cancel-btn {
+            background: #eef4e8;
+            color: #183915;
+            border: 1px solid #c9d7c0;
+            box-shadow: 0 6px 16px rgba(88, 110, 68, 0.12);
+          }
+
+          .save-btn {
+            background: linear-gradient(180deg, #2f7d1d 0%, #1b5d10 100%);
+            color: #fff;
+            min-width: 150px;
+            box-shadow: 0 10px 24px rgba(27, 93, 16, 0.24);
           }
 
           .top-select-wrap {
@@ -815,7 +1038,7 @@ export default function Page() {
             padding: 11px 14px;
             font-size: 14px;
             outline: none;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
           }
 
           .edit-row {
@@ -834,6 +1057,11 @@ export default function Page() {
             font-weight: 800;
             cursor: pointer;
             box-shadow: 0 2px 6px rgba(82, 108, 62, 0.08);
+            transition: transform 0.15s ease, background 0.15s ease;
+          }
+
+          .edit-btn:hover {
+            transform: translateY(-1px);
           }
 
           .edit-btn.active {
@@ -859,8 +1087,12 @@ export default function Page() {
 
           .form-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr;
             gap: 18px;
+          }
+
+          .field-full {
+            grid-column: 1 / -1;
           }
 
           .field-label {
@@ -895,7 +1127,8 @@ export default function Page() {
           }
 
           .field-input:focus,
-          .field-select:focus {
+          .field-select:focus,
+          .top-select:focus {
             border-color: #8fa882;
             box-shadow: 0 0 0 3px rgba(111, 140, 98, 0.12);
           }
@@ -908,11 +1141,38 @@ export default function Page() {
             box-shadow: 0 12px 26px rgba(75, 95, 60, 0.08);
           }
 
+          .map-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 14px;
+            flex-wrap: wrap;
+          }
+
           .map-title {
             font-size: 14px;
             font-weight: 800;
             color: #183915;
-            margin-bottom: 14px;
+          }
+
+          .lock-hint {
+            font-size: 12px;
+            font-weight: 800;
+            padding: 7px 12px;
+            border-radius: 999px;
+          }
+
+          .lock-hint.lock {
+            color: #6b4f10;
+            background: #fff4d6;
+            border: 1px solid #f3ddb0;
+          }
+
+          .lock-hint.unlock {
+            color: #0f5132;
+            background: #dcfce7;
+            border: 1px solid #b7ebc6;
           }
 
           .map-shell {
@@ -961,13 +1221,28 @@ export default function Page() {
             color: #4f5c47;
           }
 
+          .save-row {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 18px;
+          }
+
           .alert-box {
-            background: linear-gradient(180deg, #fff2f2, #ffe0e0);
-            border: 1px solid #ffc7c7;
-            color: #7f1d1d;
             border-radius: 16px;
             padding: 12px;
             margin-bottom: 14px;
+          }
+
+          .alert-box.error {
+            background: linear-gradient(180deg, #fff2f2, #ffe0e0);
+            border: 1px solid #ffc7c7;
+            color: #7f1d1d;
+          }
+
+          .alert-box.success {
+            background: linear-gradient(180deg, #eefcf1, #dcfce7);
+            border: 1px solid #b7ebc6;
+            color: #14532d;
           }
 
           .alert-title {
@@ -1007,18 +1282,21 @@ export default function Page() {
             margin-right: 12px;
           }
 
-          button:disabled {
+          button:disabled,
+          select:disabled,
+          input:disabled {
             opacity: 0.6;
             cursor: not-allowed;
           }
 
           @media (max-width: 900px) {
-            .form-grid {
-              grid-template-columns: 1fr;
-            }
-
             .map-box {
               height: 430px;
+            }
+
+            .top-head,
+            .map-head {
+              align-items: flex-start;
             }
           }
         `}</style>
