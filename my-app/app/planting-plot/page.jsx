@@ -115,23 +115,40 @@ function normalizeCoords(coords) {
     .filter(Boolean);
 }
 
+function coordsToPolygonPayload(coords) {
+  return normalizeCoords(coords).map(([lat, lng]) => ({ lat, lng }));
+}
+
+function polygonArea(coords = []) {
+  const pts = normalizeCoords(coords);
+  if (pts.length < 3) return 0;
+
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i];
+    const [x2, y2] = pts[(i + 1) % pts.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(area / 2);
+}
+
 function normalizePlot(plot = {}) {
   return {
     ...plot,
     id: String(plot.id || plot._id || ""),
-    alias: safeText(plot.alias || ""),
-    plotName: safeText(plot.plotName || plot.name || ""),
-    name: safeText(plot.name || plot.plotName || ""),
-    caretaker: safeText(plot.caretaker || plot.ownerName || ""),
-    ownerName: safeText(plot.ownerName || plot.caretaker || ""),
-    plantType: safeText(plot.plantType || plot.cropType || ""),
-    status: safeText(plot.status || ""),
-    plantedAt: safeText(plot.plantedAt || ""),
+    plotName: safeText(plot.plotName || plot.name || plot.alias || ""),
+    alias: safeText(plot.alias || plot.plotName || plot.name || ""),
+    name: safeText(plot.name || plot.plotName || plot.alias || ""),
+    caretaker: safeText(plot.caretaker || ""),
+    polygon: normalizeCoords(plot.polygon || []),
+    createdAt: safeText(plot.createdAt || ""),
+    updatedAt: safeText(plot.updatedAt || ""),
   };
 }
 
 function normalizeEmployee(user = {}) {
   const role = safeText(user.role, "").trim().toLowerCase();
+  const id = safeText(user.id || user._id || "", "").trim();
   const label = safeText(
     user.nickname ||
       user.fullName ||
@@ -142,28 +159,9 @@ function normalizeEmployee(user = {}) {
     ""
   ).trim();
 
-  if (role !== "employee" || !label) return null;
+  if (role !== "employee" || !id || !label) return null;
 
-  return { value: label, label };
-}
-
-function PolyLayer({ leaflet, poly, active = false }) {
-  if (!leaflet?.RL) return null;
-
-  const coords = normalizeCoords(poly?.coords || []);
-  if (coords.length < 3) return null;
-
-  return (
-    <leaflet.RL.Polygon
-      positions={coords}
-      pathOptions={{
-        color: active ? "#0f766e" : poly?.color || "#d92d2a",
-        fillColor: active ? "#0f766e" : poly?.color || "#d92d2a",
-        fillOpacity: active ? 0.28 : 0.22,
-        weight: active ? 4 : 3,
-      }}
-    />
-  );
+  return { value: id, label, email: safeText(user.email || "") };
 }
 
 function FitBounds({ leaflet, coords }) {
@@ -184,6 +182,7 @@ function CurrentLocationLayer({ leaflet, locateTick, onStatus }) {
 
   useEffect(() => {
     if (!locateTick) return;
+
     if (!navigator.geolocation) {
       onStatus("อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง");
       return;
@@ -260,11 +259,9 @@ export default function Page() {
 
   const [plots, setPlots] = useState([]);
   const [selectedPlotId, setSelectedPlotId] = useState("");
-  const [polygonsByPlot, setPolygonsByPlot] = useState({});
   const [employeeOptions, setEmployeeOptions] = useState([]);
 
   const [mode, setMode] = useState("view"); // view | create | edit
-
   const [draftPlotName, setDraftPlotName] = useState("");
   const [draftCaretaker, setDraftCaretaker] = useState("");
   const [draftPolygon, setDraftPolygon] = useState([]);
@@ -276,50 +273,23 @@ export default function Page() {
     [plots, selectedPlotId]
   );
 
-  const caretakerOptions = useMemo(() => {
-    const map = new Map();
+  const caretakerOptions = useMemo(() => employeeOptions, [employeeOptions]);
 
-    const seeded = [
-      "สมกิด จริงจัง",
-      "สมชาย ใจดี",
-      "Siriwimon SANGTHONG",
-    ];
-
-    for (const item of seeded) {
-      map.set(item, { value: item, label: item });
-    }
-
-    for (const item of employeeOptions) {
-      const key = safeText(item.value, "").trim();
-      if (!key) continue;
-      map.set(key, item);
-    }
-
-    return Array.from(map.values());
-  }, [employeeOptions]);
+  const selectedCaretakerLabel = useMemo(() => {
+    return (
+      caretakerOptions.find((x) => String(x.value) === String(draftCaretaker))
+        ?.label || ""
+    );
+  }, [caretakerOptions, draftCaretaker]);
 
   const isCreateMode = mode === "create";
   const isEditMode = mode === "edit";
   const isEditable = isCreateMode || isEditMode;
 
-  const displayedPolygons = useMemo(() => {
-    if (isCreateMode) {
-      return draftPolygon.length >= 3
-        ? [{ id: "draft-poly", color: "#d92d2a", coords: draftPolygon }]
-        : [];
-    }
-
-    if (isEditMode) {
-      return draftPolygon.length >= 3
-        ? [{ id: "edit-poly", color: "#d92d2a", coords: draftPolygon }]
-        : [];
-    }
-
-    return polygonsByPlot[selectedPlotId] || [];
-  }, [isCreateMode, isEditMode, draftPolygon, polygonsByPlot, selectedPlotId]);
-
-  const currentPolygon =
-    displayedPolygons && displayedPolygons.length ? displayedPolygons[0] : null;
+  const displayedPolygon = useMemo(() => {
+    if (isCreateMode || isEditMode) return normalizeCoords(draftPolygon);
+    return normalizeCoords(selectedPlot?.polygon || []);
+  }, [isCreateMode, isEditMode, draftPolygon, selectedPlot]);
 
   useEffect(() => {
     if (!mounted) return;
@@ -327,26 +297,12 @@ export default function Page() {
   }, [mounted]);
 
   useEffect(() => {
-    if (!selectedPlotId || isCreateMode) return;
-    loadPolygon(selectedPlotId).catch(() => {});
-  }, [selectedPlotId, isCreateMode]);
-
-  useEffect(() => {
     if (!selectedPlot || isCreateMode || isEditMode) return;
 
-    setDraftPlotName(
-      safeText(
-        selectedPlot.plotName || selectedPlot.name || selectedPlot.alias || "",
-        ""
-      )
-    );
-    setDraftCaretaker(
-      safeText(selectedPlot.caretaker || selectedPlot.ownerName || "", "")
-    );
-    setDraftPolygon(
-      normalizeCoords((polygonsByPlot[selectedPlot.id] || [])[0]?.coords || [])
-    );
-  }, [selectedPlot, polygonsByPlot, isCreateMode, isEditMode]);
+    setDraftPlotName(safeText(selectedPlot.plotName || "", ""));
+    setDraftCaretaker(safeText(selectedPlot.caretaker || "", ""));
+    setDraftPolygon(normalizeCoords(selectedPlot.polygon || []));
+  }, [selectedPlot, isCreateMode, isEditMode]);
 
   async function loadEmployees() {
     try {
@@ -368,34 +324,13 @@ export default function Page() {
     return firstId || "";
   }
 
-  async function loadPolygon(plotId) {
-    if (!plotId) return;
-
-    try {
-      const res = await apiFetch(`/api/plots/${plotId}/polygon`);
-      const coords = normalizeCoords(res?.item?.coords || []);
-      const color = safeText(res?.item?.color || "#d92d2a", "#d92d2a");
-
-      setPolygonsByPlot((prev) => ({
-        ...prev,
-        [plotId]: coords.length ? [{ id: `poly-${plotId}`, color, coords }] : [],
-      }));
-    } catch {
-      setPolygonsByPlot((prev) => ({ ...prev, [plotId]: [] }));
-    }
-  }
-
   async function loadAll() {
     setLoading(true);
     setError("");
     setSuccess("");
 
     try {
-      await loadEmployees();
-      const firstPlotId = await loadPlots();
-      if (firstPlotId) {
-        await loadPolygon(firstPlotId);
-      }
+      await Promise.all([loadEmployees(), loadPlots()]);
     } catch (e) {
       setError(e?.message || "โหลดข้อมูลไม่สำเร็จ");
     } finally {
@@ -405,7 +340,7 @@ export default function Page() {
 
   function getPlotDisplayName(plot) {
     return (
-      safeText(plot?.plotName || plot?.name || plot?.alias || "", "").trim() ||
+      safeText(plot?.plotName || plot?.alias || plot?.name || "", "").trim() ||
       "แปลง"
     );
   }
@@ -431,18 +366,9 @@ export default function Page() {
 
     setError("");
     setSuccess("");
-    setDraftPlotName(
-      safeText(
-        selectedPlot.plotName || selectedPlot.name || selectedPlot.alias || "",
-        ""
-      )
-    );
-    setDraftCaretaker(
-      safeText(selectedPlot.caretaker || selectedPlot.ownerName || "", "")
-    );
-    setDraftPolygon(
-      normalizeCoords((polygonsByPlot[selectedPlotId] || [])[0]?.coords || [])
-    );
+    setDraftPlotName(safeText(selectedPlot.plotName || "", ""));
+    setDraftCaretaker(safeText(selectedPlot.caretaker || "", ""));
+    setDraftPolygon(normalizeCoords(selectedPlot.polygon || []));
     setMode("edit");
   }
 
@@ -452,18 +378,9 @@ export default function Page() {
     setMode("view");
 
     if (selectedPlot) {
-      setDraftPlotName(
-        safeText(
-          selectedPlot.plotName || selectedPlot.name || selectedPlot.alias || "",
-          ""
-        )
-      );
-      setDraftCaretaker(
-        safeText(selectedPlot.caretaker || selectedPlot.ownerName || "", "")
-      );
-      setDraftPolygon(
-        normalizeCoords((polygonsByPlot[selectedPlotId] || [])[0]?.coords || [])
-      );
+      setDraftPlotName(safeText(selectedPlot.plotName || "", ""));
+      setDraftCaretaker(safeText(selectedPlot.caretaker || "", ""));
+      setDraftPolygon(normalizeCoords(selectedPlot.polygon || []));
     } else {
       resetDraft();
     }
@@ -480,12 +397,17 @@ export default function Page() {
     }
 
     if (!caretaker) {
-      setError("กรุณากรอกข้อมูลผู้ดูแลแปลงใหม่");
+      setError("กรุณาเลือกข้อมูลผู้ดูแลแปลง");
       return false;
     }
 
     if (coords.length < 3) {
       setError("กรุณา Draw Polygons on a Map ก่อนกด Save");
+      return false;
+    }
+
+    if (polygonArea(coords) < 0.00000001) {
+      setError("Polygon เล็กเกินไปหรือจุดเกือบอยู่ในเส้นเดียวกัน กรุณาวาดใหม่ให้ครอบพื้นที่จริง");
       return false;
     }
 
@@ -502,20 +424,13 @@ export default function Page() {
     try {
       const safePlotName = draftPlotName.trim();
       const safeCaretaker = draftCaretaker.trim();
-      const safeCoords = normalizeCoords(draftPolygon);
+      const safePolygon = coordsToPolygonPayload(draftPolygon);
 
       const payload = {
-        alias: safePlotName,
         plotName: safePlotName,
-        name: safePlotName,
         caretaker: safeCaretaker,
-        ownerName: safeCaretaker,
-        plantType: "",
-        polygon: {
-          color: "#d92d2a",
-          coords: [],
-          pins: [],
-        },
+        polygon: safePolygon,
+        nodes: [],
       };
 
       const createdRes = await apiFetch("/api/plots", {
@@ -528,44 +443,11 @@ export default function Page() {
         throw new Error("สร้างแปลงไม่สำเร็จ");
       }
 
-      await apiFetch(`/api/plots/${created.id}/polygon`, {
-        method: "PUT",
-        body: {
-          color: "#d92d2a",
-          coords: safeCoords,
-        },
-      });
-
-      const createdPlot = {
-        ...created,
-        id: String(created.id),
-        alias: safePlotName,
-        plotName: safePlotName,
-        name: safePlotName,
-        caretaker: safeCaretaker,
-        ownerName: safeCaretaker,
-      };
-
-      setPlots((prev) => {
-        const next = [createdPlot, ...prev];
-        return next;
-      });
-
-      setPolygonsByPlot((prev) => ({
-        ...prev,
-        [created.id]: [
-          {
-            id: `poly-${created.id}`,
-            color: "#d92d2a",
-            coords: safeCoords,
-          },
-        ],
-      }));
-
+      setPlots((prev) => [created, ...prev]);
       setSelectedPlotId(String(created.id));
-      setDraftPlotName(safePlotName);
-      setDraftCaretaker(safeCaretaker);
-      setDraftPolygon(safeCoords);
+      setDraftPlotName(created.plotName);
+      setDraftCaretaker(created.caretaker);
+      setDraftPolygon(created.polygon);
       setMode("view");
       setSuccess("บันทึกแปลงใหม่สำเร็จ");
     } catch (e) {
@@ -590,24 +472,14 @@ export default function Page() {
     try {
       const safePlotName = draftPlotName.trim();
       const safeCaretaker = draftCaretaker.trim();
-      const safeCoords = normalizeCoords(draftPolygon);
+      const safePolygon = coordsToPolygonPayload(draftPolygon);
 
       const res = await apiFetch(`/api/plots/${selectedPlotId}`, {
         method: "PATCH",
         body: {
-          alias: safePlotName,
           plotName: safePlotName,
-          name: safePlotName,
           caretaker: safeCaretaker,
-          ownerName: safeCaretaker,
-        },
-      });
-
-      await apiFetch(`/api/plots/${selectedPlotId}/polygon`, {
-        method: "PUT",
-        body: {
-          color: "#d92d2a",
-          coords: safeCoords,
+          polygon: safePolygon,
         },
       });
 
@@ -615,11 +487,6 @@ export default function Page() {
       const updatedPlot = {
         ...updated,
         id: String(selectedPlotId),
-        alias: safePlotName,
-        plotName: safePlotName,
-        name: safePlotName,
-        caretaker: safeCaretaker,
-        ownerName: safeCaretaker,
       };
 
       setPlots((prev) =>
@@ -628,21 +495,9 @@ export default function Page() {
         )
       );
 
-      setPolygonsByPlot((prev) => ({
-        ...prev,
-        [selectedPlotId]: [
-          {
-            id: `poly-${selectedPlotId}`,
-            color: "#d92d2a",
-            coords: safeCoords,
-          },
-        ],
-      }));
-
-      setSelectedPlotId(String(selectedPlotId));
-      setDraftPlotName(safePlotName);
-      setDraftCaretaker(safeCaretaker);
-      setDraftPolygon(safeCoords);
+      setDraftPlotName(updatedPlot.plotName);
+      setDraftCaretaker(updatedPlot.caretaker);
+      setDraftPolygon(updatedPlot.polygon);
       setMode("view");
       setSuccess("บันทึกการแก้ไขสำเร็จ");
     } catch (e) {
@@ -666,6 +521,36 @@ export default function Page() {
     setError('กรุณากด "+ เพิ่มแปลง" หรือ "ลบ / แก้ไข" ก่อน');
   }
 
+  async function handleDeletePlot() {
+    if (!selectedPlotId) {
+      setError("กรุณาเลือกแปลงก่อน");
+      return;
+    }
+
+    const ok = window.confirm("ต้องการลบแปลงนี้ใช่หรือไม่?");
+    if (!ok) return;
+
+    setBusy(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      await apiFetch(`/api/plots/${selectedPlotId}`, {
+        method: "DELETE",
+      });
+
+      const nextPlots = plots.filter((p) => String(p.id) !== String(selectedPlotId));
+      setPlots(nextPlots);
+      setSelectedPlotId(nextPlots[0]?.id || "");
+      setMode("view");
+      setSuccess("ลบแปลงสำเร็จ");
+    } catch (e) {
+      setError(e?.message || "ลบแปลงไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function requireEditable(actionText) {
     if (isEditable) return true;
     setError(`🔒 กด "ลบ / แก้ไข" หรือ "+ เพิ่มแปลง" ก่อน${actionText}`);
@@ -678,10 +563,12 @@ export default function Page() {
     const layer = e?.layer;
     if (!layer) return;
 
-    const points = (layer.getLatLngs?.()?.[0] || []).map((p) => [
-      Number(p.lat),
-      Number(p.lng),
-    ]);
+    const latlngs = layer.getLatLngs?.() || [];
+    const ring = Array.isArray(latlngs?.[0]) ? latlngs[0] : latlngs;
+
+    const points = ring
+      .map((p) => [Number(p.lat), Number(p.lng)])
+      .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
 
     if (points.length >= 3) {
       setDraftPolygon(points);
@@ -698,10 +585,13 @@ export default function Page() {
     let coords = null;
 
     layers.eachLayer((layer) => {
-      const safe = (layer.getLatLngs?.()?.[0] || []).map((p) => [
-        Number(p.lat),
-        Number(p.lng),
-      ]);
+      const latlngs = layer.getLatLngs?.() || [];
+      const ring = Array.isArray(latlngs?.[0]) ? latlngs[0] : latlngs;
+
+      const safe = ring
+        .map((p) => [Number(p.lat), Number(p.lng)])
+        .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng));
+
       if (safe.length >= 3) coords = safe;
     });
 
@@ -808,6 +698,15 @@ export default function Page() {
           >
             ลบ / แก้ไข
           </button>
+
+          <button
+            type="button"
+            className="delete-btn"
+            onClick={handleDeletePlot}
+            disabled={busy || !selectedPlotId || isCreateMode}
+          >
+            ลบแปลง
+          </button>
         </div>
 
         <div className="info-card">
@@ -843,6 +742,10 @@ export default function Page() {
                   </option>
                 ))}
               </select>
+
+              {!isEditable && selectedCaretakerLabel ? (
+                <div className="caretaker-hint">ผู้ดูแลปัจจุบัน: {selectedCaretakerLabel}</div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -888,19 +791,26 @@ export default function Page() {
 
                   <DrawGuide leaflet={leaflet} />
 
-                  {currentPolygon?.coords?.length ? (
-                    <FitBounds leaflet={leaflet} coords={currentPolygon.coords} />
+                  {displayedPolygon.length >= 3 ? (
+                    <FitBounds leaflet={leaflet} coords={displayedPolygon} />
                   ) : null}
 
-                  <leaflet.RL.FeatureGroup ref={featureGroupRef}>
-                    {displayedPolygons.map((poly) => (
-                      <PolyLayer
-                        key={poly.id}
-                        leaflet={leaflet}
-                        poly={poly}
-                        active={isEditable}
+                  <leaflet.RL.FeatureGroup
+                    ref={featureGroupRef}
+                    key={`${selectedPlotId}-${mode}-${JSON.stringify(displayedPolygon)}`}
+                  >
+                    {displayedPolygon.length >= 3 ? (
+                      <leaflet.RL.Polygon
+                        key={JSON.stringify(displayedPolygon)}
+                        positions={displayedPolygon}
+                        pathOptions={{
+                          color: isEditable ? "#0f766e" : "#d92d2a",
+                          fillColor: isEditable ? "#0f766e" : "#d92d2a",
+                          fillOpacity: isEditable ? 0.28 : 0.22,
+                          weight: isEditable ? 4 : 3,
+                        }}
                       />
-                    ))}
+                    ) : null}
 
                     <leaflet.Draw.EditControl
                       position="topright"
@@ -913,11 +823,11 @@ export default function Page() {
                         circlemarker: false,
                         marker: false,
                         polyline: false,
-                        polygon: isEditable && displayedPolygons.length === 0,
+                        polygon: isEditable && displayedPolygon.length === 0,
                       }}
                       edit={{
-                        edit: isEditable && displayedPolygons.length > 0,
-                        remove: isEditable && displayedPolygons.length > 0,
+                        edit: isEditable && displayedPolygon.length > 0,
+                        remove: isEditable && displayedPolygon.length > 0,
                       }}
                     />
                   </leaflet.RL.FeatureGroup>
@@ -981,7 +891,8 @@ export default function Page() {
 
           .add-btn,
           .cancel-btn,
-          .save-btn {
+          .save-btn,
+          .delete-btn {
             border: none;
             border-radius: 999px;
             padding: 11px 24px;
@@ -993,7 +904,8 @@ export default function Page() {
 
           .add-btn:hover,
           .cancel-btn:hover,
-          .save-btn:hover {
+          .save-btn:hover,
+          .delete-btn:hover {
             transform: translateY(-1px);
           }
 
@@ -1015,6 +927,13 @@ export default function Page() {
             color: #fff;
             min-width: 150px;
             box-shadow: 0 10px 24px rgba(27, 93, 16, 0.24);
+          }
+
+          .delete-btn {
+            background: #b42318;
+            color: #fff;
+            box-shadow: 0 6px 16px rgba(180, 35, 24, 0.2);
+            margin-left: 10px;
           }
 
           .top-select-wrap {
@@ -1124,6 +1043,12 @@ export default function Page() {
 
           .field-input[readonly] {
             background: #edf1ea;
+          }
+
+          .caretaker-hint {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #5a6852;
           }
 
           .field-input:focus,
@@ -1297,6 +1222,15 @@ export default function Page() {
             .top-head,
             .map-head {
               align-items: flex-start;
+            }
+
+            .edit-row {
+              gap: 10px;
+              flex-wrap: wrap;
+            }
+
+            .delete-btn {
+              margin-left: 0;
             }
           }
         `}</style>
