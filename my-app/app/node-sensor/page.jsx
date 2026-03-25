@@ -100,7 +100,7 @@ function normalizeNode(node = {}) {
     _id: safeText(node._id || ""),
     uid: safeText(node.uid || node._id || ""),
     nodeName: safeText(node.nodeName || ""),
-    status: safeText(node.status || "INACTIVE"),
+    status: safeText(node.status || "ACTIVE"),
     lat: toNum(node.lat),
     lng: toNum(node.lng),
     sensors: Array.isArray(node.sensors) ? node.sensors.map(normalizeSensor) : [],
@@ -108,17 +108,8 @@ function normalizeNode(node = {}) {
 }
 
 function normalizePlot(plot = {}) {
-  const polygon =
-    plot?.polygon?.coords ||
-    plot?.polygon ||
-    plot?.coords ||
-    [];
-
-  const nodes =
-    plot?.nodes ||
-    plot?.node_air ||
-    plot?.node_soil ||
-    [];
+  const polygon = plot?.polygon?.coords || plot?.polygon || plot?.coords || [];
+  const nodes = plot?.nodes || plot?.node_air || plot?.node_soil || [];
 
   return {
     id: safeText(plot.id || plot._id || ""),
@@ -147,7 +138,7 @@ function sensorPresetsByType(type) {
         uid: "soil-moisture",
         minValue: 65,
         maxValue: 80,
-        latestValue: 70,
+        latestValue: 8,
         status: "OK",
       },
       {
@@ -232,7 +223,8 @@ function sensorPresetsByType(type) {
 function sensorUnit(name = "") {
   const v = String(name).toLowerCase();
   if (v.includes("อุณหภูมิ")) return "°C";
-  if (v.includes("ความชื้น")) return "%";
+  if (v.includes("ความชื้นสัมพัทธ์")) return "%";
+  if (v.includes("ความชื้นในดิน")) return "%";
   if (v === "n") return "%";
   if (v === "p") return "ppm";
   if (v === "k") return "cmol/kg";
@@ -246,6 +238,29 @@ function sensorUnit(name = "") {
 function formatSensorValue(value, name) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
   return `${value} ${sensorUnit(name)}`.trim();
+}
+
+function pointInPolygon(point, vs) {
+  if (!Array.isArray(vs) || vs.length < 3) return true;
+
+  const x = point[1];
+  const y = point[0];
+  let inside = false;
+
+  for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+    const xi = vs[i][1];
+    const yi = vs[i][0];
+    const xj = vs[j][1];
+    const yj = vs[j][0];
+
+    const intersect =
+      yi > y !== yj > y &&
+      x < ((xj - xi) * (y - yi)) / (yj - yi + Number.EPSILON) + xi;
+
+    if (intersect) inside = !inside;
+  }
+
+  return inside;
 }
 
 function useLeafletBundle() {
@@ -275,7 +290,31 @@ function useLeafletBundle() {
         });
       }
 
-      if (alive) setBundle({ RL, L });
+      const redIcon = new L.Icon({
+        iconUrl:
+          "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png",
+        shadowUrl:
+          "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41],
+      });
+
+      const greenIcon = new L.Icon({
+        iconUrl:
+          "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png",
+        shadowUrl:
+          "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41],
+      });
+
+      if (alive) {
+        setBundle({ RL, L, redIcon, greenIcon });
+      }
     })();
 
     return () => {
@@ -310,6 +349,42 @@ function FitBounds({ RL, polygons, nodes, fallbackCenter = [13.112, 100.926] }) 
       map.setView(fallbackCenter, 16);
     }
   }, [map, polygons, nodes, fallbackCenter]);
+
+  return null;
+}
+
+function LockToPolygon({
+  RL,
+  L,
+  polygonCoords = [],
+  active = false,
+  fallbackCenter = [13.112, 100.926],
+}) {
+  const map = RL.useMap();
+
+  useEffect(() => {
+    if (!map || !active || !L) return;
+
+    const coords = normalizeCoords(polygonCoords);
+
+    if (coords.length >= 3) {
+      const bounds = L.latLngBounds(coords);
+      map.fitBounds(bounds, { padding: [20, 20] });
+
+      const lockedZoom = map.getZoom();
+      map.setMinZoom(lockedZoom);
+      map.setMaxBounds(bounds.pad(0.1));
+    } else {
+      map.setView(fallbackCenter, 16);
+    }
+
+    return () => {
+      try {
+        map.setMinZoom(1);
+        map.setMaxBounds(null);
+      } catch {}
+    };
+  }, [map, L, polygonCoords, active, fallbackCenter]);
 
   return null;
 }
@@ -368,21 +443,31 @@ function CurrentLocationLayer({ RL, locateTick, onStatus }) {
   );
 }
 
-function ClickMarkerPicker({ RL, enabled, markerPosition, onPick }) {
+function ClickMarkerPicker({
+  RL,
+  enabled,
+  markerPosition,
+  onPick,
+  polygonCoords = [],
+}) {
   const map = RL.useMap();
 
   useEffect(() => {
     if (!map || !enabled) return;
 
     const onClick = (e) => {
-      onPick([e.latlng.lat, e.latlng.lng]);
+      const pt = [e.latlng.lat, e.latlng.lng];
+      const coords = normalizeCoords(polygonCoords);
+
+      if (coords.length >= 3 && !pointInPolygon(pt, coords)) return;
+      onPick(pt);
     };
 
     map.on("click", onClick);
     return () => {
       map.off("click", onClick);
     };
-  }, [map, enabled, onPick]);
+  }, [map, enabled, onPick, polygonCoords]);
 
   if (!enabled || !markerPosition) return null;
 
@@ -399,12 +484,15 @@ function NodeMap({
   locateTick = 0,
   onLocateStatus = () => {},
   mapKey = "map",
+  selectedNodeId = "",
+  lockToSelectedPolygon = false,
 }) {
-  if (!leaflet?.RL) {
+  if (!leaflet?.RL || !leaflet?.L) {
     return <div className="map-loading">กำลังโหลดแผนที่...</div>;
   }
 
-  const { RL } = leaflet;
+  const { RL, L, redIcon, greenIcon } = leaflet;
+  const firstPolygon = polygons?.[0]?.coords || [];
 
   return (
     <RL.MapContainer
@@ -412,6 +500,13 @@ function NodeMap({
       center={[13.112, 100.926]}
       zoom={16}
       style={{ height: "100%", width: "100%" }}
+      scrollWheelZoom={!lockToSelectedPolygon}
+      doubleClickZoom={!lockToSelectedPolygon}
+      touchZoom={!lockToSelectedPolygon}
+      boxZoom={!lockToSelectedPolygon}
+      keyboard={!lockToSelectedPolygon}
+      dragging
+      zoomControl
     >
       <RL.TileLayer
         attribution="&copy; OpenStreetMap contributors"
@@ -437,7 +532,11 @@ function NodeMap({
 
       {nodes.map((node) =>
         Number.isFinite(node.lat) && Number.isFinite(node.lng) ? (
-          <RL.Marker key={node._id || node.uid} position={[node.lat, node.lng]}>
+          <RL.Marker
+            key={node._id || node.uid}
+            position={[node.lat, node.lng]}
+            icon={String(node._id) === String(selectedNodeId) ? redIcon : greenIcon}
+          >
             <RL.Popup>
               <div style={{ minWidth: 220 }}>
                 <div style={{ fontWeight: 800, marginBottom: 6 }}>
@@ -457,9 +556,19 @@ function NodeMap({
         enabled={selectable}
         markerPosition={markerPosition}
         onPick={onPickMarker}
+        polygonCoords={firstPolygon}
       />
 
-      <FitBounds RL={RL} polygons={polygons.map((p) => p.coords)} nodes={nodes} />
+      {lockToSelectedPolygon ? (
+        <LockToPolygon
+          RL={RL}
+          L={L}
+          polygonCoords={firstPolygon}
+          active={true}
+        />
+      ) : (
+        <FitBounds RL={RL} polygons={polygons.map((p) => p.coords)} nodes={nodes} />
+      )}
     </RL.MapContainer>
   );
 }
@@ -501,7 +610,12 @@ function SensorTable({ sensors }) {
   );
 }
 
-function EditableSensorTable({ sensors }) {
+function EditableSensorTable({
+  sensors,
+  canEditLimits,
+  onChangeMin,
+  onChangeMax,
+}) {
   return (
     <table className="node-sensor-table">
       <thead>
@@ -528,8 +642,38 @@ function EditableSensorTable({ sensors }) {
               <td className={bad ? "val-red" : "val-green"}>
                 {formatSensorValue(latest, sensor.name)}
               </td>
-              <td>{formatSensorValue(max, sensor.name)}</td>
-              <td>{formatSensorValue(min, sensor.name)}</td>
+              <td>
+                {canEditLimits ? (
+                  <div className="edit-limit-wrap">
+                    <input
+                      className="limit-input"
+                      type="number"
+                      step="any"
+                      value={sensor.maxValue ?? ""}
+                      onChange={(e) => onChangeMax(index, e.target.value)}
+                    />
+                    <span>{sensorUnit(sensor.name)}</span>
+                  </div>
+                ) : (
+                  formatSensorValue(max, sensor.name)
+                )}
+              </td>
+              <td>
+                {canEditLimits ? (
+                  <div className="edit-limit-wrap">
+                    <input
+                      className="limit-input"
+                      type="number"
+                      step="any"
+                      value={sensor.minValue ?? ""}
+                      onChange={(e) => onChangeMin(index, e.target.value)}
+                    />
+                    <span>{sensorUnit(sensor.name)}</span>
+                  </div>
+                ) : (
+                  formatSensorValue(min, sensor.name)
+                )}
+              </td>
             </tr>
           );
         })}
@@ -546,7 +690,7 @@ export default function NodeSensorPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const [view, setView] = useState("view"); // view | create | edit
+  const [view, setView] = useState("view");
   const [plots, setPlots] = useState([]);
   const [selectedMapPlotId, setSelectedMapPlotId] = useState("all");
   const [selectedNodeType, setSelectedNodeType] = useState("all");
@@ -554,6 +698,7 @@ export default function NodeSensorPage() {
   const [locateTickCurrent, setLocateTickCurrent] = useState(0);
   const [locateTickCreate, setLocateTickCreate] = useState(0);
   const [locateTickEdit, setLocateTickEdit] = useState(0);
+  const [openNodeId, setOpenNodeId] = useState("");
 
   const [editNodeId, setEditNodeId] = useState("");
   const [editPlotId, setEditPlotId] = useState("");
@@ -564,6 +709,7 @@ export default function NodeSensorPage() {
   const [formStatus, setFormStatus] = useState("ACTIVE");
   const [formMarker, setFormMarker] = useState(null);
   const [formSensors, setFormSensors] = useState(sensorPresetsByType("air"));
+  const [canEditSensorLimit, setCanEditSensorLimit] = useState(false);
 
   useEffect(() => {
     loadAll();
@@ -605,16 +751,6 @@ export default function NodeSensorPage() {
     [plots, editPlotId]
   );
 
-  const createSelectedPlotNodes = useMemo(() => {
-    if (!formPlotId) return [];
-    return allNodes.filter((node) => String(node.plotId) === String(formPlotId));
-  }, [allNodes, formPlotId]);
-
-  const editSelectedPlotNodes = useMemo(() => {
-    if (!editPlotId) return [];
-    return allNodes.filter((node) => String(node.plotId) === String(editPlotId));
-  }, [allNodes, editPlotId]);
-
   const detectedFormNodeType = useMemo(
     () => inferNodeTypeFromUid(formUid),
     [formUid]
@@ -623,6 +759,7 @@ export default function NodeSensorPage() {
   useEffect(() => {
     if (view === "create") {
       setFormSensors(sensorPresetsByType(detectedFormNodeType));
+      setCanEditSensorLimit(false);
     }
   }, [detectedFormNodeType, view]);
 
@@ -638,7 +775,13 @@ export default function NodeSensorPage() {
         : Array.isArray(res)
         ? res.map(normalizePlot)
         : [];
+
       setPlots(items);
+
+      const firstNode = items.flatMap((plot) => plot.nodes).find(Boolean);
+      if (firstNode?._id && !openNodeId) {
+        setOpenNodeId(firstNode._id);
+      }
     } catch (e) {
       setError(e?.message || "โหลดข้อมูล node ไม่สำเร็จ");
     } finally {
@@ -653,6 +796,7 @@ export default function NodeSensorPage() {
     setFormStatus("ACTIVE");
     setFormMarker(null);
     setFormSensors(sensorPresetsByType(type));
+    setCanEditSensorLimit(false);
   }
 
   function openCreate() {
@@ -679,6 +823,7 @@ export default function NodeSensorPage() {
         ? node.sensors.map((s) => ({ ...s }))
         : sensorPresetsByType(inferNodeTypeFromUid(node.uid))
     );
+    setCanEditSensorLimit(false);
     setView("edit");
     setError("");
     setSuccess("");
@@ -723,6 +868,26 @@ export default function NodeSensorPage() {
       latestValue: sensor.latestValue,
       latestTimestamp: sensor.latestTimestamp || null,
     }));
+  }
+
+  function updateSensorMin(index, value) {
+    setFormSensors((prev) =>
+      prev.map((sensor, i) =>
+        i === index
+          ? { ...sensor, minValue: value === "" ? null : Number(value) }
+          : sensor
+      )
+    );
+  }
+
+  function updateSensorMax(index, value) {
+    setFormSensors((prev) =>
+      prev.map((sensor, i) =>
+        i === index
+          ? { ...sensor, maxValue: value === "" ? null : Number(value) }
+          : sensor
+      )
+    );
   }
 
   async function handleSave() {
@@ -778,6 +943,9 @@ export default function NodeSensorPage() {
         method: "DELETE",
       });
       setSuccess("ลบ Node สำเร็จ");
+      if (String(openNodeId) === String(node._id)) {
+        setOpenNodeId("");
+      }
       await loadAll();
     } catch (e) {
       setError(e?.message || "ลบ Node ไม่สำเร็จ");
@@ -835,43 +1003,6 @@ export default function NodeSensorPage() {
                 </button>
               </div>
 
-              <div style={{ display: "flex", gap: 9, flexWrap: "wrap", marginBottom: 11 }}>
-                <div>
-                  <div className="filter-label" style={{ marginBottom: 3 }}>
-                    Current Map แปลง
-                  </div>
-                  <select
-                    className="form-select"
-                    style={{ width: 185 }}
-                    value={selectedMapPlotId}
-                    onChange={(e) => setSelectedMapPlotId(e.target.value)}
-                  >
-                    <option value="all">ทุกแปลง</option>
-                    {plots.map((plot) => (
-                      <option key={plot.id} value={plot.id}>
-                        {plot.plotName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <div className="filter-label" style={{ marginBottom: 3 }}>
-                    เลือก Node
-                  </div>
-                  <select
-                    className="form-select"
-                    style={{ width: 155 }}
-                    value={selectedNodeType}
-                    onChange={(e) => setSelectedNodeType(e.target.value)}
-                  >
-                    <option value="all">ทุก Node</option>
-                    <option value="air">Air Node</option>
-                    <option value="soil">Soil Node</option>
-                  </select>
-                </div>
-              </div>
-
               <div className="map-wrapper">
                 <div id="currentMapHost">
                   <div className="leaflet-box">
@@ -885,7 +1016,9 @@ export default function NodeSensorPage() {
                         selectable={false}
                         locateTick={locateTickCurrent}
                         onLocateStatus={setLocateStatus}
-                        mapKey={`view-${selectedMapPlotId}-${selectedNodeType}-${filteredNodes.length}`}
+                        mapKey={`view-${selectedMapPlotId}-${selectedNodeType}-${filteredNodes.length}-${openNodeId}`}
+                        selectedNodeId={openNodeId}
+                        lockToSelectedPolygon={false}
                       />
                     )}
                   </div>
@@ -896,98 +1029,68 @@ export default function NodeSensorPage() {
               </div>
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 9,
-                marginBottom: 9,
-                flexWrap: "wrap",
-              }}
-            >
-              <div className="filter-label" style={{ marginBottom: 0 }}>
-                แปลง
-              </div>
-              <select
-                className="form-select"
-                style={{ width: 170 }}
-                value={selectedMapPlotId}
-                onChange={(e) => setSelectedMapPlotId(e.target.value)}
-              >
-                <option value="all">ทุกแปลง</option>
-                {plots.map((plot) => (
-                  <option key={plot.id} value={plot.id}>
-                    {plot.plotName}
-                  </option>
-                ))}
-              </select>
+            {filteredNodes.map((node) => {
+              const isOpen = String(openNodeId) === String(node._id);
 
-              <div className="filter-label" style={{ marginBottom: 0, marginLeft: 7 }}>
-                ชนิด Node
-              </div>
-              <select
-                className="form-select"
-                style={{ width: 145 }}
-                value={selectedNodeType}
-                onChange={(e) => setSelectedNodeType(e.target.value)}
-              >
-                <option value="all">ทุก Node</option>
-                <option value="air">Air Node</option>
-                <option value="soil">Soil Node</option>
-              </select>
-            </div>
-
-            {filteredNodes.map((node) => (
-              <div className="node-card open" key={node._id}>
-                <div className="node-header">
-                  <div className="node-header-left">
-                    <div>
-                      <div className="node-uid">{node.uid || "-"}</div>
-                      <div className="node-name">Node : {node.nodeName || "-"}</div>
+              return (
+                <div className="node-card open" key={node._id}>
+                  <button
+                    type="button"
+                    className="node-header node-header-btn"
+                    onClick={() => setOpenNodeId(isOpen ? "" : node._id)}
+                  >
+                    <div className="node-header-left">
+                      <div>
+                        <div className="node-uid">{node.uid || "-"}</div>
+                        <div className="node-name">Node : {node.nodeName || "-"}</div>
+                      </div>
+                      <span
+                        className="node-type-badge"
+                        style={{
+                          background:
+                            node.nodeType === "soil"
+                              ? "rgba(109,76,65,.30)"
+                              : "rgba(25,118,210,.28)",
+                        }}
+                      >
+                        {nodeTypeLabel(node.nodeType)}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          color: "#a5d6a7",
+                          background: "rgba(76,175,80,.18)",
+                          padding: "2px 9px",
+                          borderRadius: 20,
+                          fontWeight: 600,
+                        }}
+                      >
+                        Status : {node.status || "-"}
+                      </span>
                     </div>
-                    <span
-                      className="node-type-badge"
-                      style={{
-                        background:
-                          node.nodeType === "soil"
-                            ? "rgba(109,76,65,.30)"
-                            : "rgba(25,118,210,.28)",
-                      }}
-                    >
-                      {nodeTypeLabel(node.nodeType)}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 10,
-                        color: "#a5d6a7",
-                        background: "rgba(76,175,80,.18)",
-                        padding: "2px 9px",
-                        borderRadius: 20,
-                        fontWeight: 600,
-                      }}
-                    >
-                      Status : {node.status || "-"}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                    <span className="node-status-on">{node.status || "-"}</span>
-                  </div>
-                </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                      <span className="node-status-on">{node.status || "-"}</span>
+                      <span className={`accordion-arrow ${isOpen ? "open" : ""}`}>▾</span>
+                    </div>
+                  </button>
 
-                <div className="node-body" style={{ display: "block" }}>
-                  <SensorTable sensors={node.sensors} />
+                  {isOpen ? (
+                    <div className="node-body" style={{ display: "block" }}>
+                      <SensorTable sensors={node.sensors} />
 
-                  <div className="node-actions">
-                    <button className="btn-sm btn-edit" onClick={() => openEdit(node)}>
-                      ✏️ แก้ไข
-                    </button>
-                    <button className="btn-sm btn-del" onClick={() => handleDelete(node)}>
-                      🗑 ลบ
-                    </button>
-                  </div>
+                      <div className="node-actions">
+                        <button className="btn-sm btn-edit" onClick={() => openEdit(node)}>
+                          ✏️ แก้ไข
+                        </button>
+                        <button className="btn-sm btn-del" onClick={() => handleDelete(node)}>
+                          🗑 ลบ
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </>
         )}
 
@@ -1031,13 +1134,15 @@ export default function NodeSensorPage() {
                   <NodeMap
                     leaflet={leaflet}
                     polygons={createPolygons}
-                    nodes={createSelectedPlotNodes}
-                    selectable={true}
+                    nodes={[]}
+                    selectable={!!formPlotId}
                     markerPosition={formMarker}
                     onPickMarker={setFormMarker}
                     locateTick={locateTickCreate}
                     onLocateStatus={setLocateStatus}
-                    mapKey={`create-${formPlotId}-${createSelectedPlotNodes.length}`}
+                    mapKey={`create-${formPlotId}`}
+                    selectedNodeId=""
+                    lockToSelectedPolygon={!!formPlotId}
                   />
                 </div>
               </div>
@@ -1161,10 +1266,34 @@ export default function NodeSensorPage() {
               </div>
 
               <div>
-                <div className="card-title" style={{ margin: "14px 0 8px" }}>
-                  {detectedFormNodeType === "soil" ? "Soil Sensors" : "Air Sensors"}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    margin: "14px 0 8px",
+                  }}
+                >
+                  <div className="card-title" style={{ marginBottom: 0 }}>
+                    {detectedFormNodeType === "soil" ? "Soil Sensors" : "Air Sensors"}
+                  </div>
+                  <button
+                    className="btn-sm btn-edit"
+                    type="button"
+                    onClick={() => setCanEditSensorLimit((v) => !v)}
+                  >
+                    {canEditSensorLimit ? "ปิดแก้ไข Max/Min" : "แก้ไข Max/Min"}
+                  </button>
                 </div>
-                <EditableSensorTable sensors={formSensors} />
+
+                <EditableSensorTable
+                  sensors={formSensors}
+                  canEditLimits={canEditSensorLimit}
+                  onChangeMin={updateSensorMin}
+                  onChangeMax={updateSensorMax}
+                />
               </div>
 
               <div
@@ -1226,13 +1355,15 @@ export default function NodeSensorPage() {
                   <NodeMap
                     leaflet={leaflet}
                     polygons={editPolygons}
-                    nodes={editSelectedPlotNodes.filter((n) => n._id !== editNodeId)}
+                    nodes={[]}
                     selectable={true}
                     markerPosition={formMarker}
                     onPickMarker={setFormMarker}
                     locateTick={locateTickEdit}
                     onLocateStatus={setLocateStatus}
                     mapKey={`edit-${editPlotId}-${editNodeId}`}
+                    selectedNodeId=""
+                    lockToSelectedPolygon={!!editPlotId}
                   />
                 </div>
               </div>
@@ -1284,10 +1415,25 @@ export default function NodeSensorPage() {
                 </span>
               </div>
 
+              <div className="filter-field">
+                <div className="filter-field-label">แปลง</div>
+                <select className="form-select" value={formPlotId} disabled>
+                  {plots.map((plot) => (
+                    <option key={plot.id} value={plot.id}>
+                      {plot.plotName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="form-grid-2">
                 <div className="filter-field" style={{ marginBottom: 0 }}>
                   <div className="filter-field-label">UID</div>
-                  <input className="form-input" value={formUid} readOnly />
+                  <input
+                    className="form-input"
+                    value={formUid}
+                    onChange={(e) => setFormUid(e.target.value)}
+                  />
                 </div>
 
                 <div className="filter-field" style={{ marginBottom: 0 }}>
@@ -1336,10 +1482,27 @@ export default function NodeSensorPage() {
               </div>
 
               <div>
-                <div className="card-title" style={{ margin: "14px 0 8px" }}>
-                  {detectedFormNodeType === "soil" ? "Soil Sensors" : "Air Sensors"}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    margin: "14px 0 8px",
+                  }}
+                >
+                  <div className="card-title" style={{ marginBottom: 0 }}>
+                    {detectedFormNodeType === "soil" ? "Soil Sensors" : "Air Sensors"}
+                  </div>
                 </div>
-                <EditableSensorTable sensors={formSensors} />
+
+                <EditableSensorTable
+                  sensors={formSensors}
+                  canEditLimits={true}
+                  onChangeMin={updateSensorMin}
+                  onChangeMax={updateSensorMax}
+                />
               </div>
 
               <div
@@ -1560,6 +1723,13 @@ export default function NodeSensorPage() {
             color: #fff;
           }
 
+          .node-header-btn {
+            width: 100%;
+            border: none;
+            text-align: left;
+            cursor: pointer;
+          }
+
           .node-header-left {
             display: flex;
             align-items: center;
@@ -1598,6 +1768,16 @@ export default function NodeSensorPage() {
             font-weight: 800;
           }
 
+          .accordion-arrow {
+            font-size: 14px;
+            font-weight: 800;
+            transition: transform 0.2s ease;
+          }
+
+          .accordion-arrow.open {
+            transform: rotate(180deg);
+          }
+
           .node-body {
             padding: 12px 14px;
             background: #fff;
@@ -1628,14 +1808,6 @@ export default function NodeSensorPage() {
             border-top: 1px solid #edf3ea;
             padding: 10px 10px;
             vertical-align: middle;
-          }
-
-          .node-sensor-table input.form-input {
-            height: 30px;
-            border-radius: 999px;
-            background: #fbfef9;
-            font-size: 11px;
-            padding: 0 10px;
           }
 
           .val-green {
@@ -1700,6 +1872,24 @@ export default function NodeSensorPage() {
             margin-top: 10px;
             font-size: 12px;
             color: #4f5c47;
+          }
+
+          .edit-limit-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+          }
+
+          .limit-input {
+            width: 84px;
+            height: 30px;
+            border-radius: 999px;
+            border: 1px solid #cfe0c8;
+            background: #fbfef9;
+            color: #33422d;
+            padding: 0 10px;
+            outline: none;
+            font-size: 12px;
           }
 
           :global(.leaflet-container) {
