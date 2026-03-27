@@ -29,6 +29,7 @@ function getToken() {
 }
 
 function toNum(v) {
+  if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -116,6 +117,23 @@ function displayLatest(sensor) {
   ) {
     return String(sensor.latestValue);
   }
+
+  if (
+    sensor?.value !== undefined &&
+    sensor?.value !== null &&
+    sensor?.value !== ""
+  ) {
+    return String(sensor.value);
+  }
+
+  if (
+    sensor?.lastReading?.value !== undefined &&
+    sensor?.lastReading?.value !== null &&
+    sensor?.lastReading?.value !== ""
+  ) {
+    return String(sensor.lastReading.value);
+  }
+
   return "-";
 }
 
@@ -147,7 +165,7 @@ function sensorRangeText(sensorName = "") {
     key.includes("ความชื้นในดิน") ||
     key.includes("ดิน")
   ) {
-    return { min: "< 65 %", max: "65 - 80 %" };
+    return { min: "65 %", max: "80 %" };
   }
   if (key === "n" || key.includes("ไนโตรเจน")) {
     return { min: "0.1 %", max: "1.0 %" };
@@ -163,6 +181,72 @@ function sensorRangeText(sensorName = "") {
   }
 
   return { min: "-", max: "-" };
+}
+
+function getLatestNumericValue(sensor) {
+  const raw =
+    sensor?.latestValue ??
+    sensor?.value ??
+    sensor?.lastReading?.value ??
+    sensor?.lastReading ??
+    sensor?.reading ??
+    null;
+
+  if (raw === null || raw === undefined || raw === "") return null;
+
+  if (typeof raw === "number") {
+    return Number.isFinite(raw) ? raw : null;
+  }
+
+  const cleaned = String(raw).replace(/[^0-9.-]/g, "");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function getDisplayUnit(sensor = {}) {
+  return sensor?.unit || sensor?.sensorUnit || sensor?.latestUnit || "";
+}
+
+function formatSensorValue(value, unit = "") {
+  if (value === null || value === undefined || value === "") return "-";
+  return `${value}${unit ? ` ${unit}` : ""}`;
+}
+
+function getSensorLimitRange(sensor = {}, sensorName = "") {
+  const minValue = toNum(sensor?.minValue);
+  const maxValue = toNum(sensor?.maxValue);
+  const unit = getDisplayUnit(sensor);
+
+  if (minValue != null || maxValue != null) {
+    return {
+      min: minValue,
+      max: maxValue,
+      minText: formatSensorValue(minValue ?? "-", unit),
+      maxText: formatSensorValue(maxValue ?? "-", unit),
+      unit,
+      source: "sensor",
+    };
+  }
+
+  const fallback = sensorRangeText(sensorName);
+  return {
+    min: null,
+    max: null,
+    minText: fallback.min,
+    maxText: fallback.max,
+    unit,
+    source: "fallback",
+  };
+}
+
+function isSensorOutOfRange(sensor = {}, sensorName = "") {
+  const latest = getLatestNumericValue(sensor);
+  const range = getSensorLimitRange(sensor, sensorName);
+
+  if (latest == null) return false;
+  if (range.min != null && latest < range.min) return true;
+  if (range.max != null && latest > range.max) return true;
+  return false;
 }
 
 function buildMapData(plotsRaw) {
@@ -301,25 +385,83 @@ function buildSensorCards(plots = []) {
       const nodeStatus = String(node?.status || "INACTIVE").toUpperCase();
       const sensors = Array.isArray(node?.sensors) ? node.sensors : [];
 
+      let hasProblemInNode = false;
+
       const sensorGroups = sensors.length
         ? sensors
             .map((sensor) => {
               const sensorName = sensor?.name || sensor?.uid || "Sensor";
-              const latestValue = displayLatest(sensor);
-              const latestTs = formatDateTime(sensor?.latestTimestamp);
-              const range = sensorRangeText(sensorName);
+              const latestTs = formatDateTime(
+                sensor?.latestTimestamp ||
+                  sensor?.lastReadingAt ||
+                  sensor?.ts ||
+                  sensor?.updatedAt
+              );
+
+              const latestNumeric = getLatestNumericValue(sensor);
+              const range = getSensorLimitRange(sensor, sensorName);
+              const unit = range.unit || getDisplayUnit(sensor);
+              const isOut = isSensorOutOfRange(sensor, sensorName);
+
+              if (isOut) hasProblemInNode = true;
+
+              const latestValueText =
+                latestNumeric != null
+                  ? formatSensorValue(latestNumeric, unit)
+                  : displayLatest(sensor);
+
+              const sensorBoxStyle = isOut
+                ? `
+                  border:1.5px solid #ef4444;
+                  background:#fef2f2;
+                  box-shadow:0 0 0 1px rgba(239,68,68,.08) inset;
+                `
+                : `
+                  border:1.5px solid #22c55e;
+                  background:#f0fdf4;
+                  box-shadow:0 0 0 1px rgba(34,197,94,.08) inset;
+                `;
+
+              const valueStyle = isOut
+                ? "color:#dc2626;font-weight:800;"
+                : "color:#166534;font-weight:800;";
+
+              const statusText = isOut ? "ค่าสูง/ต่ำเกินช่วงที่กำหนด" : "ค่าปกติ";
+              const statusStyle = isOut
+                ? "color:#dc2626;font-weight:800;"
+                : "color:#166534;font-weight:800;";
 
               return `
                 <div class="sensor-group">
                   <div class="sg-title">${escapeHtml(sensorName)}</div>
                   <div class="sg-grid">
-                    <div class="sg-item">
+                    <div class="sg-item" style="${sensorBoxStyle}">
                       <div class="sgi-name">${escapeHtml(sensorName)}</div>
                       <div class="sgi-vmm">
-                        <div class="sgi-row"><span class="sgi-row-label">Value</span><span class="sgi-row-val">${escapeHtml(latestValue)}</span></div>
-                        <div class="sgi-row"><span class="sgi-row-label">MIN</span><span class="sgi-row-sub">${escapeHtml(range.min)}</span></div>
-                        <div class="sgi-row"><span class="sgi-row-label">MAX</span><span class="sgi-row-sub">${escapeHtml(range.max)}</span></div>
-                        <div class="sgi-row"><span class="sgi-row-label">Updated</span><span class="sgi-row-sub">${escapeHtml(latestTs)}</span></div>
+                        <div class="sgi-row">
+                          <span class="sgi-row-label">Value</span>
+                          <span class="sgi-row-val" style="${valueStyle}">
+                            ${escapeHtml(latestValueText)}
+                          </span>
+                        </div>
+                        <div class="sgi-row">
+                          <span class="sgi-row-label">MIN</span>
+                          <span class="sgi-row-sub">${escapeHtml(range.minText)}</span>
+                        </div>
+                        <div class="sgi-row">
+                          <span class="sgi-row-label">MAX</span>
+                          <span class="sgi-row-sub">${escapeHtml(range.maxText)}</span>
+                        </div>
+                        <div class="sgi-row">
+                          <span class="sgi-row-label">Updated</span>
+                          <span class="sgi-row-sub">${escapeHtml(latestTs)}</span>
+                        </div>
+                        <div class="sgi-row">
+                          <span class="sgi-row-label" style="${statusStyle}">สถานะ</span>
+                          <span class="sgi-row-sub" style="${statusStyle}">
+                            ${escapeHtml(statusText)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -331,15 +473,43 @@ function buildSensorCards(plots = []) {
           <div class="sensor-group">
             <div class="sg-title">ไม่มีเซนเซอร์</div>
             <div class="sg-grid">
-              <div class="sg-item">
+              <div class="sg-item" style="
+                border:1.5px solid #22c55e;
+                background:#f0fdf4;
+                box-shadow:0 0 0 1px rgba(34,197,94,.08) inset;
+              ">
                 <div class="sgi-name">ยังไม่มีข้อมูล sensor</div>
               </div>
             </div>
           </div>
         `;
 
+      const cardStyle = hasProblemInNode
+        ? `
+          border:2px solid #ef4444;
+          background:linear-gradient(180deg,#fff5f5 0%,#ffffff 100%);
+          box-shadow:0 10px 24px rgba(239,68,68,.10);
+        `
+        : `
+          border:2px solid #22c55e;
+          background:linear-gradient(180deg,#f0fdf4 0%,#ffffff 100%);
+          box-shadow:0 10px 24px rgba(34,197,94,.10);
+        `;
+
+      const badgeStyle = hasProblemInNode
+        ? `
+          background:#fee2e2;
+          color:#b91c1c;
+          border:1px solid #fecaca;
+        `
+        : `
+          background:#dcfce7;
+          color:#166534;
+          border:1px solid #bbf7d0;
+        `;
+
       cards.push(`
-        <div class="pin-card alert-card">
+        <div class="pin-card" style="${cardStyle}">
           <div class="pin-header">
             <div>
               <div class="pin-name">ข้อมูล : ${escapeHtml(plotName)} • ${escapeHtml(
@@ -347,7 +517,9 @@ function buildSensorCards(plots = []) {
       )} • Node:${escapeHtml(nodeName)}</div>
               <div class="pin-sub">รายละเอียดของอุปกรณ์และเซนเซอร์</div>
             </div>
-            <div class="status-badge">${escapeHtml(nodeStatus)}</div>
+            <div class="status-badge" style="${badgeStyle}">
+              ${hasProblemInNode ? "ผิดปกติ" : "ปกติ"} • ${escapeHtml(nodeStatus)}
+            </div>
           </div>
           ${sensorGroups}
         </div>
@@ -366,13 +538,40 @@ function buildIssueSummary(plots = []) {
     for (const node of nodes) {
       const sensors = Array.isArray(node?.sensors) ? node.sensors : [];
       for (const sensor of sensors) {
+        const sensorName = sensor?.name || sensor?.uid || "Sensor";
+        const latestNumeric = getLatestNumericValue(sensor);
+        const range = getSensorLimitRange(sensor, sensorName);
         const status = String(sensor?.status || "").toUpperCase();
+
+        const outByRange =
+          latestNumeric != null &&
+          ((range.min != null && latestNumeric < range.min) ||
+            (range.max != null && latestNumeric > range.max));
+
+        if (outByRange) {
+          issues.push({
+            plotName: plot?.plotName || "แปลง",
+            nodeName: node?.nodeName || node?.uid || "Node",
+            sensorName,
+            status: "OUT_OF_RANGE",
+            latestValue: latestNumeric,
+            min: range.min,
+            max: range.max,
+            unit: range.unit || getDisplayUnit(sensor),
+          });
+          continue;
+        }
+
         if (status && status !== "OK") {
           issues.push({
             plotName: plot?.plotName || "แปลง",
             nodeName: node?.nodeName || node?.uid || "Node",
-            sensorName: sensor?.name || sensor?.uid || "Sensor",
+            sensorName,
             status,
+            latestValue: latestNumeric,
+            min: range.min,
+            max: range.max,
+            unit: range.unit || getDisplayUnit(sensor),
           });
         }
       }
@@ -415,7 +614,11 @@ export default function Page() {
         }
 
         const data = await res.json();
-        const rows = Array.isArray(data?.items) ? data.items : [];
+        const rows = Array.isArray(data?.items)
+          ? data.items
+          : Array.isArray(data)
+          ? data
+          : [];
 
         if (!alive) return;
         setPlots(rows);
@@ -463,15 +666,24 @@ export default function Page() {
     if (issueListEl) {
       issueListEl.innerHTML = issues.length
         ? issues
-            .map(
-              (issue) => `
+            .map((issue) => {
+              const extra =
+                issue.status === "OUT_OF_RANGE"
+                  ? ` • ${escapeHtml(
+                      formatSensorValue(issue.latestValue, issue.unit)
+                    )} นอกช่วง (${escapeHtml(
+                      formatSensorValue(issue.min, issue.unit)
+                    )} - ${escapeHtml(formatSensorValue(issue.max, issue.unit))})`
+                  : ` • ${escapeHtml(issue.status)}`;
+
+              return `
                 <div class="alert-pill">
-                  ${escapeHtml(issue.sensorName)} • ${escapeHtml(issue.status)} • ${escapeHtml(
+                  ${escapeHtml(issue.sensorName)}${extra} • ${escapeHtml(
                 issue.plotName
               )} / ${escapeHtml(issue.nodeName)}
                 </div>
-              `
-            )
+              `;
+            })
             .join("")
         : `<div class="alert-pill">ไม่พบความผิดปกติ</div>`;
     }
@@ -629,7 +841,12 @@ export default function Page() {
                   .map((sensor, i) => {
                     const sensorName = sensor?.name || sensor?.uid || `Sensor ${i + 1}`;
                     const latestValue = displayLatest(sensor);
-                    const latestTs = formatDateTime(sensor?.latestTimestamp);
+                    const latestTs = formatDateTime(
+                      sensor?.latestTimestamp ||
+                        sensor?.lastReadingAt ||
+                        sensor?.ts ||
+                        sensor?.updatedAt
+                    );
                     return `<li>${escapeHtml(sensorName)} • ${escapeHtml(
                       latestValue
                     )} • ${escapeHtml(latestTs)}</li>`;

@@ -11,17 +11,16 @@ const AUTH_KEYS = [
   "duwims_token",
 ];
 
-const DEFAULT_SENSOR_OPTIONS = [
-  { label: "ความชื้นในดิน", unit: "%" },
-  { label: "อุณหภูมิ", unit: "°C" },
-  { label: "ความชื้นสัมพัทธ์", unit: "%" },
-  { label: "N", unit: "%" },
-  { label: "P", unit: "ppm" },
-  { label: "K", unit: "cmol/kg" },
-  { label: "ความเข้มแสง", unit: "lux" },
-  { label: "ปริมาณน้ำฝน", unit: "mm" },
-  { label: "ความเร็วลม", unit: "m/s" },
-  { label: "การให้น้ำ", unit: "L" },
+const SENSOR_OPTIONS = [
+  { key: "soil", label: "ความชื้นในดิน", unit: "%" },
+  { key: "water", label: "ความพร้อมใช้น้ำ", unit: "%" },
+  { key: "n", label: "N", unit: "%" },
+  { key: "p", label: "P", unit: "ppm" },
+  { key: "k", label: "K", unit: "cmol/kg" },
+  { key: "temp", label: "อุณหภูมิ", unit: "°C" },
+  { key: "rh", label: "ความชื้นสัมพัทธ์", unit: "%" },
+  { key: "wind", label: "วัดความเร็วลม", unit: "m/s" },
+  { key: "rain", label: "ปริมาณน้ำฝน", unit: "mm" },
 ];
 
 function getApiBase() {
@@ -30,34 +29,20 @@ function getApiBase() {
 
 function getToken() {
   if (typeof window === "undefined") return "";
-  for (const k of AUTH_KEYS) {
-    const v = window.localStorage.getItem(k);
-    if (v) return v;
+  for (const key of AUTH_KEYS) {
+    const value = window.localStorage.getItem(key);
+    if (value) return value;
   }
   return "";
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+function getId(obj) {
+  return obj?._id || obj?.id || obj?.uid || "";
 }
 
-function escapeJsString(value) {
-  return String(value ?? "")
-    .replaceAll("\\", "\\\\")
-    .replaceAll("'", "\\'")
-    .replaceAll('"', '\\"')
-    .replaceAll("\n", "\\n")
-    .replaceAll("\r", "");
-}
-
-function toNum(v) {
-  if (v === null || v === undefined || v === "") return null;
-  const n = Number(v);
+function toNum(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -66,8 +51,8 @@ function formatDateInput(date) {
   if (Number.isNaN(d.getTime())) return "";
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
-  const da = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${da}`;
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function formatThaiDateLabel(dateStr) {
@@ -79,38 +64,28 @@ function formatThaiDateLabel(dateStr) {
   });
 }
 
-function normalizeDateKey(value) {
-  const raw =
-    value?.timestamp ||
-    value?.ts ||
-    value?.time ||
-    value?.createdAt ||
-    value?.updatedAt ||
-    value;
-
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return null;
-  return formatDateInput(d);
-}
-
-function average(nums) {
-  const arr = nums.filter((n) => Number.isFinite(n));
-  if (!arr.length) return null;
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
-}
-
 function buildDateRange(startDate, endDate) {
   const out = [];
   const start = new Date(startDate);
   const end = new Date(endDate);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) return out;
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    return out;
+  }
 
   const cur = new Date(start);
   while (cur <= end) {
     out.push(formatDateInput(cur));
     cur.setDate(cur.getDate() + 1);
   }
+
   return out;
+}
+
+function average(nums) {
+  const arr = nums.filter((n) => Number.isFinite(n));
+  if (!arr.length) return null;
+  return arr.reduce((a, b) => a + b, 0) / arr.length;
 }
 
 function colorOfIndex(i) {
@@ -141,7 +116,72 @@ function makeCsv(rows) {
     }
     return s;
   };
+
   return rows.map((row) => row.map(esc).join(",")).join("\n");
+}
+
+function canonicalSensorKey(name = "") {
+  const key = String(name || "").trim().toLowerCase();
+
+  if (
+    key.includes("soil_moisture") ||
+    key.includes("soil moisture") ||
+    key.includes("moisture") ||
+    key.includes("ความชื้นในดิน")
+  ) {
+    return "soil";
+  }
+
+  if (
+    key.includes("water_level") ||
+    key.includes("water level") ||
+    key.includes("water") ||
+    key.includes("ให้น้ำ") ||
+    key.includes("irrigation") ||
+    key.includes("ความพร้อมใช้น้ำ")
+  ) {
+    return "water";
+  }
+
+  if (
+    key.includes("temperature") ||
+    key.includes("temp_rh") ||
+    key === "temp" ||
+    key.includes("อุณหภูมิ")
+  ) {
+    return "temp";
+  }
+
+  if (
+    key.includes("humidity") ||
+    key === "rh" ||
+    key.includes("ความชื้นสัมพัทธ์") ||
+    key === "ความชื้น"
+  ) {
+    return "rh";
+  }
+
+  if (key === "n" || key.includes("ไนโตรเจน")) return "n";
+  if (key === "p" || key.includes("ฟอสฟอรัส")) return "p";
+  if (key === "k" || key.includes("โพแทสเซียม")) return "k";
+
+  if (key.includes("rain") || key.includes("ฝน")) return "rain";
+
+  if (
+    key.includes("wind_speed") ||
+    key.includes("wind speed") ||
+    key.includes("wind") ||
+    key.includes("วัดความเร็วลม") ||
+    key.includes("ความเร็วลม")
+  ) {
+    return "wind";
+  }
+
+  return "";
+}
+
+function sensorLabelFromKey(key) {
+  return SENSOR_OPTIONS.find((s) => s.key === key)?.label || key;
 }
 
 function inferNodeType(node) {
@@ -151,7 +191,7 @@ function inferNodeType(node) {
     node?.nodeName,
     node?.uid,
     ...(Array.isArray(node?.sensors)
-      ? node.sensors.map((s) => `${s?.name || ""} ${s?.uid || ""}`)
+      ? node.sensors.map((s) => `${s?.name || ""} ${s?.uid || ""} ${s?.sensorType || ""}`)
       : []),
   ]
     .filter(Boolean)
@@ -171,80 +211,6 @@ function inferNodeType(node) {
   return "air";
 }
 
-function canonicalSensorLabel(name = "") {
-  const key = String(name || "").trim().toLowerCase();
-
-  if (
-    key.includes("soil_moisture") ||
-    key.includes("soil moisture") ||
-    key === "soil" ||
-    key.includes("moisture") ||
-    key.includes("ความชื้นในดิน")
-  ) {
-    return "ความชื้นในดิน";
-  }
-
-  if (
-    key.includes("temp_rh") ||
-    key.includes("temperature") ||
-    key === "temp" ||
-    key.includes("อุณหภูมิ")
-  ) {
-    return "อุณหภูมิ";
-  }
-
-  if (
-    key.includes("humidity") ||
-    key === "rh" ||
-    key.includes("ความชื้นสัมพัทธ์") ||
-    key === "ความชื้น"
-  ) {
-    return "ความชื้นสัมพัทธ์";
-  }
-
-  if (key === "n" || key.includes("ไนโตรเจน")) return "N";
-  if (key === "p" || key.includes("ฟอสฟอรัส")) return "P";
-  if (key === "k" || key.includes("โพแทสเซียม")) return "K";
-  if (key.includes("npk")) return "NPK";
-  if (key.includes("light") || key.includes("แสง")) return "ความเข้มแสง";
-  if (key.includes("rain") || key.includes("ฝน")) return "ปริมาณน้ำฝน";
-  if (key.includes("wind") || key.includes("ลม")) return "ความเร็วลม";
-  if (key.includes("water") || key.includes("ให้น้ำ")) return "การให้น้ำ";
-
-  return String(name || "ไม่ทราบชื่อเซนเซอร์").trim();
-}
-
-function sensorUnit(label) {
-  switch (label) {
-    case "ความชื้นในดิน":
-      return "%";
-    case "อุณหภูมิ":
-      return "°C";
-    case "ความชื้นสัมพัทธ์":
-      return "%";
-    case "ความเข้มแสง":
-      return "lux";
-    case "ปริมาณน้ำฝน":
-      return "mm";
-    case "ความเร็วลม":
-      return "m/s";
-    case "การให้น้ำ":
-      return "L";
-    case "N":
-      return "%";
-    case "P":
-      return "ppm";
-    case "K":
-      return "cmol/kg";
-    default:
-      return "";
-  }
-}
-
-function getId(obj) {
-  return obj?._id || obj?.id || obj?.uid || "";
-}
-
 function getTimestampFromReading(item) {
   return item?.timestamp || item?.ts || item?.time || item?.createdAt || item?.updatedAt || "";
 }
@@ -259,10 +225,27 @@ function getValueFromReading(item) {
   const raw = toNum(item?.raw);
   if (raw !== null) return raw;
 
-  const last = toNum(item?.lastReading?.value);
-  if (last !== null) return last;
+  const latestValue = toNum(item?.latestValue);
+  if (latestValue !== null) return latestValue;
+
+  const lastReading = toNum(item?.lastReading?.value);
+  if (lastReading !== null) return lastReading;
 
   return null;
+}
+
+function normalizeDateKey(value) {
+  const raw =
+    value?.timestamp ||
+    value?.ts ||
+    value?.time ||
+    value?.createdAt ||
+    value?.updatedAt ||
+    value;
+
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return formatDateInput(d);
 }
 
 function normalizePlot(plot) {
@@ -274,14 +257,12 @@ function normalizePlot(plot) {
 }
 
 function normalizeSensor(sensor) {
-  const label = canonicalSensorLabel(sensor?.sensorType || sensor?.name || sensor?.uid || "");
+  const sensorKey = canonicalSensorKey(sensor?.sensorType || sensor?.name || sensor?.uid || "");
   return {
     id: getId(sensor),
     uid: sensor?.uid || "",
-    name: sensor?.name || sensor?.sensorType || sensor?.uid || "",
-    label,
-    unit: sensorUnit(label),
-    status: sensor?.status || sensor?.lastReading?.status || "",
+    sensorKey,
+    label: sensorLabelFromKey(sensorKey),
   };
 }
 
@@ -294,12 +275,12 @@ function normalizeReading(item) {
     timestamp: getTimestampFromReading(item),
     value: getValueFromReading(item),
     status: item?.status || item?.state || "",
-    raw: item,
   };
 }
 
 async function apiGet(path) {
   const token = getToken();
+
   const res = await fetch(`${getApiBase()}${path}`, {
     method: "GET",
     headers: {
@@ -321,29 +302,31 @@ export default function HistoryPage() {
   const today = useMemo(() => new Date(), []);
   const defaultEnd = formatDateInput(today);
   const defaultStart = formatDateInput(
-    new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7)
+    new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29)
   );
 
   const [plots, setPlots] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingPlots, setLoadingPlots] = useState(true);
   const [loadingReadings, setLoadingReadings] = useState(false);
   const [error, setError] = useState("");
 
-  const [quickRange, setQuickRange] = useState("7 วันล่าสุด");
+  const [quickRange, setQuickRange] = useState("30 วันล่าสุด");
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEnd);
   const [selectedPlotId, setSelectedPlotId] = useState("all");
-  const [selectedSensors, setSelectedSensors] = useState(["ความชื้นในดิน"]);
+
+  const [selectedSensors, setSelectedSensors] = useState([]);
   const [sensorDropdownOpen, setSensorDropdownOpen] = useState(false);
 
   const [readingMap, setReadingMap] = useState({});
   const csvRef = useRef("");
+  const sensorWrapRef = useRef(null);
 
   useEffect(() => {
     let alive = true;
 
     async function loadPlots() {
-      setLoading(true);
+      setLoadingPlots(true);
       setError("");
 
       try {
@@ -351,14 +334,13 @@ export default function HistoryPage() {
         if (!alive) return;
 
         const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-        const normalized = items.map(normalizePlot).filter((p) => p.id);
-        setPlots(normalized);
+        setPlots(items.map(normalizePlot).filter((p) => p.id));
       } catch (err) {
         if (!alive) return;
         setError(err?.message || "ไม่สามารถโหลดข้อมูลแปลงได้");
         setPlots([]);
       } finally {
-        if (alive) setLoading(false);
+        if (alive) setLoadingPlots(false);
       }
     }
 
@@ -368,45 +350,57 @@ export default function HistoryPage() {
     };
   }, []);
 
-  const sensorOptions = useMemo(() => {
-    const map = new Map();
-
-    for (const item of DEFAULT_SENSOR_OPTIONS) {
-      map.set(item.label, item);
-    }
-
-    for (const plot of plots) {
-      const nodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
-      for (const node of nodes) {
-        const sensors = Array.isArray(node?.sensors) ? node.sensors : [];
-        for (const rawSensor of sensors) {
-          const sensor = normalizeSensor(rawSensor);
-          if (!sensor.label) continue;
-          map.set(sensor.label, {
-            label: sensor.label,
-            unit: sensor.unit || sensorUnit(sensor.label),
-          });
-        }
-      }
-    }
-
-    const arr = [...map.values()];
-    arr.sort((a, b) => a.label.localeCompare(b.label, "th"));
-    return arr;
-  }, [plots]);
-
   useEffect(() => {
-    if (!sensorOptions.length) return;
-    setSelectedSensors((prev) => {
-      const valid = prev.filter((x) => sensorOptions.some((s) => s.label === x));
-      return valid.length ? valid : [sensorOptions[0].label];
-    });
-  }, [sensorOptions]);
+    const onDocMouseDown = (e) => {
+      if (!sensorWrapRef.current) return;
+      if (!sensorWrapRef.current.contains(e.target)) {
+        setSensorDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, []);
+
+  const allNodeCount = useMemo(() => {
+    return plots.reduce((sum, plot) => sum + (Array.isArray(plot.nodes) ? plot.nodes.length : 0), 0);
+  }, [plots]);
 
   const filteredPlots = useMemo(() => {
     if (selectedPlotId === "all") return plots;
     return plots.filter((p) => String(p.id) === String(selectedPlotId));
   }, [plots, selectedPlotId]);
+
+  const visibleNodes = useMemo(() => {
+    const rows = [];
+    for (const plot of filteredPlots) {
+      const nodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
+      for (const node of nodes) {
+        rows.push({
+          plotId: plot.id,
+          plotName: plot.plotName,
+          nodeId: getId(node),
+          nodeUid: node?.uid || "",
+          nodeName: node?.nodeName || node?.name || node?.uid || "Node",
+          nodeType: inferNodeType(node),
+          sensors: Array.isArray(node?.sensors) ? node.sensors : [],
+        });
+      }
+    }
+    return rows;
+  }, [filteredPlots]);
+
+  const selectedSensorNames = useMemo(() => {
+    return selectedSensors
+      .map((key) => SENSOR_OPTIONS.find((s) => s.key === key)?.label)
+      .filter(Boolean);
+  }, [selectedSensors]);
+
+  const sensorDropdownLabel = useMemo(() => {
+    if (!selectedSensorNames.length) return "เลือกประเภทเซนเซอร์";
+    if (selectedSensorNames.length === 1) return selectedSensorNames[0];
+    return `${selectedSensorNames[0]} +${selectedSensorNames.length - 1}`;
+  }, [selectedSensorNames]);
 
   const sensorTargets = useMemo(() => {
     const targets = [];
@@ -418,20 +412,19 @@ export default function HistoryPage() {
         for (const rawSensor of sensors) {
           const sensor = normalizeSensor(rawSensor);
           if (!sensor.id) continue;
-          if (!selectedSensors.includes(sensor.label)) continue;
+          if (!sensor.sensorKey) continue;
+          if (selectedSensors.length && !selectedSensors.includes(sensor.sensorKey)) continue;
 
           targets.push({
             plotId: plot.id,
             plotName: plot.plotName,
             nodeId: getId(node),
+            nodeUid: node?.uid || "",
             nodeName: node?.nodeName || node?.name || node?.uid || "Node",
             nodeType: inferNodeType(node),
             sensorId: sensor.id,
-            sensorUid: sensor.uid,
-            sensorName: sensor.name,
+            sensorKey: sensor.sensorKey,
             sensorLabel: sensor.label,
-            unit: sensor.unit,
-            status: sensor.status,
           });
         }
       }
@@ -454,21 +447,20 @@ export default function HistoryPage() {
 
       try {
         const results = await Promise.all(
-          sensorTargets.map(async (t) => {
+          sensorTargets.map(async (target) => {
             try {
               const qs = new URLSearchParams({
-                sensorId: String(t.sensorId),
-                plotId: String(t.plotId),
-                nodeId: String(t.nodeId),
-                limit: "1000",
+                sensorId: String(target.sensorId),
+                plotId: String(target.plotId),
+                nodeId: String(target.nodeId),
+                limit: "500",
               });
 
               const data = await apiGet(`/api/sensor-readings?${qs.toString()}`);
               const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-              const normalized = items.map(normalizeReading);
-              return [t.sensorId, normalized];
+              return [target.sensorId, items.map(normalizeReading)];
             } catch {
-              return [t.sensorId, []];
+              return [target.sensorId, []];
             }
           })
         );
@@ -489,19 +481,6 @@ export default function HistoryPage() {
       alive = false;
     };
   }, [sensorTargets]);
-
-  useEffect(() => {
-    const onDocClick = (e) => {
-      const wrap = document.getElementById("sensor-type-dropdown-wrap");
-      if (!wrap) return;
-      if (!wrap.contains(e.target)) {
-        setSensorDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener("click", onDocClick);
-    return () => document.removeEventListener("click", onDocClick);
-  }, []);
 
   const dateKeys = useMemo(() => buildDateRange(startDate, endDate), [startDate, endDate]);
 
@@ -528,14 +507,15 @@ export default function HistoryPage() {
           plotId: target.plotId,
           plotName: target.plotName,
           nodeId: target.nodeId,
+          nodeUid: target.nodeUid,
           nodeName: target.nodeName,
           nodeType: target.nodeType,
           sensorId: target.sensorId,
+          sensorKey: target.sensorKey,
           sensorLabel: target.sensorLabel,
-          sensorName: target.sensorName,
           value,
           timestamp,
-          status: item?.status || target.status || "",
+          status: item?.status || "",
           dateKey,
         });
       }
@@ -544,87 +524,78 @@ export default function HistoryPage() {
     return rows;
   }, [sensorTargets, readingMap, startDate, endDate]);
 
-  const firstSelectedSensor =
-    selectedSensors[0] || (sensorOptions[0]?.label ?? "ความชื้นในดิน");
+  const firstSelectedSensorKey = selectedSensors[0] || "";
+  const firstSelectedSensorLabel = firstSelectedSensorKey
+    ? sensorLabelFromKey(firstSelectedSensorKey)
+    : "ยังไม่ได้เลือกเซนเซอร์";
 
   const chartSeries = useMemo(() => {
+    if (!firstSelectedSensorKey) return [];
+
     const byPlot = new Map();
 
     for (const plot of filteredPlots) {
       const valuesByDate = new Map(dateKeys.map((d) => [d, []]));
 
       filteredReadingRows
-        .filter((r) => r.plotId === plot.id && r.sensorLabel === firstSelectedSensor)
+        .filter((row) => row.plotId === plot.id && row.sensorKey === firstSelectedSensorKey)
         .forEach((row) => {
-          if (!valuesByDate.has(row.dateKey)) valuesByDate.set(row.dateKey, []);
-          valuesByDate.get(row.dateKey).push(row.value);
+          const existing = valuesByDate.get(row.dateKey) || [];
+          existing.push(row.value);
+          valuesByDate.set(row.dateKey, existing);
         });
 
-      const values = dateKeys.map((d) => average(valuesByDate.get(d) || []));
       byPlot.set(plot.id, {
         plotId: plot.id,
-        plotName: plot.plotName || "ไม่ทราบชื่อแปลง",
-        values,
+        plotName: plot.plotName,
+        values: dateKeys.map((d) => average(valuesByDate.get(d) || [])),
       });
     }
 
     return [...byPlot.values()];
-  }, [filteredPlots, filteredReadingRows, firstSelectedSensor, dateKeys]);
+  }, [filteredPlots, filteredReadingRows, firstSelectedSensorKey, dateKeys]);
 
   const chartMinMax = useMemo(() => {
     const vals = chartSeries.flatMap((s) => s.values).filter((n) => Number.isFinite(n));
     if (!vals.length) return { min: 0, max: 100 };
+
     const min = Math.min(...vals);
     const max = Math.max(...vals);
+
     if (min === max) return { min: min - 1, max: max + 1 };
+
     const pad = (max - min) * 0.1;
     return { min: min - pad, max: max + pad };
   }, [chartSeries]);
 
   const summaryRows = useMemo(() => {
-    const labels = [
-      "ความชื้นในดิน",
-      "อุณหภูมิ",
-      "ความชื้นสัมพัทธ์",
-      "N",
-      "P",
-      "K",
-      "ความเข้มแสง",
-      "ปริมาณน้ำฝน",
-      "ความเร็วลม",
-      "การให้น้ำ",
-    ];
-
-    return filteredPlots.map((plot) => {
-      const plotRows = filteredReadingRows.filter((r) => r.plotId === plot.id);
-      const firstNode = (Array.isArray(plot?.nodes) ? plot.nodes[0] : null) || null;
-      const nodeType = firstNode ? inferNodeType(firstNode) : "air";
-
+    return visibleNodes.map((node) => {
+      const nodeRows = filteredReadingRows.filter((r) => r.nodeId === node.nodeId);
       const values = {};
-      for (const label of labels) {
-        values[label] = average(
-          plotRows.filter((r) => r.sensorLabel === label).map((r) => r.value)
-        );
+
+      for (const opt of SENSOR_OPTIONS) {
+        values[opt.key] = average(nodeRows.filter((r) => r.sensorKey === opt.key).map((r) => r.value));
       }
 
       return {
-        plotName: plot?.plotName || "ไม่ทราบชื่อแปลง",
-        nodeType,
+        plotName: node.plotName,
+        nodeName: node.nodeName,
+        nodeType: node.nodeType,
         values,
       };
     });
-  }, [filteredPlots, filteredReadingRows]);
+  }, [visibleNodes, filteredReadingRows]);
 
   const csvRows = useMemo(() => {
     const header = ["plot", "node", "nodeType", "sensor", "value", "timestamp", "status"];
-    const body = filteredReadingRows.map((r) => [
-      r.plotName,
-      r.nodeName,
-      r.nodeType,
-      r.sensorLabel,
-      r.value ?? "",
-      r.timestamp ?? "",
-      r.status ?? "",
+    const body = filteredReadingRows.map((row) => [
+      row.plotName,
+      row.nodeName,
+      row.nodeType,
+      row.sensorLabel,
+      row.value ?? "",
+      row.timestamp ?? "",
+      row.status ?? "",
     ]);
 
     return [header, ...body];
@@ -634,77 +605,58 @@ export default function HistoryPage() {
     csvRef.current = makeCsv(csvRows);
   }, [csvRows]);
 
-  useEffect(() => {
-    window.historyPageApi = {
-      selectQuick: (label) => {
-        const now = new Date();
-        const end = formatDateInput(now);
-        let start = end;
+  const soilSensors = SENSOR_OPTIONS.filter((s) =>
+    ["soil", "water", "n", "p", "k"].includes(s.key)
+  );
 
-        if (label === "วันนี้") {
-          start = end;
-        } else if (label === "7 วันล่าสุด") {
-          start = formatDateInput(
-            new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6)
-          );
-        } else if (label === "30 วันล่าสุด") {
-          start = formatDateInput(
-            new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29)
-          );
-        }
+  const airSensors = SENSOR_OPTIONS.filter((s) =>
+    ["temp", "rh", "wind", "rain"].includes(s.key)
+  );
 
-        setQuickRange(label);
-        setStartDate(start);
-        setEndDate(end);
-      },
+  const toggleSensor = (key) => {
+    setSelectedSensors((prev) => {
+      if (prev.includes(key)) {
+        return prev.filter((k) => k !== key);
+      }
+      return [...prev, key];
+    });
+  };
 
-      setStartDate: (value) => setStartDate(String(value || "")),
-      setEndDate: (value) => setEndDate(String(value || "")),
-      setPlot: (value) => setSelectedPlotId(String(value || "all")),
+  const resetSensors = () => {
+    setSelectedSensors([]);
+  };
 
-      toggleSensor: (label) => {
-        setSelectedSensors((prev) => {
-          if (prev.includes(label)) {
-            const next = prev.filter((x) => x !== label);
-            return next.length ? next : prev;
-          }
-          return [...prev, label];
-        });
-      },
+  const handleQuick = (label) => {
+    const now = new Date();
+    const end = formatDateInput(now);
+    let start = end;
 
-      toggleSensorDropdown: () => setSensorDropdownOpen((prev) => !prev),
-      closeSensorDropdown: () => setSensorDropdownOpen(false),
+    if (label === "วันนี้") {
+      start = end;
+    } else if (label === "7 วันล่าสุด") {
+      start = formatDateInput(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
+    } else if (label === "30 วันล่าสุด") {
+      start = formatDateInput(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29));
+    }
 
-      exportCsv: () => {
-        const blob = new Blob([csvRef.current], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `history-${startDate}-to-${endDate}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-      },
-    };
+    setQuickRange(label);
+    setStartDate(start);
+    setEndDate(end);
+  };
 
-    return () => {
-      delete window.historyPageApi;
-    };
-  }, [startDate, endDate]);
+  const exportCsv = () => {
+    const blob = new Blob([csvRef.current], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `history-${startDate}-to-${endDate}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
 
-  const legendHtml = chartSeries
-    .map(
-      (item, i) => `
-        <div class="legend-item">
-          <div class="legend-dot" style="background:${colorOfIndex(i)}"></div>
-          ${escapeHtml(item.plotName)}
-        </div>
-      `
-    )
-    .join("");
-
-  const gridLabels = (() => {
+  const yLabels = (() => {
     const min = chartMinMax.min;
     const max = chartMinMax.max;
     const step = (max - min) / 4;
@@ -713,452 +665,687 @@ export default function HistoryPage() {
     );
   })();
 
-  const chartGridHtml = gridLabels
-    .map(
-      (label) => `
-      <div class="chart-grid-line"><span class="chart-grid-label">${escapeHtml(label)}</span></div>
-    `
-    )
-    .join("");
-
-  const chartLinesHtml = [
-    `<line x1="0" y1="44" x2="900" y2="44" stroke="rgba(93,184,102,0.12)" stroke-width="1"/>`,
-    `<line x1="0" y1="88" x2="900" y2="88" stroke="rgba(93,184,102,0.12)" stroke-width="1"/>`,
-    `<line x1="0" y1="132" x2="900" y2="132" stroke="rgba(93,184,102,0.12)" stroke-width="1"/>`,
-    `<line x1="0" y1="176" x2="900" y2="176" stroke="rgba(93,184,102,0.12)" stroke-width="1"/>`,
-    ...chartSeries.map((series, i) => {
-      const safeValues = series.values.map((v) =>
-        Number.isFinite(v) ? v : chartMinMax.min
-      );
-      const points = polylinePoints(safeValues, chartMinMax.min, chartMinMax.max, 900, 220);
-      return `<polyline fill="none" stroke="${colorOfIndex(i)}" stroke-width="2.5" stroke-linejoin="round" points="${points}"/>`;
-    }),
-  ].join("");
-
-  const xLabelsHtml = dateKeys
-    .map((d) => `<span class="chart-x-label">${escapeHtml(formatThaiDateLabel(d))}</span>`)
-    .join("");
-
-  const plotOptionsHtml = [
-    `<option value="all" ${selectedPlotId === "all" ? "selected" : ""}>ทุกแปลง</option>`,
-    ...plots.map(
-      (plot) =>
-        `<option value="${escapeHtml(plot.id)}" ${
-          String(selectedPlotId) === String(plot.id) ? "selected" : ""
-        }>${escapeHtml(plot.plotName || "ไม่ทราบชื่อแปลง")}</option>`
-    ),
-  ].join("");
-
-  const quickButtonsHtml = ["วันนี้", "7 วันล่าสุด", "30 วันล่าสุด"]
-    .map(
-      (label) => `
-      <button class="quick-btn ${quickRange === label ? "active" : ""}" onclick="window.historyPageApi.selectQuick('${label}')">
-        ${label}
-      </button>
-    `
-    )
-    .join("");
-
-  const sensorDropdownLabel =
-    selectedSensors.length > 0 ? selectedSensors.join(", ") : "เลือกประเภทเซนเซอร์";
-
-  const sensorCheckboxHtml = sensorOptions
-    .map((item, index) => {
-      const checked = selectedSensors.includes(item.label);
-      const id = `sensor_checkbox_${index}`;
-      const safeLabel = escapeJsString(item.label);
-
-      return `
-        <label class="sensor-dd-check-row ${checked ? "checked" : ""}" for="${id}">
-          <input
-            id="${id}"
-            class="sensor-dd-check-native"
-            type="checkbox"
-            ${checked ? "checked" : ""}
-            onchange="window.historyPageApi.toggleSensor('${safeLabel}')"
-          />
-          <span class="sensor-dd-check-box">${checked ? "✓" : ""}</span>
-          <span class="sensor-dd-check-main">
-            <span class="sensor-dd-check-text">${escapeHtml(item.label)}</span>
-            <span class="sensor-dd-check-unit">${escapeHtml(item.unit)}</span>
-          </span>
-        </label>
-      `;
-    })
-    .join("");
-
-  const summaryBodyHtml = summaryRows
-    .map((row) => {
-      const val = (label) => {
-        const v = row.values[label];
-        return Number.isFinite(v) ? Number(v.toFixed(2)) : "—";
-      };
-
-      return `
-        <tr>
-          <td>${escapeHtml(row.plotName)}</td>
-          <td><span class="node-type-pill ${row.nodeType === "soil" ? "ntp-soil" : "ntp-air"}">${
-        row.nodeType === "soil" ? "Soil Node" : "Air Node"
-      }</span></td>
-          <td>${val("ความชื้นในดิน")}</td>
-          <td>${val("อุณหภูมิ")}</td>
-          <td>${val("ความชื้นสัมพัทธ์")}</td>
-          <td>${val("N")}</td>
-          <td>${val("P")}</td>
-          <td>${val("K")}</td>
-          <td>${val("ความเข้มแสง")}</td>
-          <td>${val("ปริมาณน้ำฝน")}</td>
-          <td>${val("ความเร็วลม")}</td>
-          <td>${val("การให้น้ำ")}</td>
-        </tr>
-      `;
-    })
-    .join("");
-
-  const noteText = `* กราฟนี้เทียบ "แปลง" ด้วย sensor ตัวแรกที่เลือก (${firstSelectedSensor}) • CSV จะ export ทุก sensor ที่เลือก`;
-
   const loadInfo =
-    loading || loadingReadings
-      ? `<div style="font-size:12px;color:#64748b;margin-top:8px">กำลังโหลดข้อมูล...</div>`
+    loadingPlots || loadingReadings
+      ? "กำลังโหลดข้อมูล..."
       : error
-      ? `<div style="font-size:12px;color:#b91c1c;margin-top:8px">${escapeHtml(error)}</div>`
-      : `<div style="font-size:12px;color:#64748b;margin-top:8px">จำนวนข้อมูลย้อนหลังที่ใช้: ${filteredReadingRows.length} รายการ</div>`;
+      ? error
+      : `พบ ${visibleNodes.length} node ในหน้าที่เลือก • ทั้งหมดจาก backend ${allNodeCount} node • ข้อมูลย้อนหลัง ${filteredReadingRows.length} รายการ`;
 
-  const htmlContent = `
-  <div id="p2" class="page">
-    <style>
-      #p2,
-      #p2 .page,
-      #p2 .filter-bar,
-      #p2 .card,
-      #p2 .chart-card,
-      #p2 .chart-header,
-      #p2 .chart-area,
-      #p2 .chart-legend,
-      #p2 .chart-x-labels {
-        overflow: visible !important;
-      }
+  return (
+    <DuwimsStaticPage current="history">
+      <div id="history-page-root">
+        <div className="history-card filter-card">
+          <div className="history-title">🔍 ฟิลเตอร์ข้อมูลย้อนหลัง</div>
+          <div className="history-sub">เลือกช่วงวันที่ / เซนเซอร์ / แปลง เพื่อดูข้อมูลย้อนหลังและกราฟ</div>
 
-      #p2 .filter-bar{
-        position: relative;
-        z-index: 2000;
-      }
-
-      #p2 .chart-card{
-        position: relative;
-        z-index: 1;
-        overflow: visible !important;
-      }
-
-      .sensor-dd-wrap{
-        position: relative;
-        width: 100%;
-        overflow: visible !important;
-        z-index: 99999;
-      }
-
-      .sensor-dd-trigger{
-        width: 100%;
-        min-height: 50px;
-        padding: 12px 14px;
-        border: 1px solid #dfe7dc;
-        border-radius: 14px;
-        background: #fff;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        cursor: pointer;
-        transition: all .18s ease;
-        position: relative;
-        z-index: 100000;
-      }
-
-      .sensor-dd-trigger:hover{
-        border-color:#9ed6a5;
-      }
-
-      .sensor-dd-trigger.open{
-        border-color:#5db866;
-        box-shadow:0 0 0 3px rgba(93,184,102,.10);
-      }
-
-      .sensor-dd-trigger-text{
-        flex:1;
-        min-width:0;
-        color:#22352a;
-        font-size:14px;
-        font-weight:700;
-        text-align:left;
-        white-space:nowrap;
-        overflow:hidden;
-        text-overflow:ellipsis;
-      }
-
-      .sensor-dd-trigger-arrow{
-        flex:0 0 auto;
-        color:#64748b;
-        font-size:14px;
-        transition:transform .18s ease;
-      }
-
-      .sensor-dd-trigger.open .sensor-dd-trigger-arrow{
-        transform:rotate(180deg);
-      }
-
-      .sensor-dd-menu{
-        position:absolute;
-        top:calc(100% + 8px);
-        left:0;
-        right:0;
-        z-index:100001;
-        background:#fff;
-        border:1px solid #dfe7dc;
-        border-radius:16px;
-        box-shadow:0 16px 40px rgba(15,23,42,.18);
-        padding:10px;
-        display:none;
-      }
-
-      .sensor-dd-menu.open{
-        display:block;
-      }
-
-      .sensor-dd-list{
-        display:grid;
-        grid-template-columns:1fr;
-        gap:8px;
-        max-height:260px;
-        overflow:auto;
-      }
-
-      .sensor-dd-check-row{
-        display:flex;
-        align-items:center;
-        gap:12px;
-        min-height:50px;
-        padding:10px 12px;
-        border:1px solid #e3ebe0;
-        border-radius:14px;
-        background:#fff;
-        cursor:pointer;
-        transition:all .18s ease;
-      }
-
-      .sensor-dd-check-row:hover{
-        border-color:#9ed6a5;
-        background:#f8fcf8;
-      }
-
-      .sensor-dd-check-row.checked{
-        border-color:#5db866;
-        background:#eef9ef;
-      }
-
-      .sensor-dd-check-native{
-        display:none;
-      }
-
-      .sensor-dd-check-box{
-        width:22px;
-        height:22px;
-        min-width:22px;
-        border:2px solid #bfd3c2;
-        border-radius:6px;
-        display:flex;
-        align-items:center;
-        justify-content:center;
-        font-size:13px;
-        font-weight:800;
-        color:transparent;
-        background:#fff;
-        transition:all .18s ease;
-      }
-
-      .sensor-dd-check-row.checked .sensor-dd-check-box{
-        background:#5db866;
-        border-color:#5db866;
-        color:#fff;
-      }
-
-      .sensor-dd-check-main{
-        display:flex;
-        align-items:center;
-        justify-content:space-between;
-        gap:10px;
-        width:100%;
-      }
-
-      .sensor-dd-check-text{
-        font-size:14px;
-        font-weight:700;
-        color:#22352a;
-      }
-
-      .sensor-dd-check-unit{
-        font-size:12px;
-        color:#64748b;
-        font-weight:700;
-        white-space:nowrap;
-      }
-
-      .sensor-dd-footer{
-        display:flex;
-        justify-content:flex-end;
-        padding-top:10px;
-      }
-
-      .sensor-dd-close-btn{
-        border:none;
-        border-radius:12px;
-        background:#5db866;
-        color:#fff;
-        padding:10px 16px;
-        font-size:13px;
-        font-weight:800;
-        cursor:pointer;
-      }
-
-      @media (max-width: 768px){
-        .sensor-dd-check-main{
-          align-items:flex-start;
-          flex-direction:column;
-          gap:4px;
-        }
-      }
-    </style>
-
-    <div class="filter-bar">
-      <div class="filter-title">🔍 ฟิลเตอร์ข้อมูลย้อนหลัง</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
-        เลือกช่วงวันที่ / เซนเซอร์ / แปลง เพื่อดูข้อมูลย้อนหลังและกราฟ
-      </div>
-
-      <div style="margin-bottom:12px">
-        <div class="filter-label">ช่วงเวลาเร็ว</div>
-        <div class="filter-quick">
-          ${quickButtonsHtml}
-        </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
-        <div>
-          <div class="filter-label">วันที่เริ่มต้น</div>
-          <input type="date" class="form-input" value="${escapeHtml(
-            startDate
-          )}" onchange="window.historyPageApi.setStartDate(this.value)">
-        </div>
-        <div>
-          <div class="filter-label">วันที่สิ้นสุด</div>
-          <input type="date" class="form-input" value="${escapeHtml(
-            endDate
-          )}" onchange="window.historyPageApi.setEndDate(this.value)">
-        </div>
-        <div>
-          <div class="filter-label">แปลง</div>
-          <select class="form-select" onchange="window.historyPageApi.setPlot(this.value)">
-            ${plotOptionsHtml}
-          </select>
-        </div>
-      </div>
-
-      <div>
-        <div class="filter-label">ประเภทเซนเซอร์</div>
-        <div class="sensor-dd-wrap" id="sensor-type-dropdown-wrap">
-          <div
-            role="button"
-            tabindex="0"
-            class="sensor-dd-trigger ${sensorDropdownOpen ? "open" : ""}"
-            onclick="window.historyPageApi.toggleSensorDropdown()"
-          >
-            <span class="sensor-dd-trigger-text">${escapeHtml(sensorDropdownLabel)}</span>
-            <span class="sensor-dd-trigger-arrow">▼</span>
+          <div style={{ marginBottom: 12 }}>
+            <div className="history-label">ช่วงเวลาเร็ว</div>
+            <div className="quick-wrap">
+              {["วันนี้", "7 วันล่าสุด", "30 วันล่าสุด"].map((label) => (
+                <button
+                  key={label}
+                  type="button"
+                  className={`quick-btn ${quickRange === label ? "active" : ""}`}
+                  onClick={() => handleQuick(label)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div class="sensor-dd-menu ${sensorDropdownOpen ? "open" : ""}">
-            <div class="sensor-dd-list">
-              ${
-                sensorCheckboxHtml ||
-                `<div style="font-size:13px;color:#64748b;padding:8px 4px">ไม่พบประเภทเซนเซอร์</div>`
-              }
+          <div className="history-grid" style={{ marginBottom: 14 }}>
+            <div>
+              <label className="history-label">วันที่เริ่มต้น</label>
+              <input
+                className="history-input"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
             </div>
-            <div class="sensor-dd-footer">
+
+            <div>
+              <label className="history-label">วันที่สิ้นสุด</label>
+              <input
+                className="history-input"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
+            </div>
+
+            <div>
+              <label className="history-label">แปลง</label>
+              <select
+                className="history-select"
+                value={selectedPlotId}
+                onChange={(e) => setSelectedPlotId(e.target.value)}
+              >
+                <option value="all">ทุกแปลง</option>
+                {plots.map((plot) => (
+                  <option key={plot.id} value={plot.id}>
+                    {plot.plotName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="sensor-wrap-block">
+            <label className="history-label">ประเภทเซนเซอร์</label>
+
+            <div className="sensor-dd-wrap" ref={sensorWrapRef}>
               <button
                 type="button"
-                class="sensor-dd-close-btn"
-                onclick="window.historyPageApi.closeSensorDropdown()"
+                className={`sensor-dd-trigger ${sensorDropdownOpen ? "open" : ""}`}
+                onClick={() => setSensorDropdownOpen((prev) => !prev)}
               >
-                เสร็จสิ้น
+                <span className="sensor-dd-trigger-text">{sensorDropdownLabel}</span>
+                <span>{sensorDropdownOpen ? "▲" : "▼"}</span>
               </button>
+
+              {sensorDropdownOpen && (
+                <div className="sensor-dd-menu open" id="sensorDdMenu">
+                  <div className="sensor-dd-header">
+                    <span className="sensor-dd-header-title">เลือกได้หลายตัว</span>
+                    <button
+                      type="button"
+                      className="sensor-dd-clear"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        resetSensors();
+                      }}
+                    >
+                      ล้าง
+                    </button>
+                  </div>
+
+                  <div className="sensor-dd-grid">
+                    {SENSOR_OPTIONS.map((sensor) => {
+                      const checked = selectedSensors.includes(sensor.key);
+                      return (
+                        <label
+                          key={sensor.key}
+                          className={`sensor-dd-item ${checked ? "checked" : ""}`}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            toggleSensor(sensor.key);
+                          }}
+                        >
+                          <span className="sensor-dd-box">{checked ? "✓" : ""}</span>
+                          <span className="sensor-dd-name">{sensor.label}</span>
+                          <span className="sensor-dd-unit">{sensor.unit}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <div className="sensor-dd-footer">
+                    <button
+                      type="button"
+                      className="sensor-dd-done"
+                      onClick={() => setSensorDropdownOpen(false)}
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="mini-info">
+              เลือกแล้ว: {selectedSensorNames.length ? selectedSensorNames.join(", ") : "—"}
             </div>
           </div>
+
+          <div className="status-line">{loadInfo}</div>
         </div>
-      </div>
 
-      ${loadInfo}
-    </div>
+        <div className="history-card chart-card">
+          <div className="chart-head">
+            <div>
+              <div className="history-title" style={{ marginBottom: 4 }}>📈 กราฟเปรียบเทียบแปลง</div>
+              <div className="history-sub" style={{ marginBottom: 0 }}>
+                sensor: {firstSelectedSensorLabel} • แปลง:{" "}
+                {filteredPlots.map((p) => p.plotName || "ไม่ทราบชื่อแปลง").join(", ") || "ไม่มีข้อมูล"}
+              </div>
+            </div>
 
-    <div class="card chart-card" style="position:relative; z-index:1; overflow:visible;">
-      <div class="chart-header">
-        <div>
-          <div class="card-title">📈 กราฟเปรียบเทียบแปลง</div>
-          <div class="chart-meta">
-            sensor: ${escapeHtml(firstSelectedSensor)} • แปลง: ${escapeHtml(
-    filteredPlots.map((p) => p.plotName || "ไม่ทราบชื่อแปลง").join(", ") || "ไม่มีข้อมูล"
-  )}
+            <button type="button" className="export-btn" onClick={exportCsv}>
+              ⬇ EXPORT CSV
+            </button>
+          </div>
+
+          <div className="chart-legend">
+            {chartSeries.map((item, i) => (
+              <div key={item.plotId} className="legend-item">
+                <div className="legend-dot" style={{ background: colorOfIndex(i) }} />
+                <span>{item.plotName}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="chart-wrap">
+            <div style={{ position: "relative" }}>
+              <svg viewBox="0 0 900 220" preserveAspectRatio="none" style={{ width: "100%", height: 220 }}>
+                <line x1="0" y1="44" x2="900" y2="44" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
+                <line x1="0" y1="88" x2="900" y2="88" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
+                <line x1="0" y1="132" x2="900" y2="132" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
+                <line x1="0" y1="176" x2="900" y2="176" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
+
+                {chartSeries.map((series, i) => {
+                  const safeValues = series.values.map((v) =>
+                    Number.isFinite(v) ? v : chartMinMax.min
+                  );
+                  const points = polylinePoints(safeValues, chartMinMax.min, chartMinMax.max, 900, 220);
+
+                  return (
+                    <polyline
+                      key={series.plotId}
+                      fill="none"
+                      stroke={colorOfIndex(i)}
+                      strokeWidth="2.5"
+                      strokeLinejoin="round"
+                      points={points}
+                    />
+                  );
+                })}
+              </svg>
+
+              <div className="chart-y">
+                {yLabels.map((label, index) => (
+                  <div key={index}>{label}</div>
+                ))}
+              </div>
+            </div>
+
+            <div
+              className="chart-x"
+              style={{
+                gridTemplateColumns: `repeat(${Math.max(dateKeys.length, 1)}, minmax(0,1fr))`,
+              }}
+            >
+              {dateKeys.map((d) => (
+                <div key={d}>{formatThaiDateLabel(d)}</div>
+              ))}
+            </div>
+          </div>
+
+          <div className="chart-note">
+            * หน้า History เชื่อมข้อมูลจาก /api/plots และ /api/sensor-readings • กราฟนี้เทียบแปลงด้วย sensor ตัวแรกที่เลือก
           </div>
         </div>
-        <button class="export-btn" onclick="window.historyPageApi.exportCsv()">⬇ EXPORT CSV</button>
-      </div>
 
-      <div class="chart-legend">
-        ${legendHtml}
-      </div>
+        <div className="history-card">
+          <div className="history-title" style={{ marginBottom: 12 }}>
+            📋 สรุปการวัดข้อมูล (เฉลี่ยช่วงที่เลือก)
+          </div>
 
-      <div class="chart-area">
-        <div class="chart-grid">
-          ${chartGridHtml}
+          <div className="summary-wrap">
+            <table className="summary-table">
+              <thead>
+                <tr>
+                  <th>แปลง</th>
+                  <th>NODE</th>
+                  <th>ประเภท</th>
+                  <th>อุณหภูมิ (°C)</th>
+                  <th>ความชื้นสัมพัทธ์ (%)</th>
+                  <th>วัดความเร็วลม (m/s)</th>
+                  <th>ปริมาณน้ำฝน (mm)</th>
+                  <th>ความชื้นในดิน (%)</th>
+                  <th>ความพร้อมใช้น้ำ (%)</th>
+                  <th>N</th>
+                  <th>P</th>
+                  <th>K</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summaryRows.length ? (
+                  summaryRows.map((row, index) => {
+                    const val = (k) =>
+                      Number.isFinite(row.values[k]) ? Number(row.values[k].toFixed(2)) : "—";
+
+                    return (
+                      <tr key={`${row.nodeName}-${index}`}>
+                        <td>{row.plotName}</td>
+                        <td>{row.nodeName}</td>
+                        <td>
+                          <span className="node-pill">
+                            {row.nodeType === "soil" ? "Soil Node" : "Air Node"}
+                          </span>
+                        </td>
+                        <td>{val("temp")}</td>
+                        <td>{val("rh")}</td>
+                        <td>{val("wind")}</td>
+                        <td>{val("rain")}</td>
+                        <td>{val("soil")}</td>
+                        <td>{val("water")}</td>
+                        <td>{val("n")}</td>
+                        <td>{val("p")}</td>
+                        <td>{val("k")}</td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td colSpan="12" style={{ textAlign: "center" }}>
+                      ไม่มีข้อมูล
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <svg class="chart-svg" viewBox="0 0 900 220" preserveAspectRatio="none">
-          ${chartLinesHtml}
-        </svg>
+
+        <style jsx>{`
+          #history-page-root,
+          #history-page-root * {
+            box-sizing: border-box;
+          }
+
+          #history-page-root {
+            position: relative;
+            overflow: visible !important;
+            padding: 16px;
+            z-index: 2;
+          }
+
+          .history-card {
+            background: #fff;
+            border: 1px solid #dfe7dc;
+            border-radius: 18px;
+            padding: 18px;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+            overflow: visible !important;
+            position: relative;
+          }
+
+          .history-card + .history-card {
+            margin-top: 18px;
+          }
+
+          .history-card.filter-card {
+            z-index: 100;
+          }
+
+          .history-card.chart-card {
+            z-index: 1;
+          }
+
+          .history-title {
+            font-size: 18px;
+            font-weight: 900;
+            color: #1f3b22;
+            margin-bottom: 6px;
+          }
+
+          .history-sub {
+            font-size: 12px;
+            color: #64748b;
+            margin-bottom: 14px;
+          }
+
+          .history-label {
+            display: block;
+            font-size: 13px;
+            font-weight: 800;
+            color: #334155;
+            margin-bottom: 6px;
+          }
+
+          .history-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 12px;
+          }
+
+          .history-input,
+          .history-select {
+            width: 100%;
+            min-height: 48px;
+            border: 1px solid #dfe7dc;
+            border-radius: 14px;
+            padding: 12px 14px;
+            font-size: 14px;
+            outline: none;
+            background: #fff;
+          }
+
+          .quick-wrap {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+          }
+
+          .quick-btn {
+            border: none;
+            border-radius: 999px;
+            padding: 10px 14px;
+            font-size: 13px;
+            font-weight: 800;
+            cursor: pointer;
+            background: #edf7ee;
+            color: #245b2b;
+          }
+
+          .quick-btn.active {
+            background: #5db866;
+            color: #fff;
+          }
+
+          .sensor-wrap-block {
+            font-size: 13px;
+            min-width: 0;
+            position: relative;
+            z-index: 300;
+          }
+
+          .sensor-dd-wrap {
+            position: relative;
+            z-index: 5000;
+            overflow: visible !important;
+          }
+
+          .sensor-dd-trigger {
+            width: 100%;
+            min-height: 50px;
+            padding: 12px 14px;
+            border: 1px solid #dfe7dc;
+            border-radius: 14px;
+            background: #fff;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 14px;
+            font-weight: 800;
+            color: #22352a;
+            position: relative;
+            z-index: 5001;
+          }
+
+          .sensor-dd-trigger.open {
+            border-color: #5db866;
+            box-shadow: 0 0 0 3px rgba(93, 184, 102, 0.1);
+          }
+
+          .sensor-dd-trigger-text {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-align: left;
+          }
+
+          .sensor-dd-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            right: 0;
+            z-index: 9999;
+            background: #fff;
+            border: 1px solid #dfe7dc;
+            border-radius: 16px;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+            padding: 10px;
+          }
+
+          .sensor-dd-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 8px;
+          }
+
+          .sensor-dd-header-title {
+            font-size: 12px;
+            font-weight: 900;
+            color: #0f172a;
+          }
+
+          .sensor-dd-clear {
+            border: none;
+            background: transparent;
+            color: #b91c1c;
+            font-weight: 900;
+            cursor: pointer;
+            font-size: 12px;
+          }
+
+          .sensor-dd-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+
+          .sensor-dd-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            background: #fff;
+            cursor: pointer;
+            min-width: 0;
+            user-select: none;
+          }
+
+          .sensor-dd-item.checked {
+            background: #eef9ef;
+            border-color: #9ed6a5;
+          }
+
+          .sensor-dd-box {
+            width: 18px;
+            height: 18px;
+            border-radius: 6px;
+            border: 1.5px solid #cbd5e1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 900;
+            color: #fff;
+            background: #fff;
+            flex: 0 0 18px;
+          }
+
+          .sensor-dd-item.checked .sensor-dd-box {
+            background: #22c55e;
+            border-color: #22c55e;
+          }
+
+          .sensor-dd-name {
+            font-size: 13px;
+            font-weight: 800;
+            color: #0f172a;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .sensor-dd-unit {
+            margin-left: auto;
+            font-size: 11px;
+            color: #64748b;
+            white-space: nowrap;
+          }
+
+          .sensor-dd-footer {
+            margin-top: 10px;
+            display: flex;
+            justify-content: flex-end;
+          }
+
+          .sensor-dd-done {
+            border: none;
+            border-radius: 999px;
+            padding: 8px 12px;
+            background: #0f172a;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 900;
+            cursor: pointer;
+          }
+
+          .mini-info {
+            margin-top: 8px;
+            font-size: 12px;
+            color: #64748b;
+          }
+
+          .status-line {
+            margin-top: 12px;
+            font-size: 12px;
+            color: #334155;
+            font-weight: 700;
+          }
+
+          .chart-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+          }
+
+          .chart-legend {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            font-size: 12px;
+            color: #334155;
+            font-weight: 700;
+          }
+
+          .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+
+          .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+          }
+
+          .chart-wrap {
+            position: relative;
+            border: 1px solid #e6efe4;
+            border-radius: 14px;
+            padding: 10px 10px 0;
+            background: #fcfffc;
+            overflow: hidden;
+          }
+
+          .chart-y {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 50px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            pointer-events: none;
+            font-size: 11px;
+            color: #475569;
+            font-weight: 700;
+          }
+
+          .chart-x {
+            display: grid;
+            gap: 0;
+            margin-top: 8px;
+            padding-bottom: 8px;
+            font-size: 11px;
+            color: #475569;
+            font-weight: 700;
+            text-align: center;
+          }
+
+          .chart-note {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #64748b;
+          }
+
+          .export-btn {
+            border: none;
+            border-radius: 12px;
+            padding: 10px 14px;
+            background: #244f15;
+            color: #fff;
+            font-weight: 900;
+            cursor: pointer;
+            white-space: nowrap;
+          }
+
+          .summary-wrap {
+            overflow-x: auto;
+          }
+
+          .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 1100px;
+          }
+
+          .summary-table th {
+            background: #244f15;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 900;
+            padding: 10px 8px;
+            text-align: center;
+            white-space: nowrap;
+          }
+
+          .summary-table td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 10px 8px;
+            font-size: 13px;
+            text-align: center;
+            white-space: nowrap;
+          }
+
+          .node-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 11px;
+            font-weight: 900;
+            color: #fff;
+            background: #5db866;
+          }
+
+          @media (max-width: 900px) {
+            .history-grid {
+              grid-template-columns: 1fr;
+            }
+
+            .sensor-dd-grid {
+              grid-template-columns: 1fr;
+            }
+
+            .chart-head {
+              flex-direction: column;
+            }
+          }
+        `}</style>
       </div>
-
-      <div class="chart-x-labels">
-        ${xLabelsHtml}
-      </div>
-
-      <div class="chart-note">${escapeHtml(noteText)}</div>
-    </div>
-
-    <div class="card">
-      <div class="card-title" style="margin-bottom:12px">📋 สรุปการวัดข้อมูล (เฉลี่ยช่วงที่เลือก)</div>
-      <div style="overflow-x:auto">
-        <table class="summary-table">
-          <thead>
-            <tr>
-              <th>แปลง</th>
-              <th>Node</th>
-              <th>ความชื้นในดิน (%)</th>
-              <th>อุณหภูมิ (°C)</th>
-              <th>ความชื้นสัมพัทธ์ (%)</th>
-              <th>N</th>
-              <th>P</th>
-              <th>K</th>
-              <th>ความเข้มแสง (lux)</th>
-              <th>ปริมาณน้ำฝน (mm)</th>
-              <th>ความเร็วลม (m/s)</th>
-              <th>การให้น้ำ (L)</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${summaryBodyHtml || `<tr><td colspan="12" style="text-align:center">ไม่มีข้อมูล</td></tr>`}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-  `;
-
-  return <DuwimsStaticPage current="history" htmlContent={htmlContent} />;
+    </DuwimsStaticPage>
+  );
 }

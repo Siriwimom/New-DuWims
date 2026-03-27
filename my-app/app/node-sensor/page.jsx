@@ -130,6 +130,10 @@ function nodeTypeLabel(type) {
   return type === "soil" ? "Soil Node" : "Air Node";
 }
 
+function formatStatus(status) {
+  return String(status).toUpperCase() === "ACTIVE" ? "ON" : "OFF";
+}
+
 function sensorPresetsByType(type) {
   if (type === "soil") {
     return [
@@ -544,7 +548,7 @@ function NodeMap({
                 </div>
                 <div>ชื่อ: {node.nodeName || "-"}</div>
                 <div>ประเภท: {nodeTypeLabel(inferNodeTypeFromUid(node.uid))}</div>
-                <div>สถานะ: {node.status || "-"}</div>
+                <div>สถานะ: {formatStatus(node.status || "-")}</div>
               </div>
             </RL.Popup>
           </RL.Marker>
@@ -711,6 +715,19 @@ export default function NodeSensorPage() {
   const [formSensors, setFormSensors] = useState(sensorPresetsByType("air"));
   const [canEditSensorLimit, setCanEditSensorLimit] = useState(false);
 
+  const [uidTouched, setUidTouched] = useState(false);
+  const [nodeNameTouched, setNodeNameTouched] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
+  const [confirmState, setConfirmState] = useState({
+    open: false,
+    type: "delete",
+    title: "",
+    sub: "",
+    icon: "🗑",
+    onConfirm: null,
+  });
+
   useEffect(() => {
     loadAll();
   }, []);
@@ -756,6 +773,9 @@ export default function NodeSensorPage() {
     [formUid]
   );
 
+  const uidInvalid = (submitAttempted || uidTouched) && !formUid.trim();
+  const nodeNameInvalid = (submitAttempted || nodeNameTouched) && !formNodeName.trim();
+
   useEffect(() => {
     if (view === "create") {
       setFormSensors(sensorPresetsByType(detectedFormNodeType));
@@ -789,6 +809,12 @@ export default function NodeSensorPage() {
     }
   }
 
+  function resetValidation() {
+    setUidTouched(false);
+    setNodeNameTouched(false);
+    setSubmitAttempted(false);
+  }
+
   function resetForm(type = "air") {
     setFormPlotId("");
     setFormUid("");
@@ -797,6 +823,7 @@ export default function NodeSensorPage() {
     setFormMarker(null);
     setFormSensors(sensorPresetsByType(type));
     setCanEditSensorLimit(false);
+    resetValidation();
   }
 
   function openCreate() {
@@ -824,6 +851,7 @@ export default function NodeSensorPage() {
         : sensorPresetsByType(inferNodeTypeFromUid(node.uid))
     );
     setCanEditSensorLimit(false);
+    resetValidation();
     setView("edit");
     setError("");
     setSuccess("");
@@ -838,6 +866,8 @@ export default function NodeSensorPage() {
   }
 
   function validateForm() {
+    setSubmitAttempted(true);
+
     if (!formPlotId) {
       setError("กรุณาเลือกแปลง");
       return false;
@@ -890,68 +920,122 @@ export default function NodeSensorPage() {
     );
   }
 
-  async function handleSave() {
-    if (!validateForm()) return;
-
-    setBusy(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      const payload = {
-        uid: formUid.trim(),
-        nodeName: formNodeName.trim(),
-        status: formStatus,
-        lat: formMarker[0],
-        lng: formMarker[1],
-        sensors: buildSensorPayload(),
-      };
-
-      if (view === "create") {
-        await apiFetch(`/api/plots/${formPlotId}/nodes`, {
-          method: "POST",
-          body: payload,
-        });
-        setSuccess("บันทึก Node สำเร็จ");
-      } else if (view === "edit") {
-        await apiFetch(`/api/plots/${editPlotId}/nodes/${editNodeId}`, {
-          method: "PATCH",
-          body: payload,
-        });
-        setSuccess("แก้ไข Node สำเร็จ");
-      }
-
-      await loadAll();
-      cancelForm();
-    } catch (e) {
-      setError(e?.message || "บันทึก Node ไม่สำเร็จ");
-    } finally {
-      setBusy(false);
-    }
+  function openConfirm({ type = "delete", title, sub, icon, onConfirm }) {
+    setConfirmState({
+      open: true,
+      type,
+      title,
+      sub,
+      icon,
+      onConfirm,
+    });
   }
 
-  async function handleDelete(node) {
-    const ok = window.confirm("ต้องการลบ Node นี้ใช่หรือไม่?");
-    if (!ok) return;
+  function closeConfirm() {
+    if (busy) return;
+    setConfirmState({
+      open: false,
+      type: "delete",
+      title: "",
+      sub: "",
+      icon: "🗑",
+      onConfirm: null,
+    });
+  }
 
-    setBusy(true);
-    setError("");
-    setSuccess("");
-
-    try {
-      await apiFetch(`/api/plots/${node.plotId}/nodes/${node._id}`, {
-        method: "DELETE",
-      });
-      setSuccess("ลบ Node สำเร็จ");
-      if (String(openNodeId) === String(node._id)) {
-        setOpenNodeId("");
-      }
-      await loadAll();
-    } catch (e) {
-      setError(e?.message || "ลบ Node ไม่สำเร็จ");
-    } finally {
-      setBusy(false);
+  async function runConfirm() {
+    if (typeof confirmState.onConfirm === "function") {
+      await confirmState.onConfirm();
     }
+    setConfirmState({
+      open: false,
+      type: "delete",
+      title: "",
+      sub: "",
+      icon: "🗑",
+      onConfirm: null,
+    });
+  }
+
+  function handleSave() {
+    if (!validateForm()) return;
+
+    openConfirm({
+      type: "save",
+      icon: "💾",
+      title:
+        view === "create" ? "ยืนยันการบันทึกข้อมูล" : "ยืนยันการบันทึกการแก้ไข",
+      sub:
+        view === "create"
+          ? "ต้องการบันทึก Node นี้เข้าสู่ระบบใช่หรือไม่?"
+          : "ต้องการบันทึกการแก้ไข Node นี้ใช่หรือไม่?",
+      onConfirm: async () => {
+        setBusy(true);
+        setError("");
+        setSuccess("");
+
+        try {
+          const payload = {
+            uid: formUid.trim(),
+            nodeName: formNodeName.trim(),
+            status: formStatus,
+            lat: formMarker[0],
+            lng: formMarker[1],
+            sensors: buildSensorPayload(),
+          };
+
+          if (view === "create") {
+            await apiFetch(`/api/plots/${formPlotId}/nodes`, {
+              method: "POST",
+              body: payload,
+            });
+            setSuccess("บันทึก Node สำเร็จ");
+          } else if (view === "edit") {
+            await apiFetch(`/api/plots/${editPlotId}/nodes/${editNodeId}`, {
+              method: "PATCH",
+              body: payload,
+            });
+            setSuccess("แก้ไข Node สำเร็จ");
+          }
+
+          await loadAll();
+          cancelForm();
+        } catch (e) {
+          setError(e?.message || "บันทึก Node ไม่สำเร็จ");
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  }
+
+  function handleDelete(node) {
+    openConfirm({
+      type: "delete",
+      icon: "🗑",
+      title: "ยืนยันการลบข้อมูล",
+      sub: "ต้องการลบข้อมูล Node นี้ออกจากระบบ?\nการดำเนินการนี้ไม่สามารถกู้คืนได้",
+      onConfirm: async () => {
+        setBusy(true);
+        setError("");
+        setSuccess("");
+
+        try {
+          await apiFetch(`/api/plots/${node.plotId}/nodes/${node._id}`, {
+            method: "DELETE",
+          });
+          setSuccess("ลบ Node สำเร็จ");
+          if (String(openNodeId) === String(node._id)) {
+            setOpenNodeId("");
+          }
+          await loadAll();
+        } catch (e) {
+          setError(e?.message || "ลบ Node ไม่สำเร็จ");
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   }
 
   const viewPolygons = filteredPlotsForMap.map((plot) => ({
@@ -1040,36 +1124,49 @@ export default function NodeSensorPage() {
                     onClick={() => setOpenNodeId(isOpen ? "" : node._id)}
                   >
                     <div className="node-header-left">
-                      <div>
-                        <div className="node-uid">{node.uid || "-"}</div>
-                        <div className="node-name">Node : {node.nodeName || "-"}</div>
+                      <div className="node-summary-line">
+                        <span className="node-summary-item">
+                          <span className="node-summary-label">uid :</span>
+                          <span className="node-summary-value">{node.uid || "-"}</span>
+                        </span>
+
+                        <span className="node-summary-sep">|</span>
+
+                        <span className="node-summary-item">
+                          <span className="node-summary-label">แปลง :</span>
+                          <span className="node-summary-value">{node.plotName || "-"}</span>
+                        </span>
+
+                        <span className="node-summary-sep">|</span>
+
+                        <span className="node-summary-item">
+                          <span className="node-summary-label">node :</span>
+                          <span className="node-summary-value">{node.nodeName || "-"}</span>
+                        </span>
+
+                        <span className="node-summary-sep">|</span>
+
+                        <span
+                          className={`node-type-badge node-type-badge-inline ${
+                            node.nodeType === "soil" ? "type-soil" : "type-air"
+                          }`}
+                        >
+                          {nodeTypeLabel(node.nodeType)}
+                        </span>
+
+                        <span className="node-summary-sep">|</span>
+
+                        <span
+                          className={`node-status-pill-inline ${
+                            formatStatus(node.status) === "ON" ? "status-on" : "status-off"
+                          }`}
+                        >
+                          Status : {formatStatus(node.status || "-")}
+                        </span>
                       </div>
-                      <span
-                        className="node-type-badge"
-                        style={{
-                          background:
-                            node.nodeType === "soil"
-                              ? "rgba(109,76,65,.30)"
-                              : "rgba(25,118,210,.28)",
-                        }}
-                      >
-                        {nodeTypeLabel(node.nodeType)}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 10,
-                          color: "#a5d6a7",
-                          background: "rgba(76,175,80,.18)",
-                          padding: "2px 9px",
-                          borderRadius: 20,
-                          fontWeight: 600,
-                        }}
-                      >
-                        Status : {node.status || "-"}
-                      </span>
                     </div>
+
                     <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                      <span className="node-status-on">{node.status || "-"}</span>
                       <span className={`accordion-arrow ${isOpen ? "open" : ""}`}>▾</span>
                     </div>
                   </button>
@@ -1194,23 +1291,33 @@ export default function NodeSensorPage() {
 
               <div className="form-grid-2">
                 <div className="filter-field" style={{ marginBottom: 0 }}>
-                  <div className="filter-field-label">UID</div>
+                  <div className={`filter-field-label ${uidInvalid ? "label-error" : ""}`}>
+                    UID <span className="required-star">*</span>
+                  </div>
                   <input
-                    className="form-input"
+                    className={`form-input ${uidInvalid ? "input-error" : ""}`}
                     placeholder="เช่น Air-0000001 หรือ Soil-0000002"
                     value={formUid}
                     onChange={(e) => setFormUid(e.target.value)}
+                    onBlur={() => setUidTouched(true)}
                   />
+                  {uidInvalid ? <div className="field-error-text">กรุณากรอก UID</div> : null}
                 </div>
 
                 <div className="filter-field" style={{ marginBottom: 0 }}>
-                  <div className="filter-field-label">ชื่อ Node</div>
+                  <div className={`filter-field-label ${nodeNameInvalid ? "label-error" : ""}`}>
+                    ชื่อ Node <span className="required-star">*</span>
+                  </div>
                   <input
-                    className="form-input"
+                    className={`form-input ${nodeNameInvalid ? "input-error" : ""}`}
                     placeholder="เช่น กลางไร่"
                     value={formNodeName}
                     onChange={(e) => setFormNodeName(e.target.value)}
+                    onBlur={() => setNodeNameTouched(true)}
                   />
+                  {nodeNameInvalid ? (
+                    <div className="field-error-text">กรุณากรอกชื่อ Node</div>
+                  ) : null}
                 </div>
               </div>
 
@@ -1428,21 +1535,31 @@ export default function NodeSensorPage() {
 
               <div className="form-grid-2">
                 <div className="filter-field" style={{ marginBottom: 0 }}>
-                  <div className="filter-field-label">UID</div>
+                  <div className={`filter-field-label ${uidInvalid ? "label-error" : ""}`}>
+                    UID <span className="required-star">*</span>
+                  </div>
                   <input
-                    className="form-input"
+                    className={`form-input ${uidInvalid ? "input-error" : ""}`}
                     value={formUid}
                     onChange={(e) => setFormUid(e.target.value)}
+                    onBlur={() => setUidTouched(true)}
                   />
+                  {uidInvalid ? <div className="field-error-text">กรุณากรอก UID</div> : null}
                 </div>
 
                 <div className="filter-field" style={{ marginBottom: 0 }}>
-                  <div className="filter-field-label">ชื่อ Node</div>
+                  <div className={`filter-field-label ${nodeNameInvalid ? "label-error" : ""}`}>
+                    ชื่อ Node <span className="required-star">*</span>
+                  </div>
                   <input
-                    className="form-input"
+                    className={`form-input ${nodeNameInvalid ? "input-error" : ""}`}
                     value={formNodeName}
                     onChange={(e) => setFormNodeName(e.target.value)}
+                    onBlur={() => setNodeNameTouched(true)}
                   />
+                  {nodeNameInvalid ? (
+                    <div className="field-error-text">กรุณากรอกชื่อ Node</div>
+                  ) : null}
                 </div>
               </div>
 
@@ -1524,6 +1641,52 @@ export default function NodeSensorPage() {
           </>
         )}
 
+        {confirmState.open ? (
+          <div className="confirm-overlay" onClick={closeConfirm}>
+            <div
+              className="confirm-box"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="confirm-icon">{confirmState.icon}</div>
+
+              <div className="confirm-title">{confirmState.title}</div>
+
+              <div className="confirm-sub">
+                {String(confirmState.sub || "")
+                  .split("\n")
+                  .map((line, index, arr) => (
+                    <span key={index}>
+                      {line}
+                      {index < arr.length - 1 ? <br /> : null}
+                    </span>
+                  ))}
+              </div>
+
+              <div className="confirm-actions">
+                <button
+                  type="button"
+                  className="btn-cancel"
+                  onClick={closeConfirm}
+                  disabled={busy}
+                >
+                  ยกเลิก
+                </button>
+
+                <button
+                  type="button"
+                  className={`btn-confirm ${
+                    confirmState.type === "save" ? "confirm-save" : "confirm-delete"
+                  }`}
+                  onClick={runConfirm}
+                  disabled={busy}
+                >
+                  {busy ? "กำลังดำเนินการ..." : "ยืนยัน"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {locateStatus ? <div className="locate-global-status">{locateStatus}</div> : null}
 
         <style jsx>{`
@@ -1585,6 +1748,37 @@ export default function NodeSensorPage() {
             padding: 0 12px;
             outline: none;
             font-size: 12px;
+            transition: 0.18s ease;
+          }
+
+          .form-input:focus,
+          .form-select:focus,
+          .limit-input:focus {
+            border-color: #7aa46f;
+            box-shadow: 0 0 0 3px rgba(122, 164, 111, 0.12);
+          }
+
+          .input-error {
+            border-color: #d84343 !important;
+            background: #fff7f7 !important;
+            color: #b71c1c !important;
+            box-shadow: 0 0 0 3px rgba(216, 67, 67, 0.1);
+          }
+
+          .label-error {
+            color: #d84343 !important;
+          }
+
+          .required-star {
+            color: #d84343;
+            margin-left: 2px;
+          }
+
+          .field-error-text {
+            margin-top: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #d84343;
           }
 
           .form-grid-2 {
@@ -1735,18 +1929,44 @@ export default function NodeSensorPage() {
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
+            min-width: 0;
+            flex: 1;
           }
 
-          .node-uid {
+          .node-summary-line {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            row-gap: 6px;
+            min-width: 0;
+          }
+
+          .node-summary-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            min-width: 0;
+          }
+
+          .node-summary-label {
+            font-size: 11px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.82);
+            white-space: nowrap;
+          }
+
+          .node-summary-value {
             font-size: 12px;
             font-weight: 800;
-            color: #fff;
+            color: #ffffff;
+            white-space: nowrap;
           }
 
-          .node-name {
+          .node-summary-sep {
             font-size: 12px;
             font-weight: 700;
-            color: #f0f6ec;
+            color: rgba(255, 255, 255, 0.45);
           }
 
           .node-type-badge {
@@ -1759,13 +1979,39 @@ export default function NodeSensorPage() {
             color: #fff;
           }
 
-          .node-status-on {
-            background: #4caf50;
-            color: #fff;
-            padding: 3px 10px;
+          .node-type-badge-inline {
+            padding: 4px 10px;
+            font-size: 10px;
+            white-space: nowrap;
+          }
+
+          .node-type-badge-inline.type-air {
+            background: rgba(25, 118, 210, 0.28);
+          }
+
+          .node-type-badge-inline.type-soil {
+            background: rgba(109, 76, 65, 0.35);
+          }
+
+          .node-status-pill-inline {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 24px;
+            padding: 4px 10px;
             border-radius: 999px;
             font-size: 10px;
             font-weight: 800;
+            white-space: nowrap;
+            color: #fff;
+          }
+
+          .node-status-pill-inline.status-on {
+            background: rgba(76, 175, 80, 0.92);
+          }
+
+          .node-status-pill-inline.status-off {
+            background: rgba(211, 47, 47, 0.92);
           }
 
           .accordion-arrow {
@@ -1892,6 +2138,112 @@ export default function NodeSensorPage() {
             font-size: 12px;
           }
 
+          .confirm-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: rgba(18, 28, 14, 0.42);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            backdrop-filter: blur(3px);
+          }
+
+          .confirm-box {
+            width: min(100%, 420px);
+            background: #ffffff;
+            border-radius: 22px;
+            padding: 22px 20px 18px;
+            box-shadow: 0 20px 60px rgba(19, 35, 14, 0.22);
+            border: 1px solid #e4eee0;
+            text-align: center;
+            animation: confirmPop 0.18s ease-out;
+          }
+
+          .confirm-icon {
+            width: 62px;
+            height: 62px;
+            margin: 0 auto 12px;
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            background: linear-gradient(180deg, #fff4f4 0%, #ffe6e6 100%);
+            border: 1px solid #ffd3d3;
+          }
+
+          .confirm-title {
+            font-size: 20px;
+            font-weight: 800;
+            color: #1f2f1a;
+            margin-bottom: 8px;
+            line-height: 1.25;
+          }
+
+          .confirm-sub {
+            font-size: 14px;
+            line-height: 1.65;
+            color: #60705a;
+            margin-bottom: 18px;
+          }
+
+          .confirm-actions {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+          }
+
+          .confirm-actions .btn-cancel {
+            min-width: 120px;
+            height: 42px;
+            border-radius: 12px;
+            border: 1px solid #d8e4d2;
+            background: #ffffff;
+            color: #496141;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+          }
+
+          .confirm-actions .btn-confirm {
+            min-width: 120px;
+            height: 42px;
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 800;
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+          }
+
+          .confirm-actions .btn-confirm.confirm-delete {
+            background: linear-gradient(180deg, #e53935 0%, #c62828 100%);
+          }
+
+          .confirm-actions .btn-confirm.confirm-save {
+            background: linear-gradient(180deg, #2e7d32 0%, #1f6b24 100%);
+          }
+
+          .confirm-actions button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+          }
+
+          @keyframes confirmPop {
+            from {
+              transform: translateY(8px) scale(0.98);
+              opacity: 0;
+            }
+            to {
+              transform: translateY(0) scale(1);
+              opacity: 1;
+            }
+          }
+
           :global(.leaflet-container) {
             width: 100% !important;
             height: 100% !important;
@@ -1902,6 +2254,14 @@ export default function NodeSensorPage() {
           @media (max-width: 900px) {
             .form-grid-2 {
               grid-template-columns: 1fr;
+            }
+
+            .node-summary-line {
+              gap: 6px;
+            }
+
+            .node-summary-sep {
+              display: none;
             }
           }
         `}</style>
