@@ -714,6 +714,9 @@ export default function NodeSensorPage() {
   const [formMarker, setFormMarker] = useState(null);
   const [formSensors, setFormSensors] = useState(sensorPresetsByType("air"));
   const [canEditSensorLimit, setCanEditSensorLimit] = useState(false);
+  const [matchedNode, setMatchedNode] = useState(null);
+  const [uidLookupBusy, setUidLookupBusy] = useState(false);
+  const [uidLookupMessage, setUidLookupMessage] = useState("");
 
   const [uidTouched, setUidTouched] = useState(false);
   const [nodeNameTouched, setNodeNameTouched] = useState(false);
@@ -769,19 +772,47 @@ export default function NodeSensorPage() {
   );
 
   const detectedFormNodeType = useMemo(
-    () => inferNodeTypeFromUid(formUid),
-    [formUid]
+    () => (matchedNode ? inferNodeTypeFromUid(matchedNode.uid) : ""),
+    [matchedNode]
   );
 
+  const isUidMatched = !!matchedNode;
+  const shouldShowNodeDetails = !!formUid.trim() && isUidMatched;
   const uidInvalid = (submitAttempted || uidTouched) && !formUid.trim();
   const nodeNameInvalid = (submitAttempted || nodeNameTouched) && !formNodeName.trim();
 
   useEffect(() => {
-    if (view === "create") {
-      setFormSensors(sensorPresetsByType(detectedFormNodeType));
-      setCanEditSensorLimit(false);
+    const cleanUid = String(formUid || "").trim().toLowerCase();
+
+    if (!cleanUid) {
+      setMatchedNode(null);
+      setUidLookupBusy(false);
+      setUidLookupMessage("");
+      setFormSensors([]);
+      return;
     }
-  }, [detectedFormNodeType, view]);
+
+    setUidLookupBusy(true);
+
+    const found = allNodes.find(
+      (node) => String(node.uid || "").trim().toLowerCase() === cleanUid
+    );
+
+    if (!found) {
+      setMatchedNode(null);
+      setFormSensors([]);
+      setUidLookupMessage("ไม่พบ UID นี้ในฐานข้อมูล");
+      setUidLookupBusy(false);
+      return;
+    }
+
+    setMatchedNode(found);
+    setFormSensors(
+      Array.isArray(found.sensors) ? found.sensors.map((s) => ({ ...s })) : []
+    );
+    setUidLookupMessage("พบ UID ในฐานข้อมูล");
+    setUidLookupBusy(false);
+  }, [formUid, allNodes]);
 
   async function loadAll() {
     setLoading(true);
@@ -815,19 +846,22 @@ export default function NodeSensorPage() {
     setSubmitAttempted(false);
   }
 
-  function resetForm(type = "air") {
+  function resetForm() {
     setFormPlotId("");
     setFormUid("");
     setFormNodeName("");
     setFormStatus("ACTIVE");
     setFormMarker(null);
-    setFormSensors(sensorPresetsByType(type));
+    setFormSensors([]);
     setCanEditSensorLimit(false);
+    setMatchedNode(null);
+    setUidLookupBusy(false);
+    setUidLookupMessage("");
     resetValidation();
   }
 
   function openCreate() {
-    resetForm("air");
+    resetForm();
     setView("create");
     setError("");
     setSuccess("");
@@ -861,7 +895,7 @@ export default function NodeSensorPage() {
     setView("view");
     setEditNodeId("");
     setEditPlotId("");
-    resetForm("air");
+    resetForm();
     setError("");
   }
 
@@ -874,6 +908,10 @@ export default function NodeSensorPage() {
     }
     if (!formUid.trim()) {
       setError("กรุณากรอก UID");
+      return false;
+    }
+    if (!matchedNode) {
+      setError("UID นี้ไม่มีอยู่ในฐานข้อมูล");
       return false;
     }
     if (!formNodeName.trim()) {
@@ -1296,12 +1334,27 @@ export default function NodeSensorPage() {
                   </div>
                   <input
                     className={`form-input ${uidInvalid ? "input-error" : ""}`}
-                    placeholder="เช่น Air-0000001 หรือ Soil-0000002"
+                    placeholder="กรอก UID ที่มีอยู่ในฐานข้อมูลเท่านั้น"
                     value={formUid}
-                    onChange={(e) => setFormUid(e.target.value)}
+                    onChange={(e) => {
+                      setFormUid(e.target.value);
+                      setUidTouched(true);
+                    }}
                     onBlur={() => setUidTouched(true)}
                   />
                   {uidInvalid ? <div className="field-error-text">กรุณากรอก UID</div> : null}
+                  {formUid.trim() ? (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: isUidMatched ? "#2e7d32" : "#d84343",
+                      }}
+                    >
+                      {uidLookupBusy ? "กำลังตรวจสอบ UID..." : uidLookupMessage}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="filter-field" style={{ marginBottom: 0 }}>
@@ -1321,21 +1374,23 @@ export default function NodeSensorPage() {
                 </div>
               </div>
 
-              <div
-                style={{
-                  display: "block",
-                  margin: "13px 0",
-                  padding: "10px 12px",
-                  borderRadius: 11,
-                  background: "rgba(76,175,80,.08)",
-                  border: "1px solid rgba(76,175,80,.24)",
-                  fontSize: 12,
-                  color: "var(--soil)",
-                  fontWeight: 600,
-                }}
-              >
-                ตรวจพบชนิด Node : {nodeTypeLabel(detectedFormNodeType)}
-              </div>
+              {shouldShowNodeDetails ? (
+                <div
+                  style={{
+                    display: "block",
+                    margin: "13px 0",
+                    padding: "10px 12px",
+                    borderRadius: 11,
+                    background: "rgba(76,175,80,.08)",
+                    border: "1px solid rgba(76,175,80,.24)",
+                    fontSize: 12,
+                    color: "var(--soil)",
+                    fontWeight: 600,
+                  }}
+                >
+                  ตรวจพบชนิด Node : {nodeTypeLabel(detectedFormNodeType)}
+                </div>
+              ) : null}
 
               <div className="filter-field">
                 <div className="filter-field-label">Status</div>
@@ -1372,36 +1427,53 @@ export default function NodeSensorPage() {
                 </div>
               </div>
 
-              <div>
+              {shouldShowNodeDetails ? (
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      margin: "14px 0 8px",
+                    }}
+                  >
+                    <div className="card-title" style={{ marginBottom: 0 }}>
+                      {detectedFormNodeType === "soil" ? "Soil Sensors" : "Air Sensors"}
+                    </div>
+                    <button
+                      className="btn-sm btn-edit"
+                      type="button"
+                      onClick={() => setCanEditSensorLimit((v) => !v)}
+                    >
+                      {canEditSensorLimit ? "ปิดแก้ไข Max/Min" : "แก้ไข Max/Min"}
+                    </button>
+                  </div>
+
+                  <EditableSensorTable
+                    sensors={formSensors}
+                    canEditLimits={canEditSensorLimit}
+                    onChangeMin={updateSensorMin}
+                    onChangeMax={updateSensorMax}
+                  />
+                </div>
+              ) : (
                 <div
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    margin: "14px 0 8px",
+                    marginTop: 14,
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    background: "#fff8f8",
+                    border: "1px solid #efc8c8",
+                    color: "#c62828",
+                    fontSize: 12,
+                    fontWeight: 700,
                   }}
                 >
-                  <div className="card-title" style={{ marginBottom: 0 }}>
-                    {detectedFormNodeType === "soil" ? "Soil Sensors" : "Air Sensors"}
-                  </div>
-                  <button
-                    className="btn-sm btn-edit"
-                    type="button"
-                    onClick={() => setCanEditSensorLimit((v) => !v)}
-                  >
-                    {canEditSensorLimit ? "ปิดแก้ไข Max/Min" : "แก้ไข Max/Min"}
-                  </button>
+                  กรุณากรอก UID ที่มีอยู่ในฐานข้อมูลก่อน ระบบจึงจะแสดงรายละเอียด Node และ Sensor
                 </div>
-
-                <EditableSensorTable
-                  sensors={formSensors}
-                  canEditLimits={canEditSensorLimit}
-                  onChangeMin={updateSensorMin}
-                  onChangeMax={updateSensorMax}
-                />
-              </div>
+              )}
 
               <div
                 style={{
@@ -1511,15 +1583,17 @@ export default function NodeSensorPage() {
                 <div className="card-title" style={{ marginBottom: 0 }}>
                   📡 Edit Node
                 </div>
-                <span
-                  className="node-type-badge"
-                  style={{
-                    background: detectedFormNodeType === "soil" ? "#6d4c41" : "#1565c0",
-                    color: "#fff",
-                  }}
-                >
-                  {nodeTypeLabel(detectedFormNodeType)}
-                </span>
+                {shouldShowNodeDetails ? (
+                  <span
+                    className="node-type-badge"
+                    style={{
+                      background: detectedFormNodeType === "soil" ? "#6d4c41" : "#1565c0",
+                      color: "#fff",
+                    }}
+                  >
+                    {nodeTypeLabel(detectedFormNodeType)}
+                  </span>
+                ) : null}
               </div>
 
               <div className="filter-field">
@@ -1540,11 +1614,27 @@ export default function NodeSensorPage() {
                   </div>
                   <input
                     className={`form-input ${uidInvalid ? "input-error" : ""}`}
+                    placeholder="กรอก UID ที่มีอยู่ในฐานข้อมูลเท่านั้น"
                     value={formUid}
-                    onChange={(e) => setFormUid(e.target.value)}
+                    onChange={(e) => {
+                      setFormUid(e.target.value);
+                      setUidTouched(true);
+                    }}
                     onBlur={() => setUidTouched(true)}
                   />
                   {uidInvalid ? <div className="field-error-text">กรุณากรอก UID</div> : null}
+                  {formUid.trim() ? (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: isUidMatched ? "#2e7d32" : "#d84343",
+                      }}
+                    >
+                      {uidLookupBusy ? "กำลังตรวจสอบ UID..." : uidLookupMessage}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="filter-field" style={{ marginBottom: 0 }}>
@@ -1598,29 +1688,46 @@ export default function NodeSensorPage() {
                 </div>
               </div>
 
-              <div>
+              {shouldShowNodeDetails ? (
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      flexWrap: "wrap",
+                      margin: "14px 0 8px",
+                    }}
+                  >
+                    <div className="card-title" style={{ marginBottom: 0 }}>
+                      {detectedFormNodeType === "soil" ? "Soil Sensors" : "Air Sensors"}
+                    </div>
+                  </div>
+
+                  <EditableSensorTable
+                    sensors={formSensors}
+                    canEditLimits={true}
+                    onChangeMin={updateSensorMin}
+                    onChangeMax={updateSensorMax}
+                  />
+                </div>
+              ) : (
                 <div
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    flexWrap: "wrap",
-                    margin: "14px 0 8px",
+                    marginTop: 14,
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    background: "#fff8f8",
+                    border: "1px solid #efc8c8",
+                    color: "#c62828",
+                    fontSize: 12,
+                    fontWeight: 700,
                   }}
                 >
-                  <div className="card-title" style={{ marginBottom: 0 }}>
-                    {detectedFormNodeType === "soil" ? "Soil Sensors" : "Air Sensors"}
-                  </div>
+                  ระบบจะแสดงรายละเอียด Node และ Sensor ต่อเมื่อ UID ตรงกับข้อมูลในฐานข้อมูลเท่านั้น
                 </div>
-
-                <EditableSensorTable
-                  sensors={formSensors}
-                  canEditLimits={true}
-                  onChangeMin={updateSensorMin}
-                  onChangeMax={updateSensorMax}
-                />
-              </div>
+              )}
 
               <div
                 style={{
