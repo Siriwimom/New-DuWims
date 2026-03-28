@@ -92,13 +92,26 @@ function average(nums) {
 }
 
 function colorOfIndex(i) {
-  const colors = ["#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#ec4899"];
+  const colors = [
+    "#3b82f6",
+    "#22c55e",
+    "#f59e0b",
+    "#ef4444",
+    "#8b5cf6",
+    "#06b6d4",
+    "#ec4899",
+    "#14b8a6",
+    "#f97316",
+    "#6366f1",
+    "#84cc16",
+    "#a855f7",
+  ];
   return colors[i % colors.length];
 }
 
 function polylinePoints(values, minY, maxY, width = 900, height = 220) {
   if (!values.length) return "";
-  const stepX = values.length === 1 ? 0 : width / (values.length - 1);
+  const stepX = values.length === 1 ? 0 : width / Math.max(values.length - 1, 1);
 
   return values
     .map((v, i) => {
@@ -125,10 +138,7 @@ function makeCsv(rows) {
 function canonicalSensorKey(name = "") {
   const key = String(name || "").trim().toLowerCase();
 
-  if (
-    key.includes("temp_rh") ||
-    key.includes("temperature_humidity")
-  ) {
+  if (key.includes("temp_rh") || key.includes("temperature_humidity")) {
     return "temp_rh";
   }
 
@@ -155,11 +165,7 @@ function canonicalSensorKey(name = "") {
     return "water";
   }
 
-  if (
-    key.includes("temperature") ||
-    key === "temp" ||
-    key.includes("อุณหภูมิ")
-  ) {
+  if (key.includes("temperature") || key === "temp" || key.includes("อุณหภูมิ")) {
     return "temp";
   }
 
@@ -201,6 +207,10 @@ function canonicalSensorKey(name = "") {
 
 function sensorLabelFromKey(key) {
   return SENSOR_OPTIONS.find((s) => s.key === key)?.label || key;
+}
+
+function sensorUnitFromKey(key) {
+  return SENSOR_OPTIONS.find((s) => s.key === key)?.unit || "-";
 }
 
 function getTimestampFromReading(item) {
@@ -605,6 +615,7 @@ export default function HistoryPage() {
               rawSensorType: rawSensor?.sensorType || rawSensor?.name || rawSensor?.uid || "",
               sensorKey,
               sensorLabel: sensorLabelFromKey(sensorKey),
+              unit: sensorUnitFromKey(sensorKey),
               latestValue: rawSensor?.latestValue,
               latestTimestamp: rawSensor?.latestTimestamp,
             };
@@ -730,6 +741,7 @@ export default function HistoryPage() {
           sensorId: target.sensorId,
           sensorKey: target.sensorKey,
           sensorLabel: target.sensorLabel,
+          unit: target.unit,
           value,
           timestamp,
           status: raw?.status || "",
@@ -770,6 +782,7 @@ export default function HistoryPage() {
             sensorId: target.sensorId,
             sensorKey: target.sensorKey,
             sensorLabel: target.sensorLabel,
+            unit: target.unit,
             value: fallbackValue,
             timestamp: fallbackTs || `${fallbackDateKey}T00:00:00.000Z`,
             status: "",
@@ -783,51 +796,98 @@ export default function HistoryPage() {
     return rows;
   }, [sensorTargets, readingMap, startDate, endDate]);
 
-  const firstSelectedSensorKey = selectedSensors[0] || "";
-  const firstSelectedSensorLabel = firstSelectedSensorKey
-    ? sensorLabelFromKey(firstSelectedSensorKey)
-    : "ยังไม่ได้เลือกเซนเซอร์";
+  const selectedSensorOptions = useMemo(() => {
+    return SENSOR_OPTIONS.filter((s) => selectedSensors.includes(s.key));
+  }, [selectedSensors]);
 
-  const chartSeries = useMemo(() => {
-    if (!firstSelectedSensorKey) return [];
+  const chartGroups = useMemo(() => {
+    if (!selectedSensorOptions.length) return [];
 
-    const byPlot = new Map();
+    const unitMap = new Map();
 
-    for (const plot of filteredPlots) {
-      const valuesByDate = new Map(dateKeys.map((d) => [d, []]));
-
-      filteredReadingRows
-        .filter((row) => row.plotId === plot.id && row.sensorKey === firstSelectedSensorKey)
-        .forEach((row) => {
-          const list = valuesByDate.get(row.dateKey) || [];
-          list.push(row.value);
-          valuesByDate.set(row.dateKey, list);
-        });
-
-      const avgValues = dateKeys.map((d) => average(valuesByDate.get(d) || []));
-      if (avgValues.some((v) => Number.isFinite(v))) {
-        byPlot.set(plot.id, {
-          plotId: plot.id,
-          plotName: plot.plotName,
-          values: avgValues,
+    for (const sensor of selectedSensorOptions) {
+      const unitKey = sensor.unit || "-";
+      if (!unitMap.has(unitKey)) {
+        unitMap.set(unitKey, {
+          unit: unitKey,
+          sensors: [],
         });
       }
+      unitMap.get(unitKey).sensors.push(sensor);
     }
 
-    return [...byPlot.values()];
-  }, [filteredPlots, filteredReadingRows, firstSelectedSensorKey, dateKeys]);
+    const groups = [];
 
-  const chartMinMax = useMemo(() => {
-    const vals = chartSeries.flatMap((s) => s.values).filter((n) => Number.isFinite(n));
-    if (!vals.length) return { min: 0, max: 100 };
+    for (const [, unitGroup] of unitMap) {
+      const seriesList = [];
 
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
-    if (min === max) return { min: min - 1, max: max + 1 };
+      for (const sensor of unitGroup.sensors) {
+        const byPlot = new Map();
 
-    const pad = (max - min) * 0.1;
-    return { min: min - pad, max: max + pad };
-  }, [chartSeries]);
+        for (const plot of filteredPlots) {
+          const valuesByDate = new Map(dateKeys.map((d) => [d, []]));
+
+          filteredReadingRows
+            .filter((row) => row.plotId === plot.id && row.sensorKey === sensor.key)
+            .forEach((row) => {
+              const list = valuesByDate.get(row.dateKey) || [];
+              list.push(row.value);
+              valuesByDate.set(row.dateKey, list);
+            });
+
+          const avgValues = dateKeys.map((d) => average(valuesByDate.get(d) || []));
+          if (avgValues.some((v) => Number.isFinite(v))) {
+            byPlot.set(plot.id, {
+              key: `${sensor.key}-${plot.id}`,
+              plotId: plot.id,
+              plotName: plot.plotName,
+              sensorKey: sensor.key,
+              sensorLabel: sensor.label,
+              unit: sensor.unit,
+              values: avgValues,
+            });
+          }
+        }
+
+        seriesList.push(...byPlot.values());
+      }
+
+      const vals = seriesList.flatMap((s) => s.values).filter((n) => Number.isFinite(n));
+
+      let min = 0;
+      let max = 100;
+
+      if (vals.length) {
+        min = Math.min(...vals);
+        max = Math.max(...vals);
+
+        if (min === max) {
+          min = min - 1;
+          max = max + 1;
+        } else {
+          const pad = (max - min) * 0.1;
+          min = min - pad;
+          max = max + pad;
+        }
+      }
+
+      const step = (max - min) / 4;
+      const yLabels = [max, max - step, max - step * 2, max - step * 3, min].map((n) =>
+        Number.isFinite(n) ? Number(n.toFixed(2)) : "-"
+      );
+
+      groups.push({
+        unit: unitGroup.unit,
+        sensors: unitGroup.sensors,
+        series: seriesList,
+        min,
+        max,
+        yLabels,
+      });
+    }
+
+    return groups;
+  }, [selectedSensorOptions, filteredPlots, filteredReadingRows, dateKeys]);
 
   const summaryRows = useMemo(() => {
     return visibleNodes.map((node) => {
@@ -849,12 +909,13 @@ export default function HistoryPage() {
   }, [visibleNodes, filteredReadingRows]);
 
   const csvRows = useMemo(() => {
-    const header = ["plot", "node", "nodeType", "sensor", "value", "timestamp", "status", "source"];
+    const header = ["plot", "node", "nodeType", "sensor", "unit", "value", "timestamp", "status", "source"];
     const body = filteredReadingRows.map((row) => [
       row.plotName,
       row.nodeName,
       row.nodeType,
       row.sensorLabel,
+      row.unit ?? "",
       row.value ?? "",
       row.timestamp ?? "",
       row.status ?? "",
@@ -911,15 +972,6 @@ export default function HistoryPage() {
     a.remove();
     URL.revokeObjectURL(url);
   }
-
-  const yLabels = (() => {
-    const min = chartMinMax.min;
-    const max = chartMinMax.max;
-    const step = (max - min) / 4;
-    return [max, max - step, max - step * 2, max - step * 3, min].map((n) =>
-      Number.isFinite(n) ? Number(n.toFixed(2)) : "-"
-    );
-  })();
 
   const loadInfo =
     loadingPlots || loadingReadings
@@ -996,10 +1048,10 @@ export default function HistoryPage() {
               <button
                 type="button"
                 className={`sensor-dd-trigger ${sensorDropdownOpen ? "open" : ""}`}
-                onClick={() => setSensorDropdownOpen((prev) => !prev)}
+                onClick={() => setSensorDropdownOpen((v) => !v)}
               >
                 <span className="sensor-dd-trigger-text">{sensorDropdownLabel}</span>
-                <span>{sensorDropdownOpen ? "▲" : "▼"}</span>
+                <span className="sensor-dd-trigger-arrow">{sensorDropdownOpen ? "▲" : "▼"}</span>
               </button>
 
               {sensorDropdownOpen && (
@@ -1059,88 +1111,97 @@ export default function HistoryPage() {
           <div className="status-line">{loadInfo}</div>
         </div>
 
-        <div className="history-card chart-card">
-          <div className="chart-head">
-            <div>
-              <div className="history-title" style={{ marginBottom: 4 }}>📈 กราฟเปรียบเทียบแปลง</div>
-              <div className="history-sub" style={{ marginBottom: 0 }}>
-                sensor: {firstSelectedSensorLabel} • แปลง:{" "}
-                {filteredPlots.map((p) => p.plotName || "ไม่ทราบชื่อแปลง").join(", ") || "ไม่มีข้อมูล"}
-              </div>
-            </div>
-
-            <button type="button" className="export-btn" onClick={exportCsv}>
-              ⬇ EXPORT CSV
-            </button>
-          </div>
-
-          <div className="chart-legend">
-            {chartSeries.length ? (
-              chartSeries.map((item, i) => (
-                <div key={item.plotId} className="legend-item">
-                  <div className="legend-dot" style={{ background: colorOfIndex(i) }} />
-                  <span>{item.plotName}</span>
+        {chartGroups.length ? (
+          chartGroups.map((group, groupIndex) => (
+            <div key={`${group.unit}-${groupIndex}`} className="history-card chart-card">
+              <div className="chart-head">
+                <div>
+                  <div className="history-title" style={{ marginBottom: 4 }}>
+                    📈 กราฟเปรียบเทียบแปลง ({group.unit})
+                  </div>
+                  <div className="history-sub" style={{ marginBottom: 0 }}>
+                    sensor: {group.sensors.map((s) => s.label).join(", ")} • แปลง:{" "}
+                    {filteredPlots.map((p) => p.plotName || "ไม่ทราบชื่อแปลง").join(", ") || "ไม่มีข้อมูล"}
+                  </div>
                 </div>
-              ))
-            ) : (
-              <div className="chart-empty-inline">ไม่มีข้อมูลสำหรับกราฟในช่วงที่เลือก</div>
-            )}
-          </div>
 
-          <div className="chart-wrap">
-            <div style={{ position: "relative" }}>
-              <svg viewBox="0 0 900 220" preserveAspectRatio="none" style={{ width: "100%", height: 220 }}>
-                <line x1="0" y1="44" x2="900" y2="44" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
-                <line x1="0" y1="88" x2="900" y2="88" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
-                <line x1="0" y1="132" x2="900" y2="132" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
-                <line x1="0" y1="176" x2="900" y2="176" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
-
-                {chartSeries.map((series, i) => {
-                  const safeValues = series.values.map((v) => (Number.isFinite(v) ? v : chartMinMax.min));
-                  const points = polylinePoints(safeValues, chartMinMax.min, chartMinMax.max, 900, 220);
-
-                  return (
-                    <polyline
-                      key={series.plotId}
-                      fill="none"
-                      stroke={colorOfIndex(i)}
-                      strokeWidth="2.5"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                      points={points}
-                    />
-                  );
-                })}
-              </svg>
-
-              <div className="chart-y">
-                {yLabels.map((label, index) => (
-                  <div key={index}>{label}</div>
-                ))}
+                <button type="button" className="export-btn" onClick={exportCsv}>
+                  ⬇ EXPORT CSV
+                </button>
               </div>
-            </div>
 
-            <div
-              className="chart-x"
-              style={{
-                gridTemplateColumns: `repeat(${Math.max(dateKeys.length, 1)}, minmax(0,1fr))`,
-              }}
-            >
-              {dateKeys.map((d) => (
-                <div key={d}>{formatThaiDateLabel(d)}</div>
-              ))}
-            </div>
-          </div>
+              <div className="chart-legend">
+                {group.series.length ? (
+                  group.series.map((item, i) => (
+                    <div key={item.key} className="legend-item">
+                      <div className="legend-dot" style={{ background: colorOfIndex(i) }} />
+                      <span>
+                        {item.sensorLabel} • {item.plotName}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="chart-empty-inline">ไม่มีข้อมูลสำหรับกราฟในช่วงที่เลือก</div>
+                )}
+              </div>
 
-          <div className="chart-note">
-            * กราฟนี้เทียบแปลงด้วย sensor ตัวแรกที่เลือก
+              <div className="chart-wrap">
+                <div style={{ position: "relative" }}>
+                  <svg viewBox="0 0 900 220" preserveAspectRatio="none" style={{ width: "100%", height: 220 }}>
+                    <line x1="0" y1="44" x2="900" y2="44" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
+                    <line x1="0" y1="88" x2="900" y2="88" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
+                    <line x1="0" y1="132" x2="900" y2="132" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
+                    <line x1="0" y1="176" x2="900" y2="176" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
+
+                    {group.series.map((series, i) => {
+                      const safeValues = series.values.map((v) => (Number.isFinite(v) ? v : group.min));
+                      const points = polylinePoints(safeValues, group.min, group.max, 900, 220);
+
+                      return (
+                        <polyline
+                          key={series.key}
+                          fill="none"
+                          stroke={colorOfIndex(i)}
+                          strokeWidth="2.5"
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                          points={points}
+                        />
+                      );
+                    })}
+                  </svg>
+
+                  <div className="chart-y">
+                    {group.yLabels.map((label, index) => (
+                      <div key={index}>{label}</div>
+                    ))}
+                  </div>
+                </div>
+
+                <div
+                  className="chart-x"
+                  style={{
+                    gridTemplateColumns: `repeat(${Math.max(dateKeys.length, 1)}, minmax(0,1fr))`,
+                  }}
+                >
+                  {dateKeys.map((d) => (
+                    <div key={d}>{formatThaiDateLabel(d)}</div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="chart-note">* กราฟนี้แยกตามหน่วย โดยแต่ละเส้น = sensor + plot</div>
+            </div>
+          ))
+        ) : (
+          <div className="history-card chart-card">
+            <div className="chart-empty-inline">ไม่มีข้อมูลสำหรับกราฟในช่วงที่เลือก</div>
           </div>
-        </div>
+        )}
 
         <div className="history-card">
-          <div className="history-title" style={{ marginBottom: 12 }}>
-            📋 สรุปการวัดข้อมูล (เฉลี่ยช่วงที่เลือก)
-          </div>
+          <div className="history-title">📋 สรุปการวัดข้อมูล (เฉลี่ยช่วงที่เลือก)</div>
+          <div className="history-sub">เฉลี่ยจากข้อมูลย้อนหลังในช่วงวันที่ที่เลือก</div>
 
           <div className="summary-wrap">
             <table className="summary-table">
@@ -1156,43 +1217,36 @@ export default function HistoryPage() {
                   <th>ปริมาณน้ำฝน (mm)</th>
                   <th>ความชื้นในดิน (%)</th>
                   <th>ความพร้อมใช้น้ำ (%)</th>
-                  <th>N</th>
-                  <th>P</th>
-                  <th>K</th>
+                  <th>N (%)</th>
+                  <th>P (ppm)</th>
+                  <th>K (cmol/kg)</th>
                 </tr>
               </thead>
               <tbody>
-                {summaryRows.some((row) => row.hasAnyValue) ? (
-                  summaryRows.map((row, index) => {
-                    const val = (k) =>
-                      Number.isFinite(row.values[k]) ? Number(row.values[k].toFixed(2)) : "—";
-
-                    return (
-                      <tr key={`${row.nodeName}-${index}`}>
-                        <td>{row.plotName}</td>
-                        <td>{row.nodeName}</td>
-                        <td>
-                          <span className="node-pill">
-                            {row.nodeType === "soil" ? "Soil Node" : "Air Node"}
-                          </span>
-                        </td>
-                        <td>{val("temp")}</td>
-                        <td>{val("rh")}</td>
-                        <td>{val("wind")}</td>
-                        <td>{val("light")}</td>
-                        <td>{val("rain")}</td>
-                        <td>{val("soil")}</td>
-                        <td>{val("water")}</td>
-                        <td>{val("n")}</td>
-                        <td>{val("p")}</td>
-                        <td>{val("k")}</td>
-                      </tr>
-                    );
-                  })
+                {summaryRows.length ? (
+                  summaryRows.map((row, index) => (
+                    <tr key={`${row.plotName}-${row.nodeName}-${index}`}>
+                      <td>{row.plotName}</td>
+                      <td>{row.nodeName}</td>
+                      <td>
+                        <span className="node-pill">{row.nodeType === "soil" ? "Soil Node" : "Air Node"}</span>
+                      </td>
+                      <td>{Number.isFinite(row.values.temp) ? Number(row.values.temp).toFixed(2) : "-"}</td>
+                      <td>{Number.isFinite(row.values.rh) ? Number(row.values.rh).toFixed(2) : "-"}</td>
+                      <td>{Number.isFinite(row.values.wind) ? Number(row.values.wind).toFixed(2) : "-"}</td>
+                      <td>{Number.isFinite(row.values.light) ? Number(row.values.light).toFixed(2) : "-"}</td>
+                      <td>{Number.isFinite(row.values.rain) ? Number(row.values.rain).toFixed(2) : "-"}</td>
+                      <td>{Number.isFinite(row.values.soil) ? Number(row.values.soil).toFixed(2) : "-"}</td>
+                      <td>{Number.isFinite(row.values.water) ? Number(row.values.water).toFixed(2) : "-"}</td>
+                      <td>{Number.isFinite(row.values.n) ? Number(row.values.n).toFixed(2) : "-"}</td>
+                      <td>{Number.isFinite(row.values.p) ? Number(row.values.p).toFixed(2) : "-"}</td>
+                      <td>{Number.isFinite(row.values.k) ? Number(row.values.k).toFixed(2) : "-"}</td>
+                    </tr>
+                  ))
                 ) : (
                   <tr>
-                    <td colSpan="13" style={{ textAlign: "center" }}>
-                      ไม่มีข้อมูล
+                    <td colSpan={13} style={{ textAlign: "center", color: "#64748b" }}>
+                      ไม่มีข้อมูลสรุปในช่วงที่เลือก
                     </td>
                   </tr>
                 )}
@@ -1202,182 +1256,170 @@ export default function HistoryPage() {
         </div>
 
         <style jsx>{`
-          #history-page-root,
-          #history-page-root * {
-            box-sizing: border-box;
-          }
-
           #history-page-root {
-            position: relative;
-            overflow: visible !important;
-            padding: 16px;
-            z-index: 2;
+            padding: 18px;
+            display: grid;
+            gap: 16px;
           }
 
           .history-card {
-            background: #fff;
-            border: 1px solid #dfe7dc;
+            background: #ffffff;
+            border: 1px solid #dbead5;
             border-radius: 18px;
-            padding: 18px;
-            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
-            overflow: visible !important;
-            position: relative;
+            padding: 16px;
+            box-shadow: 0 8px 24px rgba(36, 79, 21, 0.06);
           }
 
-          .history-card + .history-card {
-            margin-top: 18px;
-          }
-
-          .history-card.filter-card {
-            z-index: 100;
-          }
-
-          .history-card.chart-card {
-            z-index: 1;
+          .filter-card {
+            background: linear-gradient(180deg, #ffffff 0%, #f8fff6 100%);
           }
 
           .history-title {
             font-size: 18px;
             font-weight: 900;
-            color: #1f3b22;
+            color: #244f15;
             margin-bottom: 6px;
           }
 
           .history-sub {
-            font-size: 12px;
+            font-size: 13px;
             color: #64748b;
             margin-bottom: 14px;
           }
 
           .history-label {
             display: block;
+            margin-bottom: 6px;
             font-size: 13px;
             font-weight: 800;
-            color: #334155;
-            margin-bottom: 6px;
+            color: #244f15;
           }
 
           .history-grid {
             display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 12px;
           }
 
           .history-input,
           .history-select {
             width: 100%;
-            min-height: 48px;
-            border: 1px solid #dfe7dc;
-            border-radius: 14px;
-            padding: 12px 14px;
-            font-size: 14px;
-            outline: none;
+            border: 1px solid #d8e7d2;
             background: #fff;
+            border-radius: 12px;
+            padding: 11px 12px;
+            font-size: 14px;
+            color: #0f172a;
+            outline: none;
+          }
+
+          .history-input:focus,
+          .history-select:focus {
+            border-color: #5db866;
+            box-shadow: 0 0 0 3px rgba(93, 184, 102, 0.15);
           }
 
           .quick-wrap {
             display: flex;
-            gap: 10px;
             flex-wrap: wrap;
-            margin-bottom: 14px;
+            gap: 10px;
           }
 
           .quick-btn {
-            border: none;
+            border: 1px solid #cfe3c7;
+            background: #fff;
+            color: #244f15;
             border-radius: 999px;
-            padding: 10px 14px;
+            padding: 9px 14px;
             font-size: 13px;
             font-weight: 800;
             cursor: pointer;
-            background: #edf7ee;
-            color: #245b2b;
           }
 
           .quick-btn.active {
-            background: #5db866;
+            background: #244f15;
+            border-color: #244f15;
             color: #fff;
           }
 
           .sensor-wrap-block {
-            font-size: 13px;
-            min-width: 0;
-            position: relative;
-            z-index: 300;
+            margin-bottom: 8px;
           }
 
           .sensor-dd-wrap {
             position: relative;
-            z-index: 5000;
-            overflow: visible !important;
           }
 
           .sensor-dd-trigger {
             width: 100%;
-            min-height: 50px;
-            padding: 12px 14px;
-            border: 1px solid #dfe7dc;
-            border-radius: 14px;
+            min-height: 46px;
+            border: 1px solid #d8e7d2;
             background: #fff;
-            cursor: pointer;
+            border-radius: 14px;
+            padding: 11px 14px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 10px;
+            gap: 12px;
+            cursor: pointer;
             font-size: 14px;
             font-weight: 800;
-            color: #22352a;
-            position: relative;
-            z-index: 5001;
+            color: #0f172a;
           }
 
           .sensor-dd-trigger.open {
             border-color: #5db866;
-            box-shadow: 0 0 0 3px rgba(93, 184, 102, 0.1);
+            box-shadow: 0 0 0 3px rgba(93, 184, 102, 0.15);
           }
 
           .sensor-dd-trigger-text {
-            flex: 1;
-            min-width: 0;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             text-align: left;
           }
 
+          .sensor-dd-trigger-arrow {
+            color: #244f15;
+            font-size: 12px;
+            font-weight: 900;
+            flex: 0 0 auto;
+          }
+
           .sensor-dd-menu {
             position: absolute;
-            top: calc(100% + 8px);
+            z-index: 30;
             left: 0;
             right: 0;
-            z-index: 9999;
+            top: calc(100% + 8px);
             background: #fff;
-            border: 1px solid #dfe7dc;
+            border: 1px solid #dbead5;
             border-radius: 16px;
-            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
-            padding: 10px;
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);
+            padding: 12px;
           }
 
           .sensor-dd-header {
             display: flex;
-            align-items: center;
             justify-content: space-between;
-            gap: 10px;
-            margin-bottom: 8px;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
           }
 
           .sensor-dd-header-title {
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 900;
-            color: #0f172a;
+            color: #244f15;
           }
 
           .sensor-dd-clear {
             border: none;
             background: transparent;
-            color: #b91c1c;
+            color: #ef4444;
+            font-size: 12px;
             font-weight: 900;
             cursor: pointer;
-            font-size: 12px;
           }
 
           .sensor-dd-grid {
@@ -1387,72 +1429,67 @@ export default function HistoryPage() {
           }
 
           .sensor-dd-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
             border-radius: 12px;
-            border: 1px solid rgba(15, 23, 42, 0.08);
-            background: #fff;
+            padding: 10px 12px;
+            display: grid;
+            grid-template-columns: 20px 1fr auto;
+            align-items: center;
+            gap: 10px;
             cursor: pointer;
-            min-width: 0;
             user-select: none;
+            background: #fff;
           }
 
           .sensor-dd-item.checked {
-            background: #eef9ef;
-            border-color: #9ed6a5;
+            border-color: #5db866;
+            background: #f4fff3;
           }
 
           .sensor-dd-box {
             width: 18px;
             height: 18px;
+            border: 1.5px solid #9ca3af;
             border-radius: 6px;
-            border: 1.5px solid #cbd5e1;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             font-size: 12px;
             font-weight: 900;
             color: #fff;
-            background: #fff;
-            flex: 0 0 18px;
+            background: transparent;
           }
 
           .sensor-dd-item.checked .sensor-dd-box {
-            background: #22c55e;
-            border-color: #22c55e;
+            border-color: #244f15;
+            background: #244f15;
           }
 
           .sensor-dd-name {
             font-size: 13px;
             font-weight: 800;
             color: #0f172a;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
           }
 
           .sensor-dd-unit {
-            margin-left: auto;
-            font-size: 11px;
+            font-size: 12px;
+            font-weight: 900;
             color: #64748b;
             white-space: nowrap;
           }
 
           .sensor-dd-footer {
-            margin-top: 10px;
             display: flex;
             justify-content: flex-end;
+            margin-top: 12px;
           }
 
           .sensor-dd-done {
             border: none;
-            border-radius: 999px;
-            padding: 8px 12px;
-            background: #0f172a;
+            border-radius: 12px;
+            padding: 10px 14px;
+            background: #244f15;
             color: #fff;
-            font-size: 12px;
             font-weight: 900;
             cursor: pointer;
           }
@@ -1460,19 +1497,24 @@ export default function HistoryPage() {
           .mini-info {
             margin-top: 8px;
             font-size: 12px;
-            color: #64748b;
+            color: #475569;
+            font-weight: 700;
           }
 
           .status-line {
-            margin-top: 12px;
+            margin-top: 8px;
             font-size: 12px;
-            color: #334155;
-            font-weight: 700;
+            color: #64748b;
+            font-weight: 800;
+          }
+
+          .chart-card {
+            overflow: hidden;
           }
 
           .chart-head {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: space-between;
             gap: 12px;
             margin-bottom: 12px;
@@ -1608,6 +1650,11 @@ export default function HistoryPage() {
 
             .chart-head {
               flex-direction: column;
+              align-items: stretch;
+            }
+
+            .export-btn {
+              width: 100%;
             }
           }
         `}</style>
