@@ -266,6 +266,9 @@ export default function Page() {
   const [draftCaretaker, setDraftCaretaker] = useState("");
   const [draftPolygon, setDraftPolygon] = useState([]);
 
+  const [showDeletePopup, setShowDeletePopup] = useState(false);
+  const [showSavePopup, setShowSavePopup] = useState(false);
+
   useEffect(() => setMounted(true), []);
 
   const selectedPlot = useMemo(
@@ -375,6 +378,8 @@ export default function Page() {
   function cancelEditOrCreate() {
     setError("");
     setSuccess("");
+    setShowDeletePopup(false);
+    setShowSavePopup(false);
     setMode("view");
 
     if (selectedPlot) {
@@ -407,7 +412,9 @@ export default function Page() {
     }
 
     if (polygonArea(coords) < 0.00000001) {
-      setError("Polygon เล็กเกินไปหรือจุดเกือบอยู่ในเส้นเดียวกัน กรุณาวาดใหม่ให้ครอบพื้นที่จริง");
+      setError(
+        "Polygon เล็กเกินไปหรือจุดเกือบอยู่ในเส้นเดียวกัน กรุณาวาดใหม่ให้ครอบพื้นที่จริง"
+      );
       return false;
     }
 
@@ -507,7 +514,9 @@ export default function Page() {
     }
   }
 
-  async function handleSave() {
+  async function doSaveConfirmed() {
+    setShowSavePopup(false);
+
     if (isCreateMode) {
       await saveNewPlot();
       return;
@@ -521,15 +530,31 @@ export default function Page() {
     setError('กรุณากด "+ เพิ่มแปลง" หรือ "ลบ / แก้ไข" ก่อน');
   }
 
-  async function handleDeletePlot() {
+  function handleSaveClick() {
+    setError("");
+    setSuccess("");
+    setShowSavePopup(true);
+  }
+
+  function handleDeleteClick() {
     if (!selectedPlotId) {
       setError("กรุณาเลือกแปลงก่อน");
       return;
     }
 
-    const ok = window.confirm("ต้องการลบแปลงนี้ใช่หรือไม่?");
-    if (!ok) return;
+    setError("");
+    setSuccess("");
+    setShowDeletePopup(true);
+  }
 
+  async function doDeleteConfirmed() {
+    if (!selectedPlotId) {
+      setShowDeletePopup(false);
+      setError("กรุณาเลือกแปลงก่อน");
+      return;
+    }
+
+    setShowDeletePopup(false);
     setBusy(true);
     setError("");
     setSuccess("");
@@ -539,7 +564,9 @@ export default function Page() {
         method: "DELETE",
       });
 
-      const nextPlots = plots.filter((p) => String(p.id) !== String(selectedPlotId));
+      const nextPlots = plots.filter(
+        (p) => String(p.id) !== String(selectedPlotId)
+      );
       setPlots(nextPlots);
       setSelectedPlotId(nextPlots[0]?.id || "");
       setMode("view");
@@ -656,6 +683,24 @@ export default function Page() {
             >
               + เพิ่มแปลง
             </button>
+
+            <button
+              type="button"
+              className={`edit-btn top-edit-btn ${isEditMode ? "active" : ""}`}
+              onClick={enterEditMode}
+              disabled={busy || isCreateMode || !selectedPlotId}
+            >
+              ลบ / แก้ไข
+            </button>
+
+            <button
+              type="button"
+              className="delete-btn"
+              onClick={handleDeleteClick}
+              disabled={busy || !selectedPlotId || isCreateMode}
+            >
+              ลบแปลง
+            </button>
           </div>
         </div>
 
@@ -687,26 +732,6 @@ export default function Page() {
               ))
             )}
           </select>
-        </div>
-
-        <div className="edit-row">
-          <button
-            type="button"
-            className={`edit-btn ${isEditMode ? "active" : ""}`}
-            onClick={enterEditMode}
-            disabled={busy || isCreateMode || !selectedPlotId}
-          >
-            ลบ / แก้ไข
-          </button>
-
-          <button
-            type="button"
-            className="delete-btn"
-            onClick={handleDeletePlot}
-            disabled={busy || !selectedPlotId || isCreateMode}
-          >
-            ลบแปลง
-          </button>
         </div>
 
         <div className="info-card">
@@ -744,7 +769,9 @@ export default function Page() {
               </select>
 
               {!isEditable && selectedCaretakerLabel ? (
-                <div className="caretaker-hint">ผู้ดูแลปัจจุบัน: {selectedCaretakerLabel}</div>
+                <div className="caretaker-hint">
+                  ผู้ดูแลปัจจุบัน: {selectedCaretakerLabel}
+                </div>
               ) : null}
             </div>
           </div>
@@ -797,7 +824,9 @@ export default function Page() {
 
                   <leaflet.RL.FeatureGroup
                     ref={featureGroupRef}
-                    key={`${selectedPlotId}-${mode}-${JSON.stringify(displayedPolygon)}`}
+                    key={`${selectedPlotId}-${mode}-${JSON.stringify(
+                      displayedPolygon
+                    )}`}
                   >
                     {displayedPolygon.length >= 3 ? (
                       <leaflet.RL.Polygon
@@ -844,7 +873,9 @@ export default function Page() {
             </button>
           </div>
 
-          {locateStatus ? <div className="locate-status">{locateStatus}</div> : null}
+          {locateStatus ? (
+            <div className="locate-status">{locateStatus}</div>
+          ) : null}
         </div>
 
         {(isCreateMode || isEditMode) && (
@@ -852,7 +883,7 @@ export default function Page() {
             <button
               type="button"
               className="save-btn"
-              onClick={handleSave}
+              onClick={handleSaveClick}
               disabled={busy}
             >
               Save
@@ -860,12 +891,92 @@ export default function Page() {
           </div>
         )}
 
+        {showDeletePopup ? (
+          <div
+            className="confirm-overlay open"
+            onClick={() => !busy && setShowDeletePopup(false)}
+          >
+            <div
+              className="confirm-box"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="confirm-icon">🗑</div>
+              <div className="confirm-title">ยืนยันการลบข้อมูล</div>
+              <div className="confirm-sub">
+                ต้องการลบแปลงนี้ออกจากระบบ?
+                <br />
+                การดำเนินการนี้ไม่สามารถกู้คืนได้
+              </div>
+              <div className="confirm-actions">
+                <button
+                  type="button"
+                  className="btn-cancel"
+                  onClick={() => setShowDeletePopup(false)}
+                  disabled={busy}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  className="btn-confirm danger"
+                  onClick={doDeleteConfirmed}
+                  disabled={busy}
+                >
+                  ยืนยัน
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {showSavePopup ? (
+          <div
+            className="confirm-overlay open"
+            onClick={() => !busy && setShowSavePopup(false)}
+          >
+            <div
+              className="confirm-box"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="confirm-icon">💾</div>
+              <div className="confirm-title">ยืนยันการบันทึกข้อมูล</div>
+              <div className="confirm-sub">
+                ต้องการบันทึกข้อมูลแปลงนี้ใช่หรือไม่?
+                <br />
+                ระบบจะทำการบันทึกข้อมูลล่าสุดลงฐานข้อมูล
+              </div>
+              <div className="confirm-actions">
+                <button
+                  type="button"
+                  className="btn-cancel"
+                  onClick={() => setShowSavePopup(false)}
+                  disabled={busy}
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type="button"
+                  className="btn-confirm"
+                  onClick={doSaveConfirmed}
+                  disabled={busy}
+                >
+                  ยืนยัน
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <style jsx>{`
           .polygon-page {
             min-height: 100vh;
             padding: 18px 16px 24px;
             background:
-              radial-gradient(circle at top left, rgba(84, 123, 60, 0.14), transparent 24%),
+              radial-gradient(
+                circle at top left,
+                rgba(84, 123, 60, 0.14),
+                transparent 24%
+              ),
               linear-gradient(180deg, #edf3e8 0%, #e6ece0 100%);
           }
 
@@ -875,12 +986,14 @@ export default function Page() {
             justify-content: space-between;
             gap: 12px;
             margin-bottom: 12px;
+            flex-wrap: wrap;
           }
 
           .head-actions {
             display: flex;
             align-items: center;
             gap: 10px;
+            flex-wrap: wrap;
           }
 
           .page-title {
@@ -892,20 +1005,25 @@ export default function Page() {
           .add-btn,
           .cancel-btn,
           .save-btn,
-          .delete-btn {
+          .delete-btn,
+          .top-edit-btn {
             border: none;
             border-radius: 999px;
             padding: 11px 24px;
             font-size: 13px;
             font-weight: 800;
             cursor: pointer;
-            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            transition:
+              transform 0.15s ease,
+              box-shadow 0.15s ease,
+              background 0.15s ease;
           }
 
           .add-btn:hover,
           .cancel-btn:hover,
           .save-btn:hover,
-          .delete-btn:hover {
+          .delete-btn:hover,
+          .top-edit-btn:hover {
             transform: translateY(-1px);
           }
 
@@ -933,7 +1051,6 @@ export default function Page() {
             background: #b42318;
             color: #fff;
             box-shadow: 0 6px 16px rgba(180, 35, 24, 0.2);
-            margin-left: 10px;
           }
 
           .top-select-wrap {
@@ -960,12 +1077,6 @@ export default function Page() {
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
           }
 
-          .edit-row {
-            display: flex;
-            justify-content: flex-end;
-            margin-bottom: 14px;
-          }
-
           .edit-btn {
             border: 1px solid #b7c9af;
             background: #eef4e8;
@@ -976,14 +1087,24 @@ export default function Page() {
             font-weight: 800;
             cursor: pointer;
             box-shadow: 0 2px 6px rgba(82, 108, 62, 0.08);
-            transition: transform 0.15s ease, background 0.15s ease;
-          }
-
-          .edit-btn:hover {
-            transform: translateY(-1px);
+            transition:
+              transform 0.15s ease,
+              background 0.15s ease;
           }
 
           .edit-btn.active {
+            background: #dceada;
+            border-color: #8faa82;
+          }
+
+          .top-edit-btn {
+            border: 1px solid #b7c9af;
+            background: #eef4e8;
+            color: #183915;
+            box-shadow: 0 2px 6px rgba(82, 108, 62, 0.08);
+          }
+
+          .top-edit-btn.active {
             background: #dceada;
             border-color: #8faa82;
           }
@@ -1181,6 +1302,99 @@ export default function Page() {
             line-height: 1.5;
           }
 
+          .confirm-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 5000;
+            background: rgba(23, 33, 20, 0.42);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            backdrop-filter: blur(2px);
+          }
+
+          .confirm-box {
+            width: 100%;
+            max-width: 430px;
+            background: linear-gradient(180deg, #f7faf4 0%, #edf3e8 100%);
+            border: 1px solid #d7e0d0;
+            border-radius: 24px;
+            padding: 26px 22px 20px;
+            box-shadow: 0 18px 44px rgba(34, 58, 28, 0.2);
+            text-align: center;
+          }
+
+          .confirm-icon {
+            width: 70px;
+            height: 70px;
+            margin: 0 auto 14px;
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 30px;
+            background: linear-gradient(180deg, #fde8e8 0%, #fbd5d5 100%);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+          }
+
+          .confirm-title {
+            font-size: 20px;
+            font-weight: 900;
+            color: #20351a;
+            margin-bottom: 10px;
+          }
+
+          .confirm-sub {
+            font-size: 14px;
+            line-height: 1.7;
+            color: #55634f;
+            margin-bottom: 18px;
+          }
+
+          .confirm-actions {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+          }
+
+          .btn-cancel,
+          .btn-confirm {
+            min-width: 120px;
+            border: none;
+            border-radius: 999px;
+            padding: 12px 18px;
+            font-size: 14px;
+            font-weight: 800;
+            cursor: pointer;
+            transition:
+              transform 0.15s ease,
+              box-shadow 0.15s ease;
+          }
+
+          .btn-cancel:hover,
+          .btn-confirm:hover {
+            transform: translateY(-1px);
+          }
+
+          .btn-cancel {
+            background: #eef4e8;
+            color: #183915;
+            border: 1px solid #c9d7c0;
+          }
+
+          .btn-confirm {
+            background: linear-gradient(180deg, #2f7d1d 0%, #1b5d10 100%);
+            color: #fff;
+            box-shadow: 0 10px 20px rgba(27, 93, 16, 0.24);
+          }
+
+          .btn-confirm.danger {
+            background: linear-gradient(180deg, #d93f32 0%, #b42318 100%);
+            box-shadow: 0 10px 20px rgba(180, 35, 24, 0.24);
+          }
+
           :global(.leaflet-container) {
             font-family: inherit;
             background: #d4e0cb;
@@ -1224,13 +1438,17 @@ export default function Page() {
               align-items: flex-start;
             }
 
-            .edit-row {
-              gap: 10px;
-              flex-wrap: wrap;
+            .head-actions {
+              width: 100%;
             }
 
-            .delete-btn {
-              margin-left: 0;
+            .confirm-actions {
+              flex-direction: column;
+            }
+
+            .btn-cancel,
+            .btn-confirm {
+              width: 100%;
             }
           }
         `}</style>

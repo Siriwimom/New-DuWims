@@ -137,52 +137,6 @@ function displayLatest(sensor) {
   return "-";
 }
 
-function sensorRangeText(sensorName = "") {
-  const key = String(sensorName).toLowerCase();
-
-  if (key.includes("temp") || key.includes("อุณหภูมิ")) {
-    return { min: "20 °C", max: "35 °C" };
-  }
-  if (
-    (key.includes("humidity") && !key.includes("soil")) ||
-    key.includes("ความชื้นสัมพัทธ์") ||
-    key === "rh"
-  ) {
-    return { min: "75 %", max: "85 %" };
-  }
-  if (key.includes("wind") || key.includes("ลม")) {
-    return { min: "< 0.56 m/s", max: "0.56 - 1.39 m/s" };
-  }
-  if (key.includes("light") || key.includes("แสง")) {
-    return { min: "< 40000 lux", max: "40000 - 60000 lux" };
-  }
-  if (key.includes("rain") || key.includes("ฝน")) {
-    return { min: "< 4 mm", max: "4 - 8 mm" };
-  }
-  if (
-    key.includes("soil") ||
-    key.includes("moisture") ||
-    key.includes("ความชื้นในดิน") ||
-    key.includes("ดิน")
-  ) {
-    return { min: "65 %", max: "80 %" };
-  }
-  if (key === "n" || key.includes("ไนโตรเจน")) {
-    return { min: "0.1 %", max: "1.0 %" };
-  }
-  if (key === "p" || key.includes("ฟอสฟอรัส")) {
-    return { min: "25 ppm", max: "45 ppm" };
-  }
-  if (key === "k" || key.includes("โพแทสเซียม")) {
-    return { min: "0.8 cmol/kg", max: "1.4 cmol/kg" };
-  }
-  if (key.includes("water") || key.includes("ให้น้ำ")) {
-    return { min: "50 %", max: "90 %" };
-  }
-
-  return { min: "-", max: "-" };
-}
-
 function getLatestNumericValue(sensor) {
   const raw =
     sensor?.latestValue ??
@@ -212,41 +166,215 @@ function formatSensorValue(value, unit = "") {
   return `${value}${unit ? ` ${unit}` : ""}`;
 }
 
-function getSensorLimitRange(sensor = {}, sensorName = "") {
-  const minValue = toNum(sensor?.minValue);
-  const maxValue = toNum(sensor?.maxValue);
-  const unit = getDisplayUnit(sensor);
+function getSensorThresholdProfile(sensorName = "") {
+  const key = String(sensorName).trim().toLowerCase();
 
-  if (minValue != null || maxValue != null) {
+  if (key.includes("temp") || key.includes("อุณหภูมิ")) {
     return {
-      min: minValue,
-      max: maxValue,
-      minText: formatSensorValue(minValue ?? "-", unit),
-      maxText: formatSensorValue(maxValue ?? "-", unit),
-      unit,
-      source: "sensor",
+      label: "อุณหภูมิ",
+      min: 20,
+      max: 35,
+      displayMin: "20 °C",
+      displayMax: "35 °C",
+      lowReason:
+        "ต่ำกว่า 20: ต้นชะงักการดึงน้ำ ปากใบปิดทำให้สังเคราะห์แสงหยุดชะงัก",
+      highReason:
+        "สูงกว่า 35: พืชเครียดจากความร้อนจัด ใบไหม้และดอกร่วงก่อนกำหนด",
     };
   }
 
-  const fallback = sensorRangeText(sensorName);
+  if (
+    (key.includes("humidity") && !key.includes("soil")) ||
+    key.includes("ความชื้นสัมพัทธ์") ||
+    key === "rh"
+  ) {
+    return {
+      label: "ความชื้นสัมพัทธ์",
+      min: 75,
+      max: 85,
+      displayMin: "75 %",
+      displayMax: "85 %",
+      lowReason:
+        "ต่ำกว่า 75: อากาศแห้งเกินไป ดอกและหางแย้สูญเสียน้ำจนแห้งร่วง",
+      highReason:
+        "สูงกว่า 85: อากาศอิ่มตัว เกสรจับก้อนผสมไม่ติด และเสี่ยงโรคเชื้อรา",
+    };
+  }
+
+  if (key.includes("wind") || key.includes("ลม")) {
+    return {
+      label: "ความเร็วลม",
+      min: 2,
+      max: 5,
+      displayMin: "2 กม./ชม.",
+      displayMax: "5 กม./ชม.",
+      lowReason:
+        "ต่ำกว่า 2: อากาศไม่ไหลเวียน ความร้อนสะสมในทรงพุ่มสูงเกินเกณฑ์",
+      highReason:
+        "สูงกว่า 5: กิ่งฉีกขาดง่าย และใบสูญเสียน้ำเร็วเกินไปจนต้นเหี่ยวเฉา",
+    };
+  }
+
+  if (key.includes("light") || key.includes("แสง")) {
+    return {
+      label: "ความเข้มแสง",
+      min: 40000,
+      max: 60000,
+      displayMin: "40,000 Lux",
+      displayMax: "60,000 Lux",
+      lowReason:
+        "ต่ำกว่า 40,000: พลังงานแสงไม่พอต่อการสร้างตาดอกและเลี้ยงผลอ่อน",
+      highReason:
+        "สูงกว่า 60,000: รังสีความร้อนแรงเกินไป ทำลายเนื้อเยื่อผิวใบและผล (Sunburn)",
+    };
+  }
+
+  if (key.includes("rain") || key.includes("ฝน")) {
+    return {
+      label: "ปริมาณน้ำฝน",
+      min: 4,
+      max: 10,
+      displayMin: "4 มม./วัน",
+      displayMax: "8 มม./วัน",
+      lowReason:
+        "ต่ำกว่า 4: ดินแห้งเกินไป กระทบต่อการละลายและการดูดซึมธาตุอาหาร",
+      highReason:
+        "สูงกว่า 10: กระตุ้นการแตกใบอ่อนแทนการออกดอก และน้ำเกินจนผลร่วง",
+    };
+  }
+
+  if (
+    key.includes("soil") ||
+    key.includes("moisture") ||
+    key.includes("ความชื้นในดิน") ||
+    key.includes("ดิน")
+  ) {
+    return {
+      label: "ความชื้นในดิน",
+      min: 65,
+      max: 80,
+      displayMin: "65 %",
+      displayMax: "80 %",
+      lowReason:
+        "ต่ำกว่า 65: ดินแห้งจนรากฝอยตาย ส่งน้ำไปเลี้ยงผลไม่ต่อเนื่อง",
+      highReason:
+        "สูงกว่า 80: ดินขาดอากาศ รากหายใจไม่ได้และเน่าตายจากเชื้อราในดิน",
+    };
+  }
+
+  if (key === "n" || key.includes("ไนโตรเจน")) {
+    return {
+      label: "ไนโตรเจน (N)",
+      min: 0.1,
+      max: 1.0,
+      displayMin: "0.1",
+      displayMax: "1.0",
+      lowReason:
+        "ต่ำกว่า 0.1: ต้นแคระแกร็น ใบเหลืองซีด ขาดพลังงานเจริญเติบโต",
+      highReason:
+        "สูงกว่า 1.0: ต้นบ้าใบ จะสลัดลูกทิ้งเพื่อไปเลี้ยงใบอ่อนแทน",
+    };
+  }
+
+  if (key === "p" || key.includes("ฟอสฟอรัส")) {
+    return {
+      label: "ฟอสฟอรัส (P)",
+      min: 25,
+      max: 45,
+      displayMin: "25 ppm",
+      displayMax: "45 ppm",
+      lowReason:
+        "ต่ำกว่า 25: พลังงานสะสมไม่พอสร้างตาดอก และระบบรากไม่เดิน",
+      highReason:
+        "สูงกว่า 45: ธาตุเกินจนไปขัดขวางการดูดซึมธาตุอาหารรองชนิดอื่น",
+    };
+  }
+
+  if (key === "k" || key.includes("โพแทสเซียม")) {
+    return {
+      label: "โพแทสเซียม (K)",
+      min: 0.8,
+      max: 1.4,
+      displayMin: "0.8 cmol/kg",
+      displayMax: "1.4 cmol/kg",
+      lowReason:
+        "ต่ำกว่า 0.8: การเคลื่อนย้ายน้ำตาลผิดปกติ ผลบิดเบี้ยว เนื้อไม่หวาน",
+      highReason:
+        "สูงกว่า 1.4: ดินเค็มและขัดขวางการดูดซึมแคลเซียม ทำให้เปลือกแตก",
+    };
+  }
+
+  if (key.includes("water") || key.includes("ให้น้ำ")) {
+    return {
+      label: "การให้น้ำ",
+      min: 80,
+      max: 150,
+      displayMin: "80 ลิตร/วัน/ต้น",
+      displayMax: "150 ลิตร/วัน/ต้น",
+      lowReason:
+        "ต่ำกว่า 80: ปริมาณน้ำไม่พอเลี้ยงผล ทำให้ลูกฝ่อและชะงักการโต",
+      highReason:
+        "สูงกว่า 150: สิ้นเปลืองน้ำโดยเปล่าประโยชน์ และเสี่ยงเกิดโรครากเน่า",
+    };
+  }
+
   return {
+    label: sensorName || "Sensor",
     min: null,
     max: null,
-    minText: fallback.min,
-    maxText: fallback.max,
-    unit,
-    source: "fallback",
+    displayMin: "-",
+    displayMax: "-",
+    lowReason: "",
+    highReason: "",
   };
 }
 
-function isSensorOutOfRange(sensor = {}, sensorName = "") {
+function getSensorStatusInfo(sensor = {}, sensorName = "") {
   const latest = getLatestNumericValue(sensor);
-  const range = getSensorLimitRange(sensor, sensorName);
+  const profile = getSensorThresholdProfile(sensorName);
+  const unit = getDisplayUnit(sensor);
 
-  if (latest == null) return false;
-  if (range.min != null && latest < range.min) return true;
-  if (range.max != null && latest > range.max) return true;
-  return false;
+  if (latest == null) {
+    return {
+      latest,
+      unit,
+      profile,
+      isOut: false,
+      statusText: "ไม่มีข้อมูลปัจจุบัน",
+      reasonText: "ไม่พบค่าปัจจุบันจาก latestValue / value / lastReading",
+    };
+  }
+
+  if (profile.min != null && latest < profile.min) {
+    return {
+      latest,
+      unit,
+      profile,
+      isOut: true,
+      statusText: "ค่าต่ำเกินช่วงที่กำหนด",
+      reasonText: profile.lowReason,
+    };
+  }
+
+  if (profile.max != null && latest > profile.max) {
+    return {
+      latest,
+      unit,
+      profile,
+      isOut: true,
+      statusText: "ค่าสูงเกินช่วงที่กำหนด",
+      reasonText: profile.highReason,
+    };
+  }
+
+  return {
+    latest,
+    unit,
+    profile,
+    isOut: false,
+    statusText: "ค่าปกติ",
+    reasonText: "ค่าอยู่ในช่วงที่กำหนด",
+  };
 }
 
 function buildMapData(plotsRaw) {
@@ -391,26 +519,16 @@ function buildSensorCards(plots = []) {
         ? sensors
             .map((sensor) => {
               const sensorName = sensor?.name || sensor?.uid || "Sensor";
-              const latestTs = formatDateTime(
-                sensor?.latestTimestamp ||
-                  sensor?.lastReadingAt ||
-                  sensor?.ts ||
-                  sensor?.updatedAt
-              );
-
-              const latestNumeric = getLatestNumericValue(sensor);
-              const range = getSensorLimitRange(sensor, sensorName);
-              const unit = range.unit || getDisplayUnit(sensor);
-              const isOut = isSensorOutOfRange(sensor, sensorName);
-
-              if (isOut) hasProblemInNode = true;
-
+              const sensorStatus = getSensorStatusInfo(sensor, sensorName);
+              const range = sensorStatus.profile;
               const latestValueText =
-                latestNumeric != null
-                  ? formatSensorValue(latestNumeric, unit)
+                sensorStatus.latest != null
+                  ? formatSensorValue(sensorStatus.latest, sensorStatus.unit)
                   : displayLatest(sensor);
 
-              const sensorBoxStyle = isOut
+              if (sensorStatus.isOut) hasProblemInNode = true;
+
+              const sensorBoxStyle = sensorStatus.isOut
                 ? `
                   border:1.5px solid #ef4444;
                   background:#fef2f2;
@@ -422,14 +540,17 @@ function buildSensorCards(plots = []) {
                   box-shadow:0 0 0 1px rgba(34,197,94,.08) inset;
                 `;
 
-              const valueStyle = isOut
+              const valueStyle = sensorStatus.isOut
                 ? "color:#dc2626;font-weight:800;"
                 : "color:#166534;font-weight:800;";
 
-              const statusText = isOut ? "ค่าสูง/ต่ำเกินช่วงที่กำหนด" : "ค่าปกติ";
-              const statusStyle = isOut
+              const statusStyle = sensorStatus.isOut
                 ? "color:#dc2626;font-weight:800;"
                 : "color:#166534;font-weight:800;";
+
+              const reasonStyle = sensorStatus.isOut
+                ? "color:#991b1b;font-weight:700;line-height:1.5;"
+                : "color:#166534;line-height:1.5;";
 
               return `
                 <div class="sensor-group">
@@ -439,27 +560,29 @@ function buildSensorCards(plots = []) {
                       <div class="sgi-name">${escapeHtml(sensorName)}</div>
                       <div class="sgi-vmm">
                         <div class="sgi-row">
-                          <span class="sgi-row-label">Value</span>
+                          <span class="sgi-row-label">ค่าปัจจุบัน</span>
                           <span class="sgi-row-val" style="${valueStyle}">
                             ${escapeHtml(latestValueText)}
                           </span>
                         </div>
                         <div class="sgi-row">
                           <span class="sgi-row-label">MIN</span>
-                          <span class="sgi-row-sub">${escapeHtml(range.minText)}</span>
+                          <span class="sgi-row-sub">${escapeHtml(range.displayMin)}</span>
                         </div>
                         <div class="sgi-row">
                           <span class="sgi-row-label">MAX</span>
-                          <span class="sgi-row-sub">${escapeHtml(range.maxText)}</span>
-                        </div>
-                        <div class="sgi-row">
-                          <span class="sgi-row-label">Updated</span>
-                          <span class="sgi-row-sub">${escapeHtml(latestTs)}</span>
+                          <span class="sgi-row-sub">${escapeHtml(range.displayMax)}</span>
                         </div>
                         <div class="sgi-row">
                           <span class="sgi-row-label" style="${statusStyle}">สถานะ</span>
                           <span class="sgi-row-sub" style="${statusStyle}">
-                            ${escapeHtml(statusText)}
+                            ${escapeHtml(sensorStatus.statusText)}
+                          </span>
+                        </div>
+                        <div class="sgi-row" style="align-items:flex-start">
+                          <span class="sgi-row-label" style="${statusStyle}">เหตุผล</span>
+                          <span class="sgi-row-sub" style="${reasonStyle}">
+                            ${escapeHtml(sensorStatus.reasonText)}
                           </span>
                         </div>
                       </div>
@@ -539,39 +662,17 @@ function buildIssueSummary(plots = []) {
       const sensors = Array.isArray(node?.sensors) ? node.sensors : [];
       for (const sensor of sensors) {
         const sensorName = sensor?.name || sensor?.uid || "Sensor";
-        const latestNumeric = getLatestNumericValue(sensor);
-        const range = getSensorLimitRange(sensor, sensorName);
-        const status = String(sensor?.status || "").toUpperCase();
+        const info = getSensorStatusInfo(sensor, sensorName);
 
-        const outByRange =
-          latestNumeric != null &&
-          ((range.min != null && latestNumeric < range.min) ||
-            (range.max != null && latestNumeric > range.max));
-
-        if (outByRange) {
+        if (info.isOut) {
           issues.push({
             plotName: plot?.plotName || "แปลง",
             nodeName: node?.nodeName || node?.uid || "Node",
             sensorName,
-            status: "OUT_OF_RANGE",
-            latestValue: latestNumeric,
-            min: range.min,
-            max: range.max,
-            unit: range.unit || getDisplayUnit(sensor),
-          });
-          continue;
-        }
-
-        if (status && status !== "OK") {
-          issues.push({
-            plotName: plot?.plotName || "แปลง",
-            nodeName: node?.nodeName || node?.uid || "Node",
-            sensorName,
-            status,
-            latestValue: latestNumeric,
-            min: range.min,
-            max: range.max,
-            unit: range.unit || getDisplayUnit(sensor),
+            latestValue: info.latest,
+            unit: info.unit,
+            statusText: info.statusText,
+            reasonText: info.reasonText,
           });
         }
       }
@@ -667,20 +768,20 @@ export default function Page() {
       issueListEl.innerHTML = issues.length
         ? issues
             .map((issue) => {
-              const extra =
-                issue.status === "OUT_OF_RANGE"
-                  ? ` • ${escapeHtml(
-                      formatSensorValue(issue.latestValue, issue.unit)
-                    )} นอกช่วง (${escapeHtml(
-                      formatSensorValue(issue.min, issue.unit)
-                    )} - ${escapeHtml(formatSensorValue(issue.max, issue.unit))})`
-                  : ` • ${escapeHtml(issue.status)}`;
-
               return `
-                <div class="alert-pill">
-                  ${escapeHtml(issue.sensorName)}${extra} • ${escapeHtml(
-                issue.plotName
-              )} / ${escapeHtml(issue.nodeName)}
+                <div class="alert-pill" style="display:block;line-height:1.5">
+                  <div style="font-weight:800">
+                    ${escapeHtml(issue.sensorName)} • ${escapeHtml(issue.statusText)}
+                  </div>
+                  <div>
+                    ค่า ${escapeHtml(formatSensorValue(issue.latestValue, issue.unit))}
+                  </div>
+                  <div>
+                    ${escapeHtml(issue.reasonText)}
+                  </div>
+                  <div>
+                    ${escapeHtml(issue.plotName)} / ${escapeHtml(issue.nodeName)}
+                  </div>
                 </div>
               `;
             })
@@ -841,15 +942,9 @@ export default function Page() {
                   .map((sensor, i) => {
                     const sensorName = sensor?.name || sensor?.uid || `Sensor ${i + 1}`;
                     const latestValue = displayLatest(sensor);
-                    const latestTs = formatDateTime(
-                      sensor?.latestTimestamp ||
-                        sensor?.lastReadingAt ||
-                        sensor?.ts ||
-                        sensor?.updatedAt
-                    );
                     return `<li>${escapeHtml(sensorName)} • ${escapeHtml(
                       latestValue
-                    )} • ${escapeHtml(latestTs)}</li>`;
+                    )}</li>`;
                   })
                   .join("")}
                </ul>`
@@ -870,7 +965,7 @@ export default function Page() {
               )}</div>
               <div style="margin-bottom:4px">สถานะ: ${escapeHtml(node?.status || "-")}</div>
               <div style="margin-bottom:4px">lat ${escapeHtml(pin.lat)}, lng ${escapeHtml(pin.lng)}</div>
-              <div style="font-weight:700;margin-top:8px;margin-bottom:4px">Sensors ล่าสุด</div>
+              <div style="font-weight:700;margin-top:8px;margin-bottom:4px">Sensors ปัจจุบัน</div>
               ${sensorListHtml}
             </div>
           `);

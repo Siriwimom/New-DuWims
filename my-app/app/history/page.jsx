@@ -12,15 +12,16 @@ const AUTH_KEYS = [
 ];
 
 const SENSOR_OPTIONS = [
+  { key: "temp", label: "อุณหภูมิ", unit: "°C" },
+  { key: "rh", label: "ความชื้นสัมพัทธ์", unit: "%" },
+  { key: "wind", label: "วัดความเร็วลม", unit: "m/s" },
+  { key: "light", label: "ความเข้มแสง", unit: "lux" },
+  { key: "rain", label: "ปริมาณน้ำฝน", unit: "mm" },
   { key: "soil", label: "ความชื้นในดิน", unit: "%" },
   { key: "water", label: "ความพร้อมใช้น้ำ", unit: "%" },
   { key: "n", label: "N", unit: "%" },
   { key: "p", label: "P", unit: "ppm" },
   { key: "k", label: "K", unit: "cmol/kg" },
-  { key: "temp", label: "อุณหภูมิ", unit: "°C" },
-  { key: "rh", label: "ความชื้นสัมพัทธ์", unit: "%" },
-  { key: "wind", label: "วัดความเร็วลม", unit: "m/s" },
-  { key: "rain", label: "ปริมาณน้ำฝน", unit: "mm" },
 ];
 
 function getApiBase() {
@@ -38,6 +39,10 @@ function getToken() {
 
 function getId(obj) {
   return obj?._id || obj?.id || obj?.uid || "";
+}
+
+function safeArray(v) {
+  return Array.isArray(v) ? v : [];
 }
 
 function toNum(value) {
@@ -68,7 +73,6 @@ function buildDateRange(startDate, endDate) {
   const out = [];
   const start = new Date(startDate);
   const end = new Date(endDate);
-
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
     return out;
   }
@@ -78,7 +82,6 @@ function buildDateRange(startDate, endDate) {
     out.push(formatDateInput(cur));
     cur.setDate(cur.getDate() + 1);
   }
-
   return out;
 }
 
@@ -116,12 +119,22 @@ function makeCsv(rows) {
     }
     return s;
   };
-
   return rows.map((row) => row.map(esc).join(",")).join("\n");
 }
 
 function canonicalSensorKey(name = "") {
   const key = String(name || "").trim().toLowerCase();
+
+  if (
+    key.includes("temp_rh") ||
+    key.includes("temperature_humidity")
+  ) {
+    return "temp_rh";
+  }
+
+  if (key.includes("npk")) {
+    return "npk";
+  }
 
   if (
     key.includes("soil_moisture") ||
@@ -135,9 +148,8 @@ function canonicalSensorKey(name = "") {
   if (
     key.includes("water_level") ||
     key.includes("water level") ||
-    key.includes("water") ||
-    key.includes("ให้น้ำ") ||
     key.includes("irrigation") ||
+    key.includes("ให้น้ำ") ||
     key.includes("ความพร้อมใช้น้ำ")
   ) {
     return "water";
@@ -145,7 +157,6 @@ function canonicalSensorKey(name = "") {
 
   if (
     key.includes("temperature") ||
-    key.includes("temp_rh") ||
     key === "temp" ||
     key.includes("อุณหภูมิ")
   ) {
@@ -161,21 +172,29 @@ function canonicalSensorKey(name = "") {
     return "rh";
   }
 
-  if (key === "n" || key.includes("ไนโตรเจน")) return "n";
-  if (key === "p" || key.includes("ฟอสฟอรัส")) return "p";
-  if (key === "k" || key.includes("โพแทสเซียม")) return "k";
-
-  if (key.includes("rain") || key.includes("ฝน")) return "rain";
+  if (
+    key.includes("light") ||
+    key.includes("lux") ||
+    key.includes("ความเข้มแสง") ||
+    key.includes("แสง")
+  ) {
+    return "light";
+  }
 
   if (
     key.includes("wind_speed") ||
     key.includes("wind speed") ||
-    key.includes("wind") ||
+    key === "wind" ||
     key.includes("วัดความเร็วลม") ||
     key.includes("ความเร็วลม")
   ) {
     return "wind";
   }
+
+  if (key.includes("rain") || key.includes("ฝน")) return "rain";
+  if (key === "n" || key.includes("ไนโตรเจน")) return "n";
+  if (key === "p" || key.includes("ฟอสฟอรัส")) return "p";
+  if (key === "k" || key.includes("โพแทสเซียม")) return "k";
 
   return "";
 }
@@ -184,15 +203,34 @@ function sensorLabelFromKey(key) {
   return SENSOR_OPTIONS.find((s) => s.key === key)?.label || key;
 }
 
+function getTimestampFromReading(item) {
+  return item?.timestamp || item?.ts || item?.time || item?.createdAt || item?.updatedAt || "";
+}
+
+function normalizeDateKey(value) {
+  const raw =
+    value?.timestamp ||
+    value?.ts ||
+    value?.time ||
+    value?.createdAt ||
+    value?.updatedAt ||
+    value;
+
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+  return formatDateInput(d);
+}
+
 function inferNodeType(node) {
   const raw = [
     node?.nodeType,
     node?.type,
     node?.nodeName,
+    node?.name,
     node?.uid,
-    ...(Array.isArray(node?.sensors)
-      ? node.sensors.map((s) => `${s?.name || ""} ${s?.uid || ""} ${s?.sensorType || ""}`)
-      : []),
+    ...safeArray(node?.sensors).map(
+      (s) => `${s?.name || ""} ${s?.uid || ""} ${s?.sensorType || ""}`
+    ),
   ]
     .filter(Boolean)
     .join(" ")
@@ -211,13 +249,23 @@ function inferNodeType(node) {
   return "air";
 }
 
-function getTimestampFromReading(item) {
-  return item?.timestamp || item?.ts || item?.time || item?.createdAt || item?.updatedAt || "";
+function getObjectValueByAliases(obj, aliases = []) {
+  if (!obj || typeof obj !== "object") return null;
+  for (const alias of aliases) {
+    const n = toNum(obj?.[alias]);
+    if (n !== null) return n;
+  }
+  return null;
 }
 
-function getValueFromReading(item) {
+function pickValueForSensorKey(item, sensorKey) {
+  if (!item) return null;
+
   const direct = toNum(item?.value);
   if (direct !== null) return direct;
+
+  const latestValue = toNum(item?.latestValue);
+  if (latestValue !== null) return latestValue;
 
   const reading = toNum(item?.reading);
   if (reading !== null) return reading;
@@ -225,44 +273,173 @@ function getValueFromReading(item) {
   const raw = toNum(item?.raw);
   if (raw !== null) return raw;
 
-  const latestValue = toNum(item?.latestValue);
-  if (latestValue !== null) return latestValue;
-
   const lastReading = toNum(item?.lastReading?.value);
   if (lastReading !== null) return lastReading;
+
+  const topAliases = {
+    temp: ["temp", "temperature", "t"],
+    rh: ["rh", "humidity", "humid", "h"],
+    wind: ["wind", "windSpeed", "wind_speed"],
+    light: ["light", "lux", "lightIntensity", "light_intensity"],
+    rain: ["rain", "rainfall"],
+    soil: ["soil", "soilMoisture", "soil_moisture", "moisture"],
+    water: ["water", "waterLevel", "water_level", "irrigation"],
+    n: ["n", "N", "nitrogen"],
+    p: ["p", "P", "phosphorus"],
+    k: ["k", "K", "potassium"],
+  };
+
+  const topValue = getObjectValueByAliases(item, topAliases[sensorKey] || []);
+  if (topValue !== null) return topValue;
+
+  const nestedSources = [
+    item?.value,
+    item?.reading,
+    item?.raw,
+    item?.latestValue,
+    item?.lastReading?.value,
+    item?.values,
+    item?.data,
+    item?.payload,
+    item?.metrics,
+    item?.measurement,
+  ];
+
+  for (const source of nestedSources) {
+    if (!source || typeof source !== "object") continue;
+
+    if (sensorKey === "temp") {
+      const v1 = getObjectValueByAliases(source, ["temp", "temperature", "t"]);
+      if (v1 !== null) return v1;
+      const trh = source?.temp_rh || source?.tempRh;
+      const v2 = getObjectValueByAliases(trh, ["temp", "temperature", "t"]);
+      if (v2 !== null) return v2;
+    }
+
+    if (sensorKey === "rh") {
+      const v1 = getObjectValueByAliases(source, ["rh", "humidity", "humid", "h"]);
+      if (v1 !== null) return v1;
+      const trh = source?.temp_rh || source?.tempRh;
+      const v2 = getObjectValueByAliases(trh, ["rh", "humidity", "humid", "h"]);
+      if (v2 !== null) return v2;
+    }
+
+    if (sensorKey === "light") {
+      const v = getObjectValueByAliases(source, ["light", "lux", "lightIntensity", "light_intensity"]);
+      if (v !== null) return v;
+    }
+
+    if (sensorKey === "wind") {
+      const v = getObjectValueByAliases(source, ["wind", "windSpeed", "wind_speed"]);
+      if (v !== null) return v;
+    }
+
+    if (sensorKey === "rain") {
+      const v = getObjectValueByAliases(source, ["rain", "rainfall"]);
+      if (v !== null) return v;
+    }
+
+    if (sensorKey === "soil") {
+      const v = getObjectValueByAliases(source, ["soil", "soilMoisture", "soil_moisture", "moisture"]);
+      if (v !== null) return v;
+    }
+
+    if (sensorKey === "water") {
+      const v = getObjectValueByAliases(source, ["water", "waterLevel", "water_level", "irrigation"]);
+      if (v !== null) return v;
+    }
+
+    if (sensorKey === "n" || sensorKey === "p" || sensorKey === "k") {
+      const v1 = getObjectValueByAliases(source, [sensorKey, sensorKey.toUpperCase()]);
+      if (v1 !== null) return v1;
+      const npk = source?.npk || source?.NPK;
+      const v2 = getObjectValueByAliases(npk, [sensorKey, sensorKey.toUpperCase()]);
+      if (v2 !== null) return v2;
+    }
+  }
 
   return null;
 }
 
-function normalizeDateKey(value) {
-  const raw =
-    value?.timestamp ||
-    value?.ts ||
-    value?.time ||
-    value?.createdAt ||
-    value?.updatedAt ||
-    value;
+function expandSensorKeys(rawSensor) {
+  const rawText = [
+    rawSensor?.sensorType,
+    rawSensor?.name,
+    rawSensor?.uid,
+    rawSensor?._id,
+    rawSensor?.id,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
 
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return null;
-  return formatDateInput(d);
+  if (rawText.includes("temp_rh") || rawText.includes("temperature_humidity")) {
+    return ["temp", "rh"];
+  }
+
+  if (rawText.includes("npk")) {
+    return ["n", "p", "k"];
+  }
+
+  const single = canonicalSensorKey(rawSensor?.sensorType || rawSensor?.name || rawSensor?.uid || "");
+  return single ? [single] : [];
+}
+
+function extractNodesFromPlot(plot) {
+  const directNodes = safeArray(plot?.nodes);
+
+  const pins =
+    safeArray(plot?.pins).length > 0
+      ? safeArray(plot?.pins)
+      : safeArray(plot?.polygon?.pins);
+
+  const pinNodes = pins.flatMap((pin) => {
+    const air = safeArray(pin?.node_air).map((node) => ({
+      ...node,
+      nodeType: node?.nodeType || "air",
+      pinId: getId(pin),
+      pinName: pin?.pinName || pin?.name || "",
+    }));
+
+    const soil = safeArray(pin?.node_soil).map((node) => ({
+      ...node,
+      nodeType: node?.nodeType || "soil",
+      pinId: getId(pin),
+      pinName: pin?.pinName || pin?.name || "",
+    }));
+
+    const generic = safeArray(pin?.nodes).map((node) => ({
+      ...node,
+      pinId: getId(pin),
+      pinName: pin?.pinName || pin?.name || "",
+    }));
+
+    return [...air, ...soil, ...generic];
+  });
+
+  const seen = new Set();
+  return [...directNodes, ...pinNodes].filter((node) => {
+    const key = getId(node) || `${node?.uid || ""}-${node?.nodeName || node?.name || ""}`;
+    if (!key) return false;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function normalizePlot(plot) {
+  const nodes = extractNodesFromPlot(plot).map((node) => ({
+    ...node,
+    sensors: safeArray(node?.sensors).map((sensor) => ({
+      ...sensor,
+      _frontendSensorKeys: expandSensorKeys(sensor),
+    })),
+  }));
+
   return {
     id: getId(plot),
     plotName: plot?.plotName || plot?.name || plot?.alias || "ไม่ทราบชื่อแปลง",
-    nodes: Array.isArray(plot?.nodes) ? plot.nodes : [],
-  };
-}
-
-function normalizeSensor(sensor) {
-  const sensorKey = canonicalSensorKey(sensor?.sensorType || sensor?.name || sensor?.uid || "");
-  return {
-    id: getId(sensor),
-    uid: sensor?.uid || "",
-    sensorKey,
-    label: sensorLabelFromKey(sensorKey),
+    nodes,
   };
 }
 
@@ -273,14 +450,14 @@ function normalizeReading(item) {
     nodeId: item?.nodeId || item?.node_id || item?.node?.id || item?.node?._id || "",
     plotId: item?.plotId || item?.plot_id || item?.plot?.id || item?.plot?._id || "",
     timestamp: getTimestampFromReading(item),
-    value: getValueFromReading(item),
+    value: pickValueForSensorKey(item, canonicalSensorKey(item?.sensorType || item?.sensorName || "")),
+    rawItem: item,
     status: item?.status || item?.state || "",
   };
 }
 
 async function apiGet(path) {
   const token = getToken();
-
   const res = await fetch(`${getApiBase()}${path}`, {
     method: "GET",
     headers: {
@@ -315,7 +492,7 @@ export default function HistoryPage() {
   const [endDate, setEndDate] = useState(defaultEnd);
   const [selectedPlotId, setSelectedPlotId] = useState("all");
 
-  const [selectedSensors, setSelectedSensors] = useState([]);
+  const [selectedSensors, setSelectedSensors] = useState(SENSOR_OPTIONS.map((s) => s.key));
   const [sensorDropdownOpen, setSensorDropdownOpen] = useState(false);
 
   const [readingMap, setReadingMap] = useState({});
@@ -328,7 +505,6 @@ export default function HistoryPage() {
     async function loadPlots() {
       setLoadingPlots(true);
       setError("");
-
       try {
         const data = await apiGet("/api/plots");
         if (!alive) return;
@@ -357,14 +533,9 @@ export default function HistoryPage() {
         setSensorDropdownOpen(false);
       }
     };
-
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
-
-  const allNodeCount = useMemo(() => {
-    return plots.reduce((sum, plot) => sum + (Array.isArray(plot.nodes) ? plot.nodes.length : 0), 0);
-  }, [plots]);
 
   const filteredPlots = useMemo(() => {
     if (selectedPlotId === "all") return plots;
@@ -374,8 +545,7 @@ export default function HistoryPage() {
   const visibleNodes = useMemo(() => {
     const rows = [];
     for (const plot of filteredPlots) {
-      const nodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
-      for (const node of nodes) {
+      for (const node of safeArray(plot?.nodes)) {
         rows.push({
           plotId: plot.id,
           plotName: plot.plotName,
@@ -383,12 +553,17 @@ export default function HistoryPage() {
           nodeUid: node?.uid || "",
           nodeName: node?.nodeName || node?.name || node?.uid || "Node",
           nodeType: inferNodeType(node),
-          sensors: Array.isArray(node?.sensors) ? node.sensors : [],
+          sensors: safeArray(node?.sensors),
         });
       }
     }
     return rows;
   }, [filteredPlots]);
+
+  const allNodeCount = useMemo(
+    () => plots.reduce((sum, plot) => sum + safeArray(plot?.nodes).length, 0),
+    [plots]
+  );
 
   const selectedSensorNames = useMemo(() => {
     return selectedSensors
@@ -404,28 +579,47 @@ export default function HistoryPage() {
 
   const sensorTargets = useMemo(() => {
     const targets = [];
+    const seen = new Set();
 
     for (const plot of filteredPlots) {
-      const nodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
-      for (const node of nodes) {
-        const sensors = Array.isArray(node?.sensors) ? node.sensors : [];
-        for (const rawSensor of sensors) {
-          const sensor = normalizeSensor(rawSensor);
-          if (!sensor.id) continue;
-          if (!sensor.sensorKey) continue;
-          if (selectedSensors.length && !selectedSensors.includes(sensor.sensorKey)) continue;
+      for (const node of safeArray(plot?.nodes)) {
+        for (const rawSensor of safeArray(node?.sensors)) {
+          const keys =
+            safeArray(rawSensor?._frontendSensorKeys).length > 0
+              ? rawSensor._frontendSensorKeys
+              : expandSensorKeys(rawSensor);
 
-          targets.push({
-            plotId: plot.id,
-            plotName: plot.plotName,
-            nodeId: getId(node),
-            nodeUid: node?.uid || "",
-            nodeName: node?.nodeName || node?.name || node?.uid || "Node",
-            nodeType: inferNodeType(node),
-            sensorId: sensor.id,
-            sensorKey: sensor.sensorKey,
-            sensorLabel: sensor.label,
-          });
+          for (const sensorKey of keys) {
+            if (!sensorKey) continue;
+            if (!selectedSensors.includes(sensorKey)) continue;
+
+            const target = {
+              plotId: plot.id,
+              plotName: plot.plotName,
+              nodeId: getId(node),
+              nodeUid: node?.uid || "",
+              nodeName: node?.nodeName || node?.name || node?.uid || "Node",
+              nodeType: inferNodeType(node),
+              sensorId: getId(rawSensor),
+              sensorUid: rawSensor?.uid || "",
+              rawSensorType: rawSensor?.sensorType || rawSensor?.name || rawSensor?.uid || "",
+              sensorKey,
+              sensorLabel: sensorLabelFromKey(sensorKey),
+              latestValue: rawSensor?.latestValue,
+              latestTimestamp: rawSensor?.latestTimestamp,
+            };
+
+            const uniq = [
+              target.plotId,
+              target.nodeId || target.nodeUid,
+              target.sensorId || target.sensorUid || target.rawSensorType,
+              target.sensorKey,
+            ].join("|");
+
+            if (seen.has(uniq)) continue;
+            seen.add(uniq);
+            targets.push(target);
+          }
         }
       }
     }
@@ -448,19 +642,25 @@ export default function HistoryPage() {
       try {
         const results = await Promise.all(
           sensorTargets.map(async (target) => {
+            const mapKey = [
+              target.plotId,
+              target.nodeId || target.nodeUid,
+              target.sensorId || target.sensorUid || target.rawSensorType,
+              target.sensorKey,
+            ].join("|");
+
             try {
-              const qs = new URLSearchParams({
-                sensorId: String(target.sensorId),
-                plotId: String(target.plotId),
-                nodeId: String(target.nodeId),
-                limit: "500",
-              });
+              const qs = new URLSearchParams();
+              qs.set("limit", "500");
+              if (target.plotId) qs.set("plotId", String(target.plotId));
+              if (target.nodeId) qs.set("nodeId", String(target.nodeId));
+              if (target.sensorId) qs.set("sensorId", String(target.sensorId));
 
               const data = await apiGet(`/api/sensor-readings?${qs.toString()}`);
               const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-              return [target.sensorId, items.map(normalizeReading)];
+              return [mapKey, items.map(normalizeReading)];
             } catch {
-              return [target.sensorId, []];
+              return [mapKey, []];
             }
           })
         );
@@ -488,20 +688,37 @@ export default function HistoryPage() {
     const rows = [];
 
     for (const target of sensorTargets) {
-      const items = Array.isArray(readingMap[target.sensorId]) ? readingMap[target.sensorId] : [];
+      const mapKey = [
+        target.plotId,
+        target.nodeId || target.nodeUid,
+        target.sensorId || target.sensorUid || target.rawSensorType,
+        target.sensorKey,
+      ].join("|");
+
+      const items = Array.isArray(readingMap[mapKey]) ? readingMap[mapKey] : [];
+      const seenRowKeys = new Set();
 
       for (const item of items) {
-        const timestamp = getTimestampFromReading(item);
+        const raw = item?.rawItem || item;
+        const timestamp = getTimestampFromReading(raw);
         const dateKey = normalizeDateKey(timestamp);
         if (!dateKey) continue;
         if (dateKey < startDate || dateKey > endDate) continue;
 
-        const value =
-          item?.value !== undefined && item?.value !== null
-            ? toNum(item.value)
-            : getValueFromReading(item);
+        const itemPlotId = raw?.plotId || raw?.plot_id || raw?.plot?.id || raw?.plot?._id || "";
+        const itemNodeId = raw?.nodeId || raw?.node_id || raw?.node?.id || raw?.node?._id || "";
+        const itemSensorId = raw?.sensorId || raw?.sensor_id || raw?.sensor?.id || raw?.sensor?._id || "";
 
+        if (itemPlotId && String(itemPlotId) !== String(target.plotId)) continue;
+        if (itemNodeId && String(itemNodeId) !== String(target.nodeId)) continue;
+        if (itemSensorId && target.sensorId && String(itemSensorId) !== String(target.sensorId)) continue;
+
+        const value = pickValueForSensorKey(raw, target.sensorKey);
         if (value === null) continue;
+
+        const rowKey = `${target.plotId}|${target.nodeId}|${target.sensorKey}|${dateKey}|${value}`;
+        if (seenRowKeys.has(rowKey)) continue;
+        seenRowKeys.add(rowKey);
 
         rows.push({
           plotId: target.plotId,
@@ -515,9 +732,51 @@ export default function HistoryPage() {
           sensorLabel: target.sensorLabel,
           value,
           timestamp,
-          status: item?.status || "",
+          status: raw?.status || "",
           dateKey,
+          source: "history",
         });
+      }
+
+      const hasHistoryForTarget = rows.some(
+        (r) =>
+          r.plotId === target.plotId &&
+          r.nodeId === target.nodeId &&
+          r.sensorId === target.sensorId &&
+          r.sensorKey === target.sensorKey
+      );
+
+      if (!hasHistoryForTarget) {
+        const fallbackValue = pickValueForSensorKey(
+          { latestValue: target.latestValue },
+          target.sensorKey
+        );
+        const fallbackTs = target.latestTimestamp || null;
+        const fallbackDateKey = normalizeDateKey(fallbackTs || endDate);
+
+        if (
+          fallbackValue !== null &&
+          fallbackDateKey &&
+          fallbackDateKey >= startDate &&
+          fallbackDateKey <= endDate
+        ) {
+          rows.push({
+            plotId: target.plotId,
+            plotName: target.plotName,
+            nodeId: target.nodeId,
+            nodeUid: target.nodeUid,
+            nodeName: target.nodeName,
+            nodeType: target.nodeType,
+            sensorId: target.sensorId,
+            sensorKey: target.sensorKey,
+            sensorLabel: target.sensorLabel,
+            value: fallbackValue,
+            timestamp: fallbackTs || `${fallbackDateKey}T00:00:00.000Z`,
+            status: "",
+            dateKey: fallbackDateKey,
+            source: "latest",
+          });
+        }
       }
     }
 
@@ -540,16 +799,19 @@ export default function HistoryPage() {
       filteredReadingRows
         .filter((row) => row.plotId === plot.id && row.sensorKey === firstSelectedSensorKey)
         .forEach((row) => {
-          const existing = valuesByDate.get(row.dateKey) || [];
-          existing.push(row.value);
-          valuesByDate.set(row.dateKey, existing);
+          const list = valuesByDate.get(row.dateKey) || [];
+          list.push(row.value);
+          valuesByDate.set(row.dateKey, list);
         });
 
-      byPlot.set(plot.id, {
-        plotId: plot.id,
-        plotName: plot.plotName,
-        values: dateKeys.map((d) => average(valuesByDate.get(d) || [])),
-      });
+      const avgValues = dateKeys.map((d) => average(valuesByDate.get(d) || []));
+      if (avgValues.some((v) => Number.isFinite(v))) {
+        byPlot.set(plot.id, {
+          plotId: plot.id,
+          plotName: plot.plotName,
+          values: avgValues,
+        });
+      }
     }
 
     return [...byPlot.values()];
@@ -561,7 +823,6 @@ export default function HistoryPage() {
 
     const min = Math.min(...vals);
     const max = Math.max(...vals);
-
     if (min === max) return { min: min - 1, max: max + 1 };
 
     const pad = (max - min) * 0.1;
@@ -571,8 +832,8 @@ export default function HistoryPage() {
   const summaryRows = useMemo(() => {
     return visibleNodes.map((node) => {
       const nodeRows = filteredReadingRows.filter((r) => r.nodeId === node.nodeId);
-      const values = {};
 
+      const values = {};
       for (const opt of SENSOR_OPTIONS) {
         values[opt.key] = average(nodeRows.filter((r) => r.sensorKey === opt.key).map((r) => r.value));
       }
@@ -582,12 +843,13 @@ export default function HistoryPage() {
         nodeName: node.nodeName,
         nodeType: node.nodeType,
         values,
+        hasAnyValue: Object.values(values).some((v) => Number.isFinite(v)),
       };
     });
   }, [visibleNodes, filteredReadingRows]);
 
   const csvRows = useMemo(() => {
-    const header = ["plot", "node", "nodeType", "sensor", "value", "timestamp", "status"];
+    const header = ["plot", "node", "nodeType", "sensor", "value", "timestamp", "status", "source"];
     const body = filteredReadingRows.map((row) => [
       row.plotName,
       row.nodeName,
@@ -596,6 +858,7 @@ export default function HistoryPage() {
       row.value ?? "",
       row.timestamp ?? "",
       row.status ?? "",
+      row.source ?? "",
     ]);
 
     return [header, ...body];
@@ -605,28 +868,21 @@ export default function HistoryPage() {
     csvRef.current = makeCsv(csvRows);
   }, [csvRows]);
 
-  const soilSensors = SENSOR_OPTIONS.filter((s) =>
-    ["soil", "water", "n", "p", "k"].includes(s.key)
-  );
-
-  const airSensors = SENSOR_OPTIONS.filter((s) =>
-    ["temp", "rh", "wind", "rain"].includes(s.key)
-  );
-
-  const toggleSensor = (key) => {
+  function toggleSensor(key) {
     setSelectedSensors((prev) => {
       if (prev.includes(key)) {
-        return prev.filter((k) => k !== key);
+        const next = prev.filter((k) => k !== key);
+        return next.length ? next : SENSOR_OPTIONS.map((s) => s.key);
       }
       return [...prev, key];
     });
-  };
+  }
 
-  const resetSensors = () => {
-    setSelectedSensors([]);
-  };
+  function resetSensors() {
+    setSelectedSensors(SENSOR_OPTIONS.map((s) => s.key));
+  }
 
-  const handleQuick = (label) => {
+  function handleQuick(label) {
     const now = new Date();
     const end = formatDateInput(now);
     let start = end;
@@ -642,9 +898,9 @@ export default function HistoryPage() {
     setQuickRange(label);
     setStartDate(start);
     setEndDate(end);
-  };
+  }
 
-  const exportCsv = () => {
+  function exportCsv() {
     const blob = new Blob([csvRef.current], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -654,7 +910,7 @@ export default function HistoryPage() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-  };
+  }
 
   const yLabels = (() => {
     const min = chartMinMax.min;
@@ -747,7 +1003,7 @@ export default function HistoryPage() {
               </button>
 
               {sensorDropdownOpen && (
-                <div className="sensor-dd-menu open" id="sensorDdMenu">
+                <div className="sensor-dd-menu open">
                   <div className="sensor-dd-header">
                     <span className="sensor-dd-header-title">เลือกได้หลายตัว</span>
                     <button
@@ -819,12 +1075,16 @@ export default function HistoryPage() {
           </div>
 
           <div className="chart-legend">
-            {chartSeries.map((item, i) => (
-              <div key={item.plotId} className="legend-item">
-                <div className="legend-dot" style={{ background: colorOfIndex(i) }} />
-                <span>{item.plotName}</span>
-              </div>
-            ))}
+            {chartSeries.length ? (
+              chartSeries.map((item, i) => (
+                <div key={item.plotId} className="legend-item">
+                  <div className="legend-dot" style={{ background: colorOfIndex(i) }} />
+                  <span>{item.plotName}</span>
+                </div>
+              ))
+            ) : (
+              <div className="chart-empty-inline">ไม่มีข้อมูลสำหรับกราฟในช่วงที่เลือก</div>
+            )}
           </div>
 
           <div className="chart-wrap">
@@ -836,9 +1096,7 @@ export default function HistoryPage() {
                 <line x1="0" y1="176" x2="900" y2="176" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
 
                 {chartSeries.map((series, i) => {
-                  const safeValues = series.values.map((v) =>
-                    Number.isFinite(v) ? v : chartMinMax.min
-                  );
+                  const safeValues = series.values.map((v) => (Number.isFinite(v) ? v : chartMinMax.min));
                   const points = polylinePoints(safeValues, chartMinMax.min, chartMinMax.max, 900, 220);
 
                   return (
@@ -848,6 +1106,7 @@ export default function HistoryPage() {
                       stroke={colorOfIndex(i)}
                       strokeWidth="2.5"
                       strokeLinejoin="round"
+                      strokeLinecap="round"
                       points={points}
                     />
                   );
@@ -874,7 +1133,7 @@ export default function HistoryPage() {
           </div>
 
           <div className="chart-note">
-            * หน้า History เชื่อมข้อมูลจาก /api/plots และ /api/sensor-readings • กราฟนี้เทียบแปลงด้วย sensor ตัวแรกที่เลือก
+            * กราฟนี้เทียบแปลงด้วย sensor ตัวแรกที่เลือก
           </div>
         </div>
 
@@ -893,6 +1152,7 @@ export default function HistoryPage() {
                   <th>อุณหภูมิ (°C)</th>
                   <th>ความชื้นสัมพัทธ์ (%)</th>
                   <th>วัดความเร็วลม (m/s)</th>
+                  <th>ความเข้มแสง (lux)</th>
                   <th>ปริมาณน้ำฝน (mm)</th>
                   <th>ความชื้นในดิน (%)</th>
                   <th>ความพร้อมใช้น้ำ (%)</th>
@@ -902,7 +1162,7 @@ export default function HistoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {summaryRows.length ? (
+                {summaryRows.some((row) => row.hasAnyValue) ? (
                   summaryRows.map((row, index) => {
                     const val = (k) =>
                       Number.isFinite(row.values[k]) ? Number(row.values[k].toFixed(2)) : "—";
@@ -919,6 +1179,7 @@ export default function HistoryPage() {
                         <td>{val("temp")}</td>
                         <td>{val("rh")}</td>
                         <td>{val("wind")}</td>
+                        <td>{val("light")}</td>
                         <td>{val("rain")}</td>
                         <td>{val("soil")}</td>
                         <td>{val("water")}</td>
@@ -930,7 +1191,7 @@ export default function HistoryPage() {
                   })
                 ) : (
                   <tr>
-                    <td colSpan="12" style={{ textAlign: "center" }}>
+                    <td colSpan="13" style={{ textAlign: "center" }}>
                       ไม่มีข้อมูล
                     </td>
                   </tr>
@@ -1227,6 +1488,11 @@ export default function HistoryPage() {
             font-weight: 700;
           }
 
+          .chart-empty-inline {
+            font-size: 12px;
+            color: #64748b;
+          }
+
           .legend-item {
             display: flex;
             align-items: center;
@@ -1298,7 +1564,7 @@ export default function HistoryPage() {
           .summary-table {
             width: 100%;
             border-collapse: collapse;
-            min-width: 1100px;
+            min-width: 1250px;
           }
 
           .summary-table th {
