@@ -73,6 +73,7 @@ function buildDateRange(startDate, endDate) {
   const out = [];
   const start = new Date(startDate);
   const end = new Date(endDate);
+
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
     return out;
   }
@@ -132,19 +133,15 @@ function makeCsv(rows) {
     }
     return s;
   };
+
   return rows.map((row) => row.map(esc).join(",")).join("\n");
 }
 
 function canonicalSensorKey(name = "") {
   const key = String(name || "").trim().toLowerCase();
 
-  if (key.includes("temp_rh") || key.includes("temperature_humidity")) {
-    return "temp_rh";
-  }
-
-  if (key.includes("npk")) {
-    return "npk";
-  }
+  if (key.includes("temp_rh") || key.includes("temperature_humidity")) return "temp_rh";
+  if (key.includes("npk")) return "npk";
 
   if (
     key.includes("soil_moisture") ||
@@ -165,9 +162,7 @@ function canonicalSensorKey(name = "") {
     return "water";
   }
 
-  if (key.includes("temperature") || key === "temp" || key.includes("อุณหภูมิ")) {
-    return "temp";
-  }
+  if (key.includes("temperature") || key === "temp" || key.includes("อุณหภูมิ")) return "temp";
 
   if (
     key.includes("humidity") ||
@@ -399,9 +394,7 @@ function extractNodesFromPlot(plot) {
   const directNodes = safeArray(plot?.nodes);
 
   const pins =
-    safeArray(plot?.pins).length > 0
-      ? safeArray(plot?.pins)
-      : safeArray(plot?.polygon?.pins);
+    safeArray(plot?.pins).length > 0 ? safeArray(plot?.pins) : safeArray(plot?.polygon?.pins);
 
   const pinNodes = pins.flatMap((pin) => {
     const air = safeArray(pin?.node_air).map((node) => ({
@@ -502,7 +495,7 @@ export default function HistoryPage() {
   const [endDate, setEndDate] = useState(defaultEnd);
   const [selectedPlotId, setSelectedPlotId] = useState("all");
 
-  const [selectedSensors, setSelectedSensors] = useState(SENSOR_OPTIONS.map((s) => s.key));
+  const [selectedSensors, setSelectedSensors] = useState([]);
   const [sensorDropdownOpen, setSensorDropdownOpen] = useState(false);
 
   const [readingMap, setReadingMap] = useState({});
@@ -759,10 +752,7 @@ export default function HistoryPage() {
       );
 
       if (!hasHistoryForTarget) {
-        const fallbackValue = pickValueForSensorKey(
-          { latestValue: target.latestValue },
-          target.sensorKey
-        );
+        const fallbackValue = pickValueForSensorKey({ latestValue: target.latestValue }, target.sensorKey);
         const fallbackTs = target.latestTimestamp || null;
         const fallbackDateKey = normalizeDateKey(fallbackTs || endDate);
 
@@ -932,15 +922,14 @@ export default function HistoryPage() {
   function toggleSensor(key) {
     setSelectedSensors((prev) => {
       if (prev.includes(key)) {
-        const next = prev.filter((k) => k !== key);
-        return next.length ? next : SENSOR_OPTIONS.map((s) => s.key);
+        return prev.filter((k) => k !== key);
       }
       return [...prev, key];
     });
   }
 
   function resetSensors() {
-    setSelectedSensors(SENSOR_OPTIONS.map((s) => s.key));
+    setSelectedSensors([]);
   }
 
   function handleQuick(label) {
@@ -1256,22 +1245,36 @@ export default function HistoryPage() {
         </div>
 
         <style jsx>{`
+          #history-page-root,
+          #history-page-root * {
+            box-sizing: border-box;
+          }
+
           #history-page-root {
-            padding: 18px;
+            position: relative;
+            overflow: visible !important;
+            width: 100%;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 16px 20px;
+            z-index: 2;
             display: grid;
-            gap: 16px;
+            gap: 18px;
           }
 
           .history-card {
-            background: #ffffff;
-            border: 1px solid #dbead5;
+            width: 100%;
+            background: #fff;
+            border: 1px solid #dfe7dc;
             border-radius: 18px;
-            padding: 16px;
-            box-shadow: 0 8px 24px rgba(36, 79, 21, 0.06);
+            padding: 18px;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+            overflow: visible !important;
+            position: relative;
           }
 
-          .filter-card {
-            background: linear-gradient(180deg, #ffffff 0%, #f8fff6 100%);
+          .history-card.filter-card {
+            z-index: 100;
           }
 
           .history-title {
@@ -1640,6 +1643,11 @@ export default function HistoryPage() {
           }
 
           @media (max-width: 900px) {
+            #history-page-root {
+              max-width: 100%;
+              padding: 14px;
+            }
+
             .history-grid {
               grid-template-columns: 1fr;
             }
