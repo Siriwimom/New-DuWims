@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useMap } from "react-leaflet";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
+import { useDuwimsT } from "../components/language-context";
 
 const MapContainer = dynamic(
   () => import("react-leaflet").then((m) => m.MapContainer),
@@ -40,6 +41,142 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001"
 const DEFAULT_CENTER = [13.736717, 100.523186];
 const DEFAULT_ZOOM = 6;
 const THAILAND_FIT_PADDING = [12, 12];
+
+
+const UI_TEXT = {
+  th: {
+    selectPlot: "เลือกแปลง",
+    allPlots: "ทุกแปลง",
+    sensorType: "ชนิดเซนเซอร์",
+    startDate: "วันที่เริ่ม",
+    endDate: "วันที่สิ้นสุด",
+    plot: "แปลง",
+    status: "สถานะ",
+    time: "เวลา",
+    noData: "ไม่มีข้อมูล",
+    belowRange: "ต่ำกว่าช่วง",
+    aboveRange: "สูงกว่าช่วง",
+    withinRange: "อยู่ในช่วง",
+    sensorReadingsMissing: "ยังไม่มี /api/sensor-readings จึงไม่แสดงค่าบน heatmap",
+    sensorReadingsPartial: "โหลด sensor readings บางส่วนไม่สำเร็จ จะแสดงเฉพาะค่าที่โหลดได้",
+    loadFailed: "โหลดข้อมูลไม่สำเร็จ",
+    loadingToday: "กำลังโหลดข้อมูลวันนี้...",
+    readyToShow: "ข้อมูลพร้อมแสดงแล้ว",
+    readyToRender: "พร้อมแสดงผลแล้ว",
+    globalClimateCooldown: "กำลังพักการเรียก Global Climate ชั่วคราว {waitSec} วินาที",
+    openMeteoLimit: "Open-Meteo ใช้งานเกิน limit ชั่วคราว กรุณารอสักครู่",
+    globalClimateLoadFailed: "โหลดข้อมูล Global Climate ไม่สำเร็จ",
+    clipReady: "คลิปพร้อมเล่น",
+    preparingClip: "กำลังเตรียมคลิป {done}/{total}",
+    loadingNextFrame: "กำลังโหลดเฟรมถัดไป...",
+    preparingMap: "กำลังเตรียมแผนที่...",
+    loadingData: "กำลังโหลดข้อมูล...",
+    loadingGlobalClimate: "กำลังโหลด Global Climate...",
+    loadedCount: "โหลดแล้ว {done}/{total}",
+    noGlobalClimateData: "ไม่มีข้อมูล Global Climate สำหรับช่วงเวลานี้",
+    noSensorDataSelectedRange: "ไม่มีข้อมูลเซนเซอร์ในช่วงเวลาที่เลือก",
+    currentTimeShown: "เวลาที่กำลังแสดง",
+    stop: "หยุด",
+    play: "เล่น",
+    heatmapSummary: "สรุป Heatmap",
+    sensor: "เซนเซอร์",
+    dataMode: "โหมดข้อมูล",
+    clipStatus: "สถานะคลิป",
+    pointsUsed: "จำนวนจุดที่ใช้",
+    averageValue: "ค่าเฉลี่ย",
+    minValue: "ค่าต่ำสุด",
+    maxValue: "ค่าสูงสุด",
+    low: "ต่ำ",
+    high: "สูง",
+    referenceRange: "ช่วงอ้างอิง",
+    valueStatus: "สถานะค่า",
+    normal: "ปกติ",
+    nodesUsedForCalc: "Node ที่ใช้คำนวณ (อิง reading ย้อนหลังตามเฟรม)",
+    climateModeOverlay: "โหมด Climate ใช้ Thailand grid ส่วน node ยังแสดงเป็น overlay",
+    noReadingInFrame: "ยังไม่มี reading ของเซนเซอร์นี้ในช่วงเฟรมที่เลือก",
+    globalOverlayNote: "Global Climate แสดงบนแผนที่ทั้งโลก ส่วน node เป็น overlay",
+    noSensorForNode: "ไม่มีข้อมูลของเซนเซอร์ที่เลือกใน node นี้",
+    dataGlobalClimate: "Global Climate",
+    dataLocalSensor: "Local Sensor",
+  },
+  en: {
+    selectPlot: "Select Plot",
+    allPlots: "All Plots",
+    sensorType: "Sensor Type",
+    startDate: "Start Date",
+    endDate: "End Date",
+    plot: "Plot",
+    status: "Status",
+    time: "Time",
+    noData: "No data",
+    belowRange: "Below range",
+    aboveRange: "Above range",
+    withinRange: "Within range",
+    sensorReadingsMissing: "No /api/sensor-readings endpoint yet, so heatmap values are hidden.",
+    sensorReadingsPartial: "Some sensor readings could not be loaded. Only available values are shown.",
+    loadFailed: "Failed to load data",
+    loadingToday: "Loading today's data...",
+    readyToShow: "Data is ready",
+    readyToRender: "Ready to render",
+    globalClimateCooldown: "Global Climate requests are cooling down for {waitSec} seconds",
+    openMeteoLimit: "Open-Meteo rate limit reached temporarily. Please wait a moment.",
+    globalClimateLoadFailed: "Failed to load Global Climate data",
+    clipReady: "Clip ready",
+    preparingClip: "Preparing clip {done}/{total}",
+    loadingNextFrame: "Loading next frame...",
+    preparingMap: "Preparing map...",
+    loadingData: "Loading data...",
+    loadingGlobalClimate: "Loading Global Climate...",
+    loadedCount: "Loaded {done}/{total}",
+    noGlobalClimateData: "No Global Climate data for this time range",
+    noSensorDataSelectedRange: "No sensor data in the selected range",
+    currentTimeShown: "Currently shown time",
+    stop: "Stop",
+    play: "Play",
+    heatmapSummary: "Heatmap Summary",
+    sensor: "Sensor",
+    dataMode: "Data Mode",
+    clipStatus: "Clip Status",
+    pointsUsed: "Points Used",
+    averageValue: "Average",
+    minValue: "Minimum",
+    maxValue: "Maximum",
+    low: "Low",
+    high: "High",
+    referenceRange: "Reference range",
+    valueStatus: "Value Status",
+    normal: "Normal",
+    nodesUsedForCalc: "Nodes used for calculation (based on historical readings by frame)",
+    climateModeOverlay: "Climate mode uses a Thailand grid while nodes remain as overlays",
+    noReadingInFrame: "No reading for this sensor in the selected frame",
+    globalOverlayNote: "Global Climate is shown across the map while nodes stay as overlays",
+    noSensorForNode: "No data for the selected sensor in this node",
+    dataGlobalClimate: "Global Climate",
+    dataLocalSensor: "Local Sensor",
+  },
+};
+
+function fillTemplate(template, params = {}) {
+  return String(template || "").replace(/\{(\w+)\}/g, (_, key) => String(params[key] ?? ""));
+}
+
+function getUiText(lang, key, params = {}) {
+  const pack = UI_TEXT[lang] || UI_TEXT.th;
+  return fillTemplate(pack[key] ?? UI_TEXT.th[key] ?? key, params);
+}
+
+function getLocalizedSensorLabel(sensorKey, lang) {
+  const meta = SENSOR_META[sensorKey] || {};
+  return lang === "en" ? meta.labelEn || meta.labelTh || sensorKey : meta.labelTh || meta.labelEn || sensorKey;
+}
+
+function getLocalizedStatusLabel(type, lang) {
+  if (type === "low") return getUiText(lang, "belowRange");
+  if (type === "high") return getUiText(lang, "aboveRange");
+  if (type === "normal") return getUiText(lang, "withinRange");
+  return getUiText(lang, "noData");
+}
+
 
 const SENSOR_META = {
   temp: {
@@ -524,6 +661,121 @@ function pointInPolygon(point, polygon) {
   return inside;
 }
 
+function getPolygonArea(points) {
+  if (!Array.isArray(points) || points.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < points.length; i += 1) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    area += a.lng * b.lat - b.lng * a.lat;
+  }
+  return area / 2;
+}
+
+function lineIntersection(a1, a2, b1, b2) {
+  const x1 = a1.lng;
+  const y1 = a1.lat;
+  const x2 = a2.lng;
+  const y2 = a2.lat;
+  const x3 = b1.lng;
+  const y3 = b1.lat;
+  const x4 = b2.lng;
+  const y4 = b2.lat;
+
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 1e-12) return null;
+
+  const px =
+    ((x1 * y2 - y1 * x2) * (x3 - x4) - (x1 - x2) * (x3 * y4 - y3 * x4)) / denom;
+  const py =
+    ((x1 * y2 - y1 * x2) * (y3 - y4) - (y1 - y2) * (x3 * y4 - y3 * x4)) / denom;
+
+  if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+  return { lat: py, lng: px };
+}
+
+function dedupePolygonPoints(points) {
+  const out = [];
+  for (const point of points || []) {
+    const last = out[out.length - 1];
+    if (
+      last &&
+      Math.abs(last.lat - point.lat) < 1e-10 &&
+      Math.abs(last.lng - point.lng) < 1e-10
+    ) {
+      continue;
+    }
+    out.push(point);
+  }
+
+  if (out.length >= 2) {
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (
+      Math.abs(first.lat - last.lat) < 1e-10 &&
+      Math.abs(first.lng - last.lng) < 1e-10
+    ) {
+      out.pop();
+    }
+  }
+
+  return out;
+}
+
+function clipPolygonWithConvexPolygon(subjectPolygon, clipPolygon) {
+  if (!Array.isArray(subjectPolygon) || subjectPolygon.length < 3) return [];
+  if (!Array.isArray(clipPolygon) || clipPolygon.length < 3) return [];
+
+  let output = [...subjectPolygon];
+  const clipArea = getPolygonArea(clipPolygon);
+  const clipSign = clipArea >= 0 ? 1 : -1;
+
+  for (let i = 0; i < clipPolygon.length; i += 1) {
+    const cp1 = clipPolygon[i];
+    const cp2 = clipPolygon[(i + 1) % clipPolygon.length];
+    const input = [...output];
+    output = [];
+    if (!input.length) break;
+
+    const isInside = (p) => {
+      const cross =
+        (cp2.lng - cp1.lng) * (p.lat - cp1.lat) -
+        (cp2.lat - cp1.lat) * (p.lng - cp1.lng);
+      return clipSign >= 0 ? cross >= -1e-10 : cross <= 1e-10;
+    };
+
+    let s = input[input.length - 1];
+    for (const e of input) {
+      const eInside = isInside(e);
+      const sInside = isInside(s);
+
+      if (eInside) {
+        if (!sInside) {
+          const inter = lineIntersection(s, e, cp1, cp2);
+          if (inter) output.push(inter);
+        }
+        output.push(e);
+      } else if (sInside) {
+        const inter = lineIntersection(s, e, cp1, cp2);
+        if (inter) output.push(inter);
+      }
+
+      s = e;
+    }
+  }
+
+  return dedupePolygonPoints(output);
+}
+
+function getRectPolygon(minLat, maxLat, minLng, maxLng) {
+  return [
+    { lat: minLat, lng: minLng },
+    { lat: minLat, lng: maxLng },
+    { lat: maxLat, lng: maxLng },
+    { lat: maxLat, lng: minLng },
+  ];
+}
+
 function buildLocalHeatCells(plots, points, sensorKey, density = 48) {
   if (!plots.length || !points.length) return [];
 
@@ -581,12 +833,15 @@ function buildLocalHeatCells(plots, points, sensorKey, density = 48) {
       const ratio = getSensorRatio(sensorKey, value);
       const opacityBase = 0.18 + (1 - clamp(nearestDistance / 0.03, 0, 1)) * 0.58;
 
+      const clippedPolygon = clipPolygonWithConvexPolygon(
+        getRectPolygon(minLat, maxLat, minLng, maxLng),
+        ownerPlot.coords
+      );
+      if (clippedPolygon.length < 3) continue;
+
       cells.push({
         id: `${row}-${col}`,
-        bounds: [
-          [minLat, minLng],
-          [maxLat, maxLng],
-        ],
+        positions: clippedPolygon.map((p) => [p.lat, p.lng]),
         value,
         ratio,
         color: getHeatColorByRatio(ratio),
@@ -712,22 +967,53 @@ async function fetchOpenMeteoGrid(sensorKey, ts) {
     .filter(Boolean);
 }
 
-function buildGlobalClimateCells(points, sensorKey, step = GLOBAL_GRID_STEP) {
+function buildGlobalClimateCells(points, sensorKey, step = GLOBAL_GRID_STEP, clipPlots = []) {
   if (!points.length) return [];
 
-  return points.map((p, idx) => {
-    const ratio = getSensorRatio(sensorKey, p.value);
-    return {
-      id: `global-${idx}`,
-      bounds: [
-        [p.lat - step / 2, p.lng - step / 2],
-        [p.lat + step / 2, p.lng + step / 2],
-      ],
-      value: p.value,
-      color: getHeatColorByRatio(ratio),
-      opacity: 0.68,
-    };
-  });
+  const shouldClip = Array.isArray(clipPlots) && clipPlots.some((plot) => (plot?.coords || []).length >= 3);
+
+  return points
+    .map((p, idx) => {
+      const ratio = getSensorRatio(sensorKey, p.value);
+      const minLat = p.lat - step / 2;
+      const maxLat = p.lat + step / 2;
+      const minLng = p.lng - step / 2;
+      const maxLng = p.lng + step / 2;
+
+      if (shouldClip) {
+        const center = { lat: p.lat, lng: p.lng };
+        const ownerPlot = clipPlots.find((plot) => pointInPolygon(center, plot.coords));
+        if (!ownerPlot) return null;
+
+        const clippedPolygon = clipPolygonWithConvexPolygon(
+          getRectPolygon(minLat, maxLat, minLng, maxLng),
+          ownerPlot.coords
+        );
+        if (clippedPolygon.length < 3) return null;
+
+        return {
+          id: `global-${idx}`,
+          positions: clippedPolygon.map((point) => [point.lat, point.lng]),
+          value: p.value,
+          color: getHeatColorByRatio(ratio),
+          opacity: 0.68,
+        };
+      }
+
+      return {
+        id: `global-${idx}`,
+        positions: [
+          [minLat, minLng],
+          [minLat, maxLng],
+          [maxLat, maxLng],
+          [maxLat, minLng],
+        ],
+        value: p.value,
+        color: getHeatColorByRatio(ratio),
+        opacity: 0.68,
+      };
+    })
+    .filter(Boolean);
 }
 
 function FitToSelection({ polygons, selectedPlotId, lockToWorld }) {
@@ -808,6 +1094,19 @@ function buildPriorityFrameIndexes(frameTimestamps, selectedTs) {
 }
 
 export default function Page() {
+  const { t, lang } = useDuwimsT();
+  const uiLang = lang === "en" ? "en" : "th";
+  const tt = (key, fallback, params = {}) => {
+    const raw = t?.[key];
+    if (typeof raw === "function") {
+      try {
+        const value = raw(params);
+        if (value != null && value !== "") return value;
+      } catch {}
+    }
+    if (typeof raw === "string" && raw) return fillTemplate(raw, params);
+    return fillTemplate(fallback ?? getUiText(uiLang, key, params), params);
+  };
   const [mounted, setMounted] = useState(false);
   const [plots, setPlots] = useState([]);
   const [allReadings, setAllReadings] = useState([]);
@@ -933,15 +1232,15 @@ export default function Page() {
         setAllReadings(flattenedReadings);
 
         if (endpointMissing) {
-          setSensorReadingsNotice("ยังไม่มี /api/sensor-readings จึงไม่แสดงค่าบน heatmap");
+          setSensorReadingsNotice(tt("sensorReadingsMissing"));
         } else if (endpointFailures > 0 && !flattenedReadings.length) {
-          setSensorReadingsNotice("โหลด sensor readings บางส่วนไม่สำเร็จ จะแสดงเฉพาะค่าที่โหลดได้");
+          setSensorReadingsNotice(tt("sensorReadingsPartial"));
         } else {
           setSensorReadingsNotice("");
         }
       } catch (e) {
         if (!alive) return;
-        setError(e?.message || "โหลดข้อมูลไม่สำเร็จ");
+        setError(e?.message || tt("loadFailed"));
       } finally {
         if (alive) setLoading(false);
       }
@@ -973,7 +1272,7 @@ export default function Page() {
 
     async function loadCurrentAndQueue() {
       setGlobalError("");
-      setGlobalProgress({ done: 0, total, label: "กำลังโหลดข้อมูลวันนี้..." });
+      setGlobalProgress({ done: 0, total, label: tt("loadingToday") });
 
       const cachedCountInitial = priorityIndexes.filter((idx) =>
         globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx]))
@@ -984,13 +1283,13 @@ export default function Page() {
         setGlobalProgress({
           done: cachedCountInitial,
           total,
-          label: cachedCountInitial >= total ? "ข้อมูลพร้อมแสดงแล้ว" : "พร้อมแสดงผลแล้ว",
+          label: cachedCountInitial >= total ? tt("readyToShow") : tt("readyToRender"),
         });
       } else {
         const now = Date.now();
         if (now < globalBackoffUntilRef.current) {
           const waitSec = Math.max(1, Math.ceil((globalBackoffUntilRef.current - now) / 1000));
-          setGlobalError(`กำลังพักการเรียก Global Climate ชั่วคราว ${waitSec} วินาที`);
+          setGlobalError(tt("globalClimateCooldown", undefined, { waitSec }));
         } else {
           try {
             globalInflightRef.current = currentCacheKey;
@@ -1005,16 +1304,16 @@ export default function Page() {
             setGlobalProgress({
               done: cachedCountAfter,
               total,
-              label: cachedCountAfter >= total ? "ข้อมูลพร้อมแสดงแล้ว" : "พร้อมแสดงผลแล้ว",
+              label: cachedCountAfter >= total ? tt("readyToShow") : tt("readyToRender"),
             });
           } catch (e) {
             if (!alive) return;
             const message = String(e?.message || "");
             if (message.includes("(429)")) {
               globalBackoffUntilRef.current = Date.now() + 60000;
-              setGlobalError("Open-Meteo ใช้งานเกิน limit ชั่วคราว กรุณารอสักครู่");
+              setGlobalError(tt("openMeteoLimit"));
             } else {
-              setGlobalError(message || "โหลดข้อมูล Global Climate ไม่สำเร็จ");
+              setGlobalError(message || tt("globalClimateLoadFailed"));
             }
           } finally {
             if (alive) setGlobalLoading(false);
@@ -1060,7 +1359,7 @@ export default function Page() {
           setGlobalProgress({
             done,
             total,
-            label: done >= total ? "คลิปพร้อมเล่น" : `กำลังเตรียมคลิป ${done}/${total}`,
+            label: done >= total ? tt("clipReady") : tt("preparingClip", undefined, { done, total }),
           });
 
           await new Promise((resolve) => setTimeout(resolve, 350));
@@ -1296,7 +1595,12 @@ export default function Page() {
 
   const heatCells = useMemo(() => {
     if (isGlobalSensor) {
-      return buildGlobalClimateCells(globalPoints, selectedSensor);
+      return buildGlobalClimateCells(
+        globalPoints,
+        selectedSensor,
+        GLOBAL_GRID_STEP,
+        selectedPlotId === "all" ? [] : visiblePlots
+      );
     }
 
     const density = selectedPlotId === "all" ? 48 : 60;
@@ -1364,7 +1668,7 @@ export default function Page() {
 
         setGlobalProgress((old) => ({
           ...old,
-          label: "กำลังโหลดเฟรมถัดไป...",
+          label: tt("loadingNextFrame"),
         }));
         return prev;
       });
@@ -1383,7 +1687,7 @@ export default function Page() {
       <div className="heat-page">
         <div className="top-grid">
           <div className="plot-card">
-            <div className="top-label">เลือกแปลง</div>
+            <div className="top-label">{tt("selectPlot")}</div>
             <select
               className="plot-select"
               value={selectedPlotId}
@@ -1393,7 +1697,7 @@ export default function Page() {
                 setSelectedPlotId(e.target.value);
               }}
             >
-              <option value="all">ทุกแปลง</option>
+              <option value="all">{tt("allPlots")}</option>
               {plots.map((plot) => (
                 <option key={plot.id} value={plot.id}>
                   {plot.name}
@@ -1403,7 +1707,7 @@ export default function Page() {
           </div>
 
           <div className="plot-card">
-            <div className="top-label">ชนิดเซนเซอร์</div>
+            <div className="top-label">{tt("sensorType")}</div>
             <select
               className="plot-select"
               value={selectedSensor}
@@ -1415,14 +1719,14 @@ export default function Page() {
             >
               {SENSOR_KEYS.map((key) => (
                 <option key={key} value={key}>
-                  {SENSOR_META[key].labelTh} {SENSOR_META[key].labelEn}
+                  {getLocalizedSensorLabel(key, uiLang)}
                 </option>
               ))}
             </select>
           </div>
 
           <div className="plot-card">
-            <div className="top-label">วันที่เริ่ม</div>
+            <div className="top-label">{tt("startDate")}</div>
             <input
               className="plot-select"
               type="date"
@@ -1436,7 +1740,7 @@ export default function Page() {
           </div>
 
           <div className="plot-card">
-            <div className="top-label">วันที่สิ้นสุด</div>
+            <div className="top-label">{tt("endDate")}</div>
             <input
               className="plot-select"
               type="date"
@@ -1475,13 +1779,13 @@ export default function Page() {
                   <FitToSelection
                     polygons={plots}
                     selectedPlotId={selectedPlotId}
-                    lockToWorld
+                    lockToWorld={selectedPlotId === "all"}
                   />
 
                   {heatCells.map((cell) => (
-                    <Rectangle
+                    <Polygon
                       key={`heat-${cell.id}-${frameIndex}`}
-                      bounds={cell.bounds}
+                      positions={cell.positions}
                       pathOptions={{
                         stroke: false,
                         fillColor: cell.color,
@@ -1530,24 +1834,24 @@ export default function Page() {
                             <div style={{ fontWeight: 800, marginBottom: 6 }}>
                               {node.nodeName}
                             </div>
-                            <div>แปลง: {node.plotName}</div>
+                            <div>{tt("plot")}: {node.plotName}</div>
                             <div>UID: {node.uid || "-"}</div>
-                            <div>สถานะ: {node.status || "-"}</div>
+                            <div>{tt("status")}: {node.status || "-"}</div>
                             <div style={{ marginTop: 8 }}>
                               {active ? (
                                 <>
                                   <div>
-                                    {sensorMeta.labelTh} {sensorMeta.labelEn}:{" "}
+                                    {getLocalizedSensorLabel(selectedSensor, uiLang)}:{" "}
                                     <b>{active.value}</b> {sensorMeta.unit}
                                   </div>
-                                  <div>เวลา: {formatDateTimeThai(active.ts)}</div>
-                                  <div>สถานะ: {active.status.label}</div>
+                                  <div>{tt("time")}: {formatDateTimeThai(active.ts)}</div>
+                                  <div>{tt("status")}: {getLocalizedStatusLabel(active.status.type, uiLang)}</div>
                                 </>
                               ) : (
                                 <div>
                                   {isGlobalSensor
-                                    ? "Global Climate แสดงบนแผนที่ทั้งโลก ส่วน node เป็น overlay"
-                                    : "ไม่มีข้อมูลของเซนเซอร์ที่เลือกใน node นี้"}
+                                    ? tt("globalOverlayNote")
+                                    : tt("noSensorForNode")}
                                 </div>
                               )}
                             </div>
@@ -1558,18 +1862,18 @@ export default function Page() {
                   })}
                 </MapContainer>
               ) : (
-                <div className="map-loading-placeholder">กำลังเตรียมแผนที่...</div>
+                <div className="map-loading-placeholder">{tt("preparingMap")}</div>
               )}
 
               {(loading || globalLoading || (isGlobalSensor && globalProgress.total > 0 && globalProgress.done < globalProgress.total)) && (
                 <div className="map-overlay loading-card">
                   <div className="loading-title">
-                    {loading ? "กำลังโหลดข้อมูล..." : globalProgress.label || "กำลังโหลด Global Climate..."}
+                    {loading ? tt("loadingData") : globalProgress.label || tt("loadingGlobalClimate")}
                   </div>
                   {!loading && isGlobalSensor && globalProgress.total > 0 && (
                     <>
                       <div className="loading-sub">
-                        โหลดแล้ว {globalProgress.done}/{globalProgress.total}
+                        {tt("loadedCount", undefined, { done: globalProgress.done, total: globalProgress.total })}
                       </div>
                       <div className="loading-bar">
                         <span
@@ -1593,21 +1897,21 @@ export default function Page() {
               )}
 
               {!loading && !error && !globalError && isGlobalSensor && !globalPoints.length && (
-                <div className="map-overlay warn">ไม่มีข้อมูล Global Climate สำหรับช่วงเวลานี้</div>
+                <div className="map-overlay warn">{tt("noGlobalClimateData")}</div>
               )}
 
               {!loading &&
                 !error &&
                 !isGlobalSensor &&
                 !renderedPoints.length && (
-                  <div className="map-overlay warn">ไม่มีข้อมูลเซนเซอร์ในช่วงเวลาที่เลือก</div>
+                  <div className="map-overlay warn">{tt("noSensorDataSelectedRange")}</div>
                 )}
             </div>
 
             <div className="timeline-card">
               <div className="timeline-top">
                 <div>
-                  <div className="top-label">เวลาที่กำลังแสดง</div>
+                  <div className="top-label">{tt("currentTimeShown")}</div>
                   <div className="timeline-value">
                     {currentFrameTs ? formatDateTimeThai(currentFrameTs) : "-"}
                   </div>
@@ -1619,7 +1923,7 @@ export default function Page() {
                   onClick={() => setPlaying((v) => !v)}
                   disabled={frameTimestamps.length <= 1 || (isGlobalSensor && globalProgress.done < 2)}
                 >
-                  {playing ? "หยุด" : "เล่น"}
+                  {playing ? tt("stop") : tt("play")}
                 </button>
               </div>
 
@@ -1645,37 +1949,37 @@ export default function Page() {
 
           <div className="side-panel">
             <div className="info-card">
-              <div className="info-title">สรุป Heatmap</div>
+              <div className="info-title">{tt("heatmapSummary")}</div>
               <div className="info-row">
-                <span>เซนเซอร์</span>
+                <span>{tt("sensor")}</span>
                 <strong>
-                  {sensorMeta.labelTh} {sensorMeta.labelEn}
+                  {getLocalizedSensorLabel(selectedSensor, uiLang)}
                 </strong>
               </div>
               <div className="info-row">
-                <span>โหมดข้อมูล</span>
-                <strong>{isGlobalSensor ? "Thailand Climate" : "Local Sensor"}</strong>
+                <span>{tt("dataMode")}</span>
+                <strong>{isGlobalSensor ? tt("dataGlobalClimate") : tt("dataLocalSensor")}</strong>
               </div>
               {isGlobalSensor && (
                 <div className="info-row">
-                  <span>สถานะคลิป</span>
-                  <strong>{globalProgress.label || "พร้อมแสดงผลแล้ว"}</strong>
+                  <span>{tt("clipStatus")}</span>
+                  <strong>{globalProgress.label || tt("readyToRender")}</strong>
                 </div>
               )}
               <div className="info-row">
-                <span>จำนวนจุดที่ใช้</span>
+                <span>{tt("pointsUsed")}</span>
                 <strong>{stats.count}</strong>
               </div>
               <div className="info-row">
-                <span>ค่าเฉลี่ย</span>
+                <span>{tt("averageValue")}</span>
                 <strong>{stats.avg != null ? `${stats.avg} ${sensorMeta.unit}` : "-"}</strong>
               </div>
               <div className="info-row">
-                <span>ค่าต่ำสุด</span>
+                <span>{tt("minValue")}</span>
                 <strong>{stats.min != null ? `${stats.min} ${sensorMeta.unit}` : "-"}</strong>
               </div>
               <div className="info-row">
-                <span>ค่าสูงสุด</span>
+                <span>{tt("maxValue")}</span>
                 <strong>{stats.max != null ? `${stats.max} ${sensorMeta.unit}` : "-"}</strong>
               </div>
             </div>
@@ -1688,25 +1992,25 @@ export default function Page() {
                 ))}
               </div>
               <div className="legend-labels">
-                <span>ต่ำ</span>
-                <span>สูง</span>
+                <span>{tt("low")}</span>
+                <span>{tt("high")}</span>
               </div>
               <div className="legend-range">
-                ช่วงอ้างอิง: {sensorMeta.min} - {sensorMeta.max} {sensorMeta.unit}
+                {tt("referenceRange")}: {sensorMeta.min} - {sensorMeta.max} {sensorMeta.unit}
               </div>
             </div>
 
             <div className="info-card">
-              <div className="info-title">สถานะค่า</div>
+              <div className="info-title">{tt("valueStatus")}</div>
               <div className="status-grid">
-                <div className="status-chip low">ต่ำ: {stats.low}</div>
-                <div className="status-chip normal">ปกติ: {stats.normal}</div>
-                <div className="status-chip high">สูง: {stats.high}</div>
+                <div className="status-chip low">{tt("low")}: {stats.low}</div>
+                <div className="status-chip normal">{tt("normal")}: {stats.normal}</div>
+                <div className="status-chip high">{tt("high")}: {stats.high}</div>
               </div>
             </div>
 
             <div className="info-card">
-              <div className="info-title">Node ที่ใช้คำนวณ (อิง reading ย้อนหลังตามเฟรม)</div>
+              <div className="info-title">{tt("nodesUsedForCalc")}</div>
               <div className="node-list">
                 {renderedPoints.length ? (
                   renderedPoints.map((point) => (
@@ -1725,8 +2029,8 @@ export default function Page() {
                 ) : (
                   <div className="empty-text">
                     {isGlobalSensor
-                      ? "โหมด Climate ใช้ Thailand grid ส่วน node ยังแสดงเป็น overlay"
-                      : "ยังไม่มี reading ของเซนเซอร์นี้ในช่วงเฟรมที่เลือก"}
+                      ? tt("climateModeOverlay")
+                      : tt("noReadingInFrame")}
                   </div>
                 )}
               </div>

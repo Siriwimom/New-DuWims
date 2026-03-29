@@ -1221,16 +1221,16 @@ export default function HistoryPage() {
                   <th>{t.plotCol}</th>
                   <th>{t.nodeCol}</th>
                   <th>{t.typeCol}</th>
-                  <th>{t.temperature} (°C)</th>
-                  <th>{t.relativeHumidity} (%)</th>
-                  <th>{t.windSpeed} (m/s)</th>
-                  <th>{t.lightIntensity} (lux)</th>
-                  <th>{t.rainfall} (mm)</th>
-                  <th>{t.soilMoisture} (%)</th>
-                  <th>{t.waterAvailability} (%)</th>
-                  <th>N (%)</th>
-                  <th>P (ppm)</th>
-                  <th>K (cmol/kg)</th>
+                  <th>{t.temperature}</th>
+                  <th>{t.relativeHumidity}</th>
+                  <th>{t.windSpeed}</th>
+                  <th>{t.lightIntensity}</th>
+                  <th>{t.rainfall}</th>
+                  <th>{t.soilMoisture}</th>
+                  <th>{t.waterAvailability}</th>
+                  <th>N</th>
+                  <th>P</th>
+                  <th>K</th>
                 </tr>
               </thead>
               <tbody>
@@ -1272,17 +1272,19 @@ export default function HistoryPage() {
             box-sizing: border-box;
           }
 
-          #history-page-root {
-            position: relative;
-            overflow: visible !important;
-            width: 100%;
-            max-width: 1300px;
-            margin: 0 auto;
-            padding: 16px 20px;
-            z-index: 2;
-            display: grid;
-            gap: 18px;
-          }
+     .history-card {
+  width: 100%;
+  max-width: 1180px;
+  margin-left: auto;
+  margin-right: auto;
+  background: #fff;
+  border: 1px solid #dfe7dc;
+  border-radius: 18px;
+  padding: 18px;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+  overflow: visible !important;
+  position: relative;
+}
 
           .history-card {
             width: 100%;
@@ -1628,17 +1630,21 @@ export default function HistoryPage() {
             overflow-x: auto;
           }
 
-          .summary-table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 1250px;
-          }
+.summary-table th {
+  font-size: 9px;
+  padding: 6px 4px;
+}
+
+.summary-table td {
+  font-size: 10px;
+  padding: 6px 4px;
+}
 
           .summary-table th {
             background: #244f15;
             color: #fff;
-            font-size: 12px;
-            font-weight: 900;
+            font-size: 10px;
+            font-weight: 300;
             padding: 10px 8px;
             text-align: center;
             white-space: nowrap;

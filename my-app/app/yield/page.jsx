@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
+import { useDuwimsT } from "../components/language-context";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") || "http://localhost:3001";
@@ -34,10 +35,15 @@ function setToken(token) {
   });
 }
 
-function formatThaiDate(value) {
+function formatThaiDate(value, lang = "th") {
   if (!value) return "-";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "-";
+
+  if (lang === "en") {
+    return d.toLocaleDateString("en-GB");
+  }
+
   const dd = String(d.getDate()).padStart(2, "0");
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const yyyy = d.getFullYear() + 543;
@@ -54,11 +60,11 @@ function toDateInputValue(value) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function formatVolume(value) {
+function formatVolume(value, lang = "th") {
   if (value === null || value === undefined || value === "") return "-";
   const n = Number(value);
   if (!Number.isFinite(n)) return "-";
-  return n.toLocaleString("th-TH");
+  return n.toLocaleString(lang === "en" ? "en-US" : "th-TH");
 }
 
 function normalizePlantIcon(species = "") {
@@ -82,6 +88,82 @@ function createEmptyForm() {
 }
 
 export default function YieldPage() {
+  const { lang, t } = useDuwimsT();
+
+  const tx = useMemo(
+    () => ({
+      title: lang === "en" ? "🌾 Management Planting" : "🌾 Management Planting",
+      addYield: lang === "en" ? "＋ Add Yield Data" : "＋ เพิ่มข้อมูลผลผลิต",
+
+      plot: lang === "en" ? "Plot" : "แปลง",
+      allPlots: lang === "en" ? "All Plots" : "ทุกแปลง",
+
+      species: lang === "en" ? "Plant Type" : "ชนิดพืช",
+      allSpecies: lang === "en" ? "All Types" : "ทุกชนิด",
+
+      startDate: lang === "en" ? "Start Date" : "วันที่เริ่มต้น",
+      endDate: lang === "en" ? "End Date" : "วันที่สิ้นสุด",
+
+      plantingDate: lang === "en" ? "Planting Date" : "วันที่ปลูก",
+      harvestDate: lang === "en" ? "Harvest Date" : "วันที่เก็บเกี่ยว",
+      volume: lang === "en" ? "Volume (tons)" : "ปริมาณ (ตัน)",
+      manage: lang === "en" ? "Manage" : "จัดการ",
+
+      loading: lang === "en" ? "Loading data..." : "กำลังโหลดข้อมูล...",
+      noData: lang === "en" ? "No data yet" : "ยังไม่มีข้อมูล",
+
+      createPopupTitle: lang === "en" ? "🌾 Add Yield Data" : "🌾 เพิ่มข้อมูลผลผลิต",
+      editPopupTitle: lang === "en" ? "✏️ Edit Yield Data" : "✏️ แก้ไขข้อมูลผลผลิต",
+
+      selectPlot: lang === "en" ? "Select Plot" : "เลือกแปลง",
+      plantType: lang === "en" ? "Plant Type" : "ชนิดพืช",
+      plantTypePlaceholder: lang === "en" ? "e.g. Durian" : "เช่น ทุเรียน",
+      startPlantingDate: lang === "en" ? "Planting Start Date" : "วันที่เริ่มปลูก",
+      harvestDateField: lang === "en" ? "Harvest Date" : "วันที่เก็บเกี่ยว",
+      yieldVolume: lang === "en" ? "Yield Volume (tons)" : "ปริมาณผลผลิต (ตัน)",
+
+      cancel: t.cancel || (lang === "en" ? "Cancel" : "ยกเลิก"),
+      save: t.save || (lang === "en" ? "Save" : "บันทึก"),
+      confirm: t.confirm || (lang === "en" ? "Confirm" : "ยืนยัน"),
+
+      edit: lang === "en" ? "✏️ Edit" : "✏️ แก้ไข",
+      delete: lang === "en" ? "🗑 Delete" : "🗑 ลบ",
+
+      plotLocked: lang === "en" ? "Plot" : "แปลง",
+      cannotChange: lang === "en" ? "(cannot change)" : "(ห้ามเปลี่ยน)",
+      cannotChangePlot:
+        lang === "en"
+          ? "⛔ Plot cannot be changed"
+          : "⛔ ไม่สามารถเปลี่ยนแปลงแปลงปลูกได้",
+
+      confirmSaveTitle:
+        lang === "en" ? "Confirm Saving Data" : "ยืนยันการบันทึกข้อมูล",
+      confirmSaveSub:
+        lang === "en"
+          ? "Do you want to save this yield data?"
+          : "ต้องการบันทึกข้อมูลผลผลิตนี้ใช่หรือไม่?",
+
+      confirmDeleteTitle:
+        lang === "en" ? "Confirm Deletion" : "ยืนยันการลบข้อมูล",
+      confirmDeleteSub1:
+        lang === "en"
+          ? "Do you want to remove this yield data from the system?"
+          : "ต้องการลบข้อมูลผลผลิตนี้ออกจากระบบ?",
+      confirmDeleteSub2:
+        lang === "en"
+          ? "This action cannot be undone."
+          : "การดำเนินการนี้ไม่สามารถกู้คืนได้",
+
+      saving: lang === "en" ? "Saving..." : "กำลังบันทึก...",
+      deleting: lang === "en" ? "Deleting..." : "กำลังลบ...",
+
+      loadFailed: lang === "en" ? "Failed to load data" : "โหลดข้อมูลไม่สำเร็จ",
+      saveFailed: lang === "en" ? "Failed to save data" : "บันทึกข้อมูลไม่สำเร็จ",
+      deleteFailed: lang === "en" ? "Failed to delete data" : "ลบข้อมูลไม่สำเร็จ",
+    }),
+    [lang, t]
+  );
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -111,18 +193,22 @@ export default function YieldPage() {
     plots.forEach((plot, index) => {
       map[String(plot.id)] = {
         ...plot,
-        fallbackLabel: `แปลง ${index + 1}`,
+        fallbackLabel: lang === "en" ? `Plot ${index + 1}` : `แปลง ${index + 1}`,
       };
     });
     return map;
-  }, [plots]);
+  }, [plots, lang]);
 
   const plotOptions = useMemo(() => {
     return plots.map((plot, index) => ({
       id: plot.id,
-      label: plot.plotName || plot.alias || plot.name || `แปลง ${index + 1}`,
+      label:
+        plot.plotName ||
+        plot.alias ||
+        plot.name ||
+        (lang === "en" ? `Plot ${index + 1}` : `แปลง ${index + 1}`),
     }));
-  }, [plots]);
+  }, [plots, lang]);
 
   const speciesOptions = useMemo(() => {
     const set = new Set();
@@ -191,7 +277,7 @@ export default function YieldPage() {
       setPlots(Array.isArray(plotsRes?.items) ? plotsRes.items : []);
       setItems(Array.isArray(managementRes?.items) ? managementRes.items : []);
     } catch (err) {
-      setError(err?.message || "โหลดข้อมูลไม่สำเร็จ");
+      setError(err?.message || tx.loadFailed);
     } finally {
       setLoading(false);
     }
@@ -326,7 +412,7 @@ export default function YieldPage() {
       resetFiltersForView();
       await loadAll();
     } catch (err) {
-      setError(err?.message || "บันทึกข้อมูลไม่สำเร็จ");
+      setError(err?.message || tx.saveFailed);
       setConfirmSaveOpen(false);
     } finally {
       setSaving(false);
@@ -348,7 +434,7 @@ export default function YieldPage() {
       resetFiltersForView();
       await loadAll();
     } catch (err) {
-      setError(err?.message || "ลบข้อมูลไม่สำเร็จ");
+      setError(err?.message || tx.deleteFailed);
     } finally {
       setDeleting(false);
     }
@@ -368,7 +454,7 @@ export default function YieldPage() {
           }}
         >
           <div className="card-title" style={{ fontSize: 15 }}>
-            🌾 Management Planting
+            {tx.title}
           </div>
           <button
             className="create-btn"
@@ -376,7 +462,7 @@ export default function YieldPage() {
             onClick={openCreatePopup}
             type="button"
           >
-            ＋ เพิ่มข้อมูลผลผลิต
+            {tx.addYield}
           </button>
         </div>
 
@@ -384,14 +470,14 @@ export default function YieldPage() {
 
         <div className="yield-filters">
           <div className="yield-filter-col">
-            <div className="filter-label">แปลง</div>
+            <div className="filter-label">{tx.plot}</div>
             <select
               className="form-select"
               style={{ width: 140 }}
               value={filterPlot}
               onChange={(e) => setFilterPlot(e.target.value)}
             >
-              <option value="">ทุกแปลง</option>
+              <option value="">{tx.allPlots}</option>
               {plotOptions.map((plot) => (
                 <option key={plot.id} value={plot.id}>
                   {plot.label}
@@ -401,14 +487,14 @@ export default function YieldPage() {
           </div>
 
           <div className="yield-filter-col">
-            <div className="filter-label">ชนิดพืช</div>
+            <div className="filter-label">{tx.species}</div>
             <select
               className="form-select"
               style={{ width: 130 }}
               value={filterSpecies}
               onChange={(e) => setFilterSpecies(e.target.value)}
             >
-              <option value="">ทุกชนิด</option>
+              <option value="">{tx.allSpecies}</option>
               {speciesOptions.map((species) => (
                 <option key={species} value={species}>
                   {species}
@@ -418,7 +504,7 @@ export default function YieldPage() {
           </div>
 
           <div className="yield-filter-col">
-            <div className="filter-label">วันที่เริ่มต้น</div>
+            <div className="filter-label">{tx.startDate}</div>
             <input
               type="date"
               className="form-input"
@@ -429,7 +515,7 @@ export default function YieldPage() {
           </div>
 
           <div className="yield-filter-col">
-            <div className="filter-label">วันที่สิ้นสุด</div>
+            <div className="filter-label">{tx.endDate}</div>
             <input
               type="date"
               className="form-input"
@@ -445,25 +531,25 @@ export default function YieldPage() {
             <table className="yield-table">
               <thead>
                 <tr>
-                  <th>แปลง</th>
-                  <th>ชนิดของพืช</th>
-                  <th>วันที่ปลูก</th>
-                  <th>วันที่เก็บเกี่ยว</th>
-                  <th>ปริมาณ (ตัน)</th>
-                  <th>จัดการ</th>
+                  <th>{tx.plot}</th>
+                  <th>{lang === "en" ? "Plant Species" : "ชนิดของพืช"}</th>
+                  <th>{tx.plantingDate}</th>
+                  <th>{tx.harvestDate}</th>
+                  <th>{tx.volume}</th>
+                  <th>{tx.manage}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
                     <td colSpan={6} className="yield-empty-cell">
-                      กำลังโหลดข้อมูล...
+                      {tx.loading}
                     </td>
                   </tr>
                 ) : filteredItems.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="yield-empty-cell">
-                      ยังไม่มีข้อมูล
+                      {tx.noData}
                     </td>
                   </tr>
                 ) : (
@@ -479,10 +565,10 @@ export default function YieldPage() {
                         <td>
                           {icon} {item?.species || "-"}
                         </td>
-                        <td>{formatThaiDate(item?.startDate)}</td>
-                        <td>{formatThaiDate(item?.harvestDate)}</td>
+                        <td>{formatThaiDate(item?.startDate, lang)}</td>
+                        <td>{formatThaiDate(item?.harvestDate, lang)}</td>
                         <td>
-                          <strong>{formatVolume(item?.volume)}</strong>
+                          <strong>{formatVolume(item?.volume, lang)}</strong>
                         </td>
                         <td className="yield-actions-cell">
                           <button
@@ -490,14 +576,14 @@ export default function YieldPage() {
                             type="button"
                             onClick={() => openEditPopup(item)}
                           >
-                            ✏️ แก้ไข
+                            {tx.edit}
                           </button>
                           <button
                             className="del-row-btn"
                             type="button"
                             onClick={() => openDeletePopup(item)}
                           >
-                            🗑 ลบ
+                            {tx.delete}
                           </button>
                         </td>
                       </tr>
@@ -518,7 +604,7 @@ export default function YieldPage() {
             }}
           >
             <div className="popup-box">
-              <div className="popup-title">🌾 เพิ่มข้อมูลผลผลิต</div>
+              <div className="popup-title">{tx.createPopupTitle}</div>
               <button
                 className="popup-close"
                 type="button"
@@ -528,7 +614,7 @@ export default function YieldPage() {
               </button>
 
               <div className="form-field">
-                <div className="form-field-label">เลือกแปลง</div>
+                <div className="form-field-label">{tx.selectPlot}</div>
                 <select
                   className="form-select"
                   value={createForm.plot}
@@ -536,7 +622,7 @@ export default function YieldPage() {
                     setCreateForm((prev) => ({ ...prev, plot: e.target.value }))
                   }
                 >
-                  <option value="">ทุกแปลง</option>
+                  <option value="">{tx.allPlots}</option>
                   {plotOptions.map((plot) => (
                     <option key={plot.id} value={plot.id}>
                       {plot.label}
@@ -546,10 +632,10 @@ export default function YieldPage() {
               </div>
 
               <div className="form-field">
-                <div className="form-field-label">ชนิดพืช</div>
+                <div className="form-field-label">{tx.plantType}</div>
                 <input
                   className="form-input"
-                  placeholder="เช่น ทุเรียน"
+                  placeholder={tx.plantTypePlaceholder}
                   value={createForm.species}
                   onChange={(e) =>
                     setCreateForm((prev) => ({ ...prev, species: e.target.value }))
@@ -558,7 +644,7 @@ export default function YieldPage() {
               </div>
 
               <div className="form-field">
-                <div className="form-field-label">วันที่เริ่มปลูก</div>
+                <div className="form-field-label">{tx.startPlantingDate}</div>
                 <input
                   className="form-input"
                   type="date"
@@ -570,7 +656,7 @@ export default function YieldPage() {
               </div>
 
               <div className="form-field">
-                <div className="form-field-label">วันที่เก็บเกี่ยว</div>
+                <div className="form-field-label">{tx.harvestDateField}</div>
                 <input
                   className="form-input"
                   type="date"
@@ -582,7 +668,7 @@ export default function YieldPage() {
               </div>
 
               <div className="form-field">
-                <div className="form-field-label">ปริมาณผลผลิต (ตัน)</div>
+                <div className="form-field-label">{tx.yieldVolume}</div>
                 <input
                   className="form-input"
                   type="number"
@@ -600,7 +686,7 @@ export default function YieldPage() {
                   type="button"
                   onClick={() => setCreateOpen(false)}
                 >
-                  ยกเลิก
+                  {tx.cancel}
                 </button>
                 <button
                   className="btn-save"
@@ -613,7 +699,7 @@ export default function YieldPage() {
                   }
                   onClick={requestSaveCreate}
                 >
-                  บันทึก
+                  {tx.save}
                 </button>
               </div>
             </div>
@@ -629,7 +715,7 @@ export default function YieldPage() {
             }}
           >
             <div className="popup-box">
-              <div className="popup-title">✏️ แก้ไขข้อมูลผลผลิต</div>
+              <div className="popup-title">{tx.editPopupTitle}</div>
               <button
                 className="popup-close"
                 type="button"
@@ -640,7 +726,8 @@ export default function YieldPage() {
 
               <div className="form-field">
                 <div className="form-field-label">
-                  แปลง <span style={{ color: "#c62828", fontSize: 9 }}>(ห้ามเปลี่ยน)</span>
+                  {tx.plotLocked}{" "}
+                  <span style={{ color: "#c62828", fontSize: 9 }}>{tx.cannotChange}</span>
                 </div>
                 <select
                   className="form-select"
@@ -652,12 +739,12 @@ export default function YieldPage() {
                   <option value={editForm.plot}>{getPlotLabelById(editForm.plot)}</option>
                 </select>
                 <div style={{ fontSize: 9, color: "#c62828", marginTop: 3 }}>
-                  ⛔ ไม่สามารถเปลี่ยนแปลงแปลงปลูกได้
+                  {tx.cannotChangePlot}
                 </div>
               </div>
 
               <div className="form-field">
-                <div className="form-field-label">ชนิดพืช</div>
+                <div className="form-field-label">{tx.plantType}</div>
                 <input
                   className="form-input"
                   value={editForm.species}
@@ -668,7 +755,7 @@ export default function YieldPage() {
               </div>
 
               <div className="form-field">
-                <div className="form-field-label">วันที่เริ่มปลูก</div>
+                <div className="form-field-label">{tx.startPlantingDate}</div>
                 <input
                   className="form-input"
                   type="date"
@@ -680,7 +767,7 @@ export default function YieldPage() {
               </div>
 
               <div className="form-field">
-                <div className="form-field-label">วันที่เก็บเกี่ยว</div>
+                <div className="form-field-label">{tx.harvestDateField}</div>
                 <input
                   className="form-input"
                   type="date"
@@ -692,7 +779,7 @@ export default function YieldPage() {
               </div>
 
               <div className="form-field">
-                <div className="form-field-label">ปริมาณผลผลิต (ตัน)</div>
+                <div className="form-field-label">{tx.yieldVolume}</div>
                 <input
                   className="form-input"
                   type="number"
@@ -709,7 +796,7 @@ export default function YieldPage() {
                   type="button"
                   onClick={() => setEditOpen(false)}
                 >
-                  ยกเลิก
+                  {tx.cancel}
                 </button>
                 <button
                   className="btn-save"
@@ -721,7 +808,7 @@ export default function YieldPage() {
                   }
                   onClick={requestSaveEdit}
                 >
-                  บันทึก
+                  {tx.save}
                 </button>
               </div>
             </div>
@@ -738,15 +825,15 @@ export default function YieldPage() {
           >
             <div className="confirm-box">
               <div className="confirm-icon">💾</div>
-              <div className="confirm-title">ยืนยันการบันทึกข้อมูล</div>
-              <div className="confirm-sub">ต้องการบันทึกข้อมูลผลผลิตนี้ใช่หรือไม่?</div>
+              <div className="confirm-title">{tx.confirmSaveTitle}</div>
+              <div className="confirm-sub">{tx.confirmSaveSub}</div>
               <div className="confirm-actions">
                 <button
                   className="btn-cancel"
                   type="button"
                   onClick={() => setConfirmSaveOpen(false)}
                 >
-                  ยกเลิก
+                  {tx.cancel}
                 </button>
                 <button
                   className="btn-save"
@@ -754,7 +841,7 @@ export default function YieldPage() {
                   disabled={saving}
                   onClick={handleConfirmSave}
                 >
-                  {saving ? "กำลังบันทึก..." : "ยืนยัน"}
+                  {saving ? tx.saving : tx.confirm}
                 </button>
               </div>
             </div>
@@ -771,11 +858,11 @@ export default function YieldPage() {
           >
             <div className="confirm-box">
               <div className="confirm-icon">🗑</div>
-              <div className="confirm-title">ยืนยันการลบข้อมูล</div>
+              <div className="confirm-title">{tx.confirmDeleteTitle}</div>
               <div className="confirm-sub">
-                ต้องการลบข้อมูลผลผลิตนี้ออกจากระบบ?
+                {tx.confirmDeleteSub1}
                 <br />
-                การดำเนินการนี้ไม่สามารถกู้คืนได้
+                {tx.confirmDeleteSub2}
               </div>
               <div className="confirm-actions">
                 <button
@@ -783,7 +870,7 @@ export default function YieldPage() {
                   type="button"
                   onClick={() => setConfirmDeleteOpen(false)}
                 >
-                  ยกเลิก
+                  {tx.cancel}
                 </button>
                 <button
                   className="btn-confirm"
@@ -791,7 +878,7 @@ export default function YieldPage() {
                   disabled={deleting}
                   onClick={handleDeleteConfirm}
                 >
-                  {deleting ? "กำลังลบ..." : "ยืนยัน"}
+                  {deleting ? tx.deleting : tx.confirm}
                 </button>
               </div>
             </div>
