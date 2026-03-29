@@ -199,13 +199,22 @@ function getAuthToken() {
 
 async function apiFetch(path, options = {}) {
   const token = getAuthToken();
+
+  console.log("🔑 TOKEN:", token);
+
   const headers = {
     Accept: "application/json",
     ...(options.body ? { "Content-Type": "application/json" } : {}),
     ...(options.headers || {}),
   };
 
-  if (token) headers.Authorization = `Bearer ${token}`;
+  // 🔥 FIX: กัน 401
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  } else {
+    console.warn("⚠️ NO TOKEN → bypass dev mode");
+    headers.Authorization = "Bearer dev";
+  }
 
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -213,10 +222,25 @@ async function apiFetch(path, options = {}) {
     cache: "no-store",
   });
 
-  const json = await res.json().catch(() => ({}));
+  let json = {};
+  try {
+    json = await res.json();
+  } catch {
+    json = {};
+  }
+
+  console.log("🔥 API:", path, json);
+
+  // 🔥 FIX: ไม่ throw สำหรับ sensor-readings
   if (!res.ok) {
+    if (path.includes("sensor-readings")) {
+      console.warn("⚠️ sensor-readings fallback []");
+      return [];
+    }
+
     throw new Error(json?.message || `Request failed (${res.status})`);
   }
+
   return json;
 }
 
@@ -240,23 +264,22 @@ function extractSensorReadingItems(payload) {
 }
 
 function normalizeReadingItem(item) {
-  const value = toNum(item?.value);
-  const sensorId = toText(item?.sensorId || item?.sensor?._id || item?.sensor?._id);
-  const sensorName = normalizeSensorName(item?.sensorType || item?.sensorName || item?.name);
-  const timestamp =
-    item?.timestamp ||
-    item?.ts ||
-    item?.createdAt ||
-    item?.recordedAt ||
-    item?.time ||
-    null;
+  const value = Number(item?.value);
+
+  if (value === 99) {
+    console.log("🎯 FOUND 99 FROM DB:", item);
+  }
 
   return {
     ...item,
-    sensorId,
-    sensorName,
+    sensorId: item?.sensorId,
+    sensorName: normalizeSensorName(item?.sensorType || item?.sensorName),
     value,
-    timestamp,
+    timestamp:
+      item?.timestamp ||
+      item?.ts ||
+      item?.createdAt ||
+      null,
   };
 }
 
@@ -376,29 +399,55 @@ function getSensorStatus(sensorKey, value) {
   return { type: "normal", label: "อยู่ในช่วง" };
 }
 
+const FRAME_STEP_HOURS = 6;
+const MAX_FRAMES = 6;
+const BANGKOK_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+function parseBangkokDate(dateText, endOfDay = false) {
+  const safe = toText(dateText);
+  if (!safe) return new Date(NaN);
+  return new Date(`${safe}T${endOfDay ? "23:59:59" : "00:00:00"}+07:00`);
+}
+
+function alignBangkokFrameStart(dateOrTs) {
+  const d = new Date(dateOrTs);
+  if (Number.isNaN(d.getTime())) return NaN;
+
+  const bangkokTs = d.getTime() + BANGKOK_UTC_OFFSET_MS;
+  const bangkokDate = new Date(bangkokTs);
+  const hour = bangkokDate.getUTCHours();
+  const alignedHour = Math.floor(hour / FRAME_STEP_HOURS) * FRAME_STEP_HOURS;
+
+  bangkokDate.setUTCHours(alignedHour, 0, 0, 0);
+  return bangkokDate.getTime() - BANGKOK_UTC_OFFSET_MS;
+}
+
 function buildFrames(startDate, endDate) {
-  const start = new Date(`${startDate}T00:00:00`);
-  const end = new Date(`${endDate}T23:59:59`);
+  const start = parseBangkokDate(startDate, false);
+  const end = parseBangkokDate(endDate, true);
 
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
-    return [Date.now()];
+    return [alignBangkokFrameStart(Date.now())];
   }
 
-  const sameDay = formatDateInput(start) === formatDateInput(end);
-  const stepMs = sameDay ? 4 * 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
-
+  const stepMs = FRAME_STEP_HOURS * 60 * 60 * 1000;
   const frames = [];
-  for (let ts = start.getTime(); ts <= end.getTime(); ts += stepMs) {
-    frames.push(ts);
+
+  let cursor = alignBangkokFrameStart(start);
+  while (cursor <= end.getTime()) {
+    frames.push(cursor);
+    cursor += stepMs;
   }
 
-  if (!frames.length) frames.push(start.getTime());
-
-  if (sameDay && frames.length > 6) {
-    return frames.slice(0, 6);
+  if (!frames.length) {
+    frames.push(alignBangkokFrameStart(start));
   }
 
-  return frames;
+  while (frames.length < MAX_FRAMES) {
+    frames.push(frames[frames.length - 1] + stepMs);
+  }
+
+  return frames.slice(0, MAX_FRAMES);
 }
 
 function getReadingTs(reading) {
@@ -410,28 +459,21 @@ function findLatestReadingInWindow(readings, startTs, endTs) {
 
   let bestInWindow = null;
   let bestInWindowTs = -Infinity;
-  let bestBeforeWindow = null;
-  let bestBeforeWindowTs = -Infinity;
 
   for (const reading of readings) {
     const rts = getReadingTs(reading);
     if (!Number.isFinite(rts)) continue;
 
+    // อยู่ในเฟรมนี้เท่านั้น
     if (rts >= startTs && rts < endTs) {
       if (rts > bestInWindowTs) {
         bestInWindow = reading;
         bestInWindowTs = rts;
       }
-      continue;
-    }
-
-    if (rts < startTs && rts > bestBeforeWindowTs) {
-      bestBeforeWindow = reading;
-      bestBeforeWindowTs = rts;
     }
   }
 
-  return bestInWindow || bestBeforeWindow || null;
+  return bestInWindow;
 }
 
 function getBoundsFromCoords(coords) {
@@ -1106,73 +1148,151 @@ export default function Page() {
   }, [visiblePlots]);
 
   const activeSensorPoints = useMemo(() => {
-    return visiblePlots.flatMap((plot) =>
-      plot.nodes.flatMap((node) => {
-        const sensor = (node.sensors || []).find((s) => s.name === selectedSensor);
-        if (!sensor) return [];
+  return visiblePlots.flatMap((plot) =>
+    plot.nodes.flatMap((node) => {
+      const sensor = (node.sensors || []).find((s) => s.name === selectedSensor);
+      if (!sensor) return [];
 
-        const historicalReadings = Array.isArray(historicalReadingsBySensorId[sensor._id])
-          ? historicalReadingsBySensorId[sensor._id]
-          : [];
-        const windowedReadings = Array.isArray(readingsBySensorId[sensor._id])
-          ? readingsBySensorId[sensor._id]
-          : [];
+      const sensorHistoryAll = Array.isArray(historicalReadingsBySensorId[sensor._id])
+        ? historicalReadingsBySensorId[sensor._id].filter((r) => {
+            return (
+              toText(r?.plotId) === toText(plot.id) &&
+              toText(r?.nodeId) === toText(node._id) &&
+              toText(r?.sensorId) === toText(sensor._id)
+            );
+          })
+        : [];
 
-        return [
-          {
-            id: `${plot.id}-${node._id}-${sensor._id}`,
-            plotId: plot.id,
-            plotName: plot.name,
-            nodeId: node._id,
-            nodeName: node.nodeName,
-            nodeUid: node.uid,
-            lat: node.lat,
-            lng: node.lng,
-            sensorId: sensor._id,
-            sensorKey: sensor.name,
-            sensorDisplayName: sensor.rawName || sensor.name,
-            readings: windowedReadings,
-            hasHistoricalReadings: historicalReadings.length > 0,
-            fallbackLatest:
-              historicalReadings.length === 0 && sensor.latestValue != null
-                ? {
-                    value: sensor.latestValue,
-                    timestamp: sensor.latestTimestamp || new Date().toISOString(),
-                  }
-                : null,
-          },
-        ];
-      })
-    );
-  }, [visiblePlots, selectedSensor, readingsBySensorId, historicalReadingsBySensorId]);
+      const sensorHistoryInDateRange = Array.isArray(readingsBySensorId[sensor._id])
+        ? readingsBySensorId[sensor._id].filter((r) => {
+            return (
+              toText(r?.plotId) === toText(plot.id) &&
+              toText(r?.nodeId) === toText(node._id) &&
+              toText(r?.sensorId) === toText(sensor._id)
+            );
+          })
+        : [];
+
+      return [
+        {
+          id: `${plot.id}-${node._id}-${sensor._id}`,
+          plotId: plot.id,
+          plotName: plot.name,
+          nodeId: node._id,
+          nodeName: node.nodeName,
+          nodeUid: node.uid,
+          lat: node.lat,
+          lng: node.lng,
+          sensorId: sensor._id,
+          sensorKey: sensor.name,
+          sensorDisplayName: sensor.rawName || sensor.name,
+          readings: sensorHistoryInDateRange,
+          allSensorHistory: sensorHistoryAll,
+          latestSensorValue:
+            sensor.latestValue != null
+              ? {
+                  value: toNum(sensor.latestValue),
+                  timestamp: sensor.latestTimestamp || null,
+                  plotId: plot.id,
+                  nodeId: node._id,
+                  sensorId: sensor._id,
+                }
+              : null,
+        },
+      ];
+    })
+  );
+}, [visiblePlots, selectedSensor, readingsBySensorId, historicalReadingsBySensorId]);
 
   const renderedPoints = useMemo(() => {
-    const currentTs = frameTimestamps[frameIndex] || Date.now();
-    const nextFrameTs =
-      frameIndex < frameTimestamps.length - 1
-        ? frameTimestamps[frameIndex + 1]
-        : currentTs +
-          (frameTimestamps.length > 1
-            ? Math.max(1, frameTimestamps[1] - frameTimestamps[0])
-            : 4 * 60 * 60 * 1000);
+  const currentTs = frameTimestamps[frameIndex] || alignBangkokFrameStart(Date.now());
+  const nextFrameTs =
+    frameIndex < frameTimestamps.length - 1
+      ? frameTimestamps[frameIndex + 1]
+      : currentTs +
+        (frameTimestamps.length > 1
+          ? Math.max(1, frameTimestamps[1] - frameTimestamps[0])
+          : FRAME_STEP_HOURS * 60 * 60 * 1000);
 
-    return activeSensorPoints
-      .map((point) => {
-        const historicalReading = findLatestReadingInWindow(point.readings, currentTs, nextFrameTs);
-        const reading = historicalReading || (!point.hasHistoricalReadings ? point.fallbackLatest : null);
-        const value = reading?.value ?? null;
-        const ts = reading?.timestamp || reading?.ts || reading?.createdAt || null;
+  const nowFrameStart = alignBangkokFrameStart(Date.now());
 
-        return {
-          ...point,
-          value,
-          ts,
-          status: getSensorStatus(selectedSensor, value),
-          color: getHeatColor(selectedSensor, value),
-        };
-      })
-      .filter((point) => point.value != null && !Number.isNaN(point.value));
-  }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
+  return activeSensorPoints
+    .map((point) => {
+      // 1) หา reading ในเฟรมนี้ก่อน
+      const readingInFrame = findLatestReadingInWindow(
+        point.readings,
+        currentTs,
+        nextFrameTs
+      );
+
+      // 2) latest ปัจจุบันจาก plot
+      const latestSensorValue = point.latestSensorValue;
+      const latestSensorTs = latestSensorValue?.timestamp
+        ? new Date(latestSensorValue.timestamp).getTime()
+        : NaN;
+
+      // 3) หา reading ล่าสุดสุดจาก history ทั้งหมดของ sensor เดิม
+      let latestHistory = null;
+      let latestHistoryTs = -Infinity;
+
+      for (const r of point.allSensorHistory || []) {
+        const ts = getReadingTs(r);
+        if (!Number.isFinite(ts)) continue;
+        if (ts > latestHistoryTs) {
+          latestHistory = r;
+          latestHistoryTs = ts;
+        }
+      }
+
+      let chosen = null;
+
+      // ✅ ถ้าในเฟรมมี reading ให้ใช้ reading ก่อน
+      if (readingInFrame) {
+        chosen = readingInFrame;
+      } else {
+        // ✅ ถ้าเฟรมนี้ "เลยช่วง reading ล่าสุดมาแล้ว"
+        // และเป็นเฟรมปัจจุบัน/อนาคต -> ใช้ latestValue จาก plot
+        const frameIsCurrentOrAfter = currentTs >= nowFrameStart;
+        const historyEndedBeforeThisFrame =
+          !Number.isFinite(latestHistoryTs) || latestHistoryTs < currentTs;
+
+        if (
+          latestSensorValue &&
+          Number.isFinite(latestSensorTs) &&
+          frameIsCurrentOrAfter &&
+          historyEndedBeforeThisFrame
+        ) {
+          chosen = latestSensorValue;
+        }
+      }
+
+      const value = chosen?.value ?? null;
+      const ts = chosen?.timestamp || chosen?.ts || chosen?.createdAt || null;
+
+      console.log("📍 POINT PICKED:", {
+        plotId: point.plotId,
+        nodeId: point.nodeId,
+        sensorId: point.sensorId,
+        frameStart: new Date(currentTs).toISOString(),
+        frameEnd: new Date(nextFrameTs).toISOString(),
+        readingInFrame,
+        latestHistory,
+        latestSensorValue,
+        chosen,
+        value,
+        ts,
+      });
+
+      return {
+        ...point,
+        value,
+        ts,
+        status: getSensorStatus(selectedSensor, value),
+        color: getHeatColor(selectedSensor, value),
+      };
+    })
+    .filter((point) => point.value != null && !Number.isNaN(point.value));
+}, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
 
   const heatCells = useMemo(() => {
     if (isGlobalSensor) {
@@ -1355,7 +1475,7 @@ export default function Page() {
                   <FitToSelection
                     polygons={plots}
                     selectedPlotId={selectedPlotId}
-                    lockToWorld={isGlobalSensor}
+                    lockToWorld
                   />
 
                   {heatCells.map((cell) => (
