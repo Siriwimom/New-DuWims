@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
+import { useDuwimsT } from "../components/language-context";
 
 const AUTH_KEYS = [
   "AUTH_TOKEN_V1",
@@ -10,18 +11,17 @@ const AUTH_KEYS = [
   "pmtool_token",
   "duwims_token",
 ];
-
 const SENSOR_OPTIONS = [
-  { key: "temp", label: "อุณหภูมิ", unit: "°C" },
-  { key: "rh", label: "ความชื้นสัมพัทธ์", unit: "%" },
-  { key: "wind", label: "วัดความเร็วลม", unit: "m/s" },
-  { key: "light", label: "ความเข้มแสง", unit: "lux" },
-  { key: "rain", label: "ปริมาณน้ำฝน", unit: "mm" },
-  { key: "soil", label: "ความชื้นในดิน", unit: "%" },
-  { key: "water", label: "ความพร้อมใช้น้ำ", unit: "%" },
-  { key: "n", label: "N", unit: "%" },
-  { key: "p", label: "P", unit: "ppm" },
-  { key: "k", label: "K", unit: "cmol/kg" },
+  { key: "temp", labelKey: "temperature", unit: "°C" },
+  { key: "rh", labelKey: "relativeHumidity", unit: "%" },
+  { key: "wind", labelKey: "windSpeed", unit: "m/s" },
+  { key: "light", labelKey: "lightIntensity", unit: "lux" },
+  { key: "rain", labelKey: "rainfall", unit: "mm" },
+  { key: "soil", labelKey: "soilMoisture", unit: "%" },
+  { key: "water", labelKey: "waterAvailability", unit: "%" },
+  { key: "n", labelKey: null, unit: "%" },
+  { key: "p", labelKey: null, unit: "ppm" },
+  { key: "k", labelKey: null, unit: "cmol/kg" },
 ];
 
 function getApiBase() {
@@ -60,10 +60,10 @@ function formatDateInput(date) {
   return `${y}-${m}-${day}`;
 }
 
-function formatThaiDateLabel(dateStr) {
+function formatThaiDateLabel(dateStr, lang = "th") {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString("th-TH", {
+  return d.toLocaleDateString(lang === "en" ? "en-US" : "th-TH", {
     day: "2-digit",
     month: "short",
   });
@@ -200,8 +200,11 @@ function canonicalSensorKey(name = "") {
   return "";
 }
 
-function sensorLabelFromKey(key) {
-  return SENSOR_OPTIONS.find((s) => s.key === key)?.label || key;
+function sensorLabelFromKey(key, t) {
+  const sensor = SENSOR_OPTIONS.find((s) => s.key === key);
+  if (!sensor) return key;
+  if (!sensor.labelKey) return key.toUpperCase();
+  return t[sensor.labelKey] || key;
 }
 
 function sensorUnitFromKey(key) {
@@ -430,7 +433,7 @@ function extractNodesFromPlot(plot) {
   });
 }
 
-function normalizePlot(plot) {
+function normalizePlot(plot, t) {
   const nodes = extractNodesFromPlot(plot).map((node) => ({
     ...node,
     sensors: safeArray(node?.sensors).map((sensor) => ({
@@ -441,7 +444,7 @@ function normalizePlot(plot) {
 
   return {
     id: getId(plot),
-    plotName: plot?.plotName || plot?.name || plot?.alias || "ไม่ทราบชื่อแปลง",
+    plotName: plot?.plotName || plot?.name || plot?.alias || t.unknownPlot,
     nodes,
   };
 }
@@ -479,6 +482,7 @@ async function apiGet(path) {
 }
 
 export default function HistoryPage() {
+  const { t, lang } = useDuwimsT();
   const today = useMemo(() => new Date(), []);
   const defaultEnd = formatDateInput(today);
   const defaultStart = formatDateInput(
@@ -490,7 +494,7 @@ export default function HistoryPage() {
   const [loadingReadings, setLoadingReadings] = useState(false);
   const [error, setError] = useState("");
 
-  const [quickRange, setQuickRange] = useState("30 วันล่าสุด");
+  const [quickRange, setQuickRange] = useState(t.last30Days);
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEnd);
   const [selectedPlotId, setSelectedPlotId] = useState("all");
@@ -501,6 +505,24 @@ export default function HistoryPage() {
   const [readingMap, setReadingMap] = useState({});
   const csvRef = useRef("");
   const sensorWrapRef = useRef(null);
+
+  const quickRangeOptions = useMemo(
+    () => [t.todayShort, t.last7Days, t.last30Days],
+    [t]
+  );
+
+  const sensorOptionsI18n = useMemo(
+    () =>
+      SENSOR_OPTIONS.map((s) => ({
+        ...s,
+        label: s.labelKey ? t[s.labelKey] || s.key : s.key.toUpperCase(),
+      })),
+    [t]
+  );
+
+  useEffect(() => {
+    setQuickRange(t.last30Days);
+  }, [t.last30Days]);
 
   useEffect(() => {
     let alive = true;
@@ -513,10 +535,10 @@ export default function HistoryPage() {
         if (!alive) return;
 
         const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-        setPlots(items.map(normalizePlot).filter((p) => p.id));
+        setPlots(items.map((item) => normalizePlot(item, t)).filter((p) => p.id));
       } catch (err) {
         if (!alive) return;
-        setError(err?.message || "ไม่สามารถโหลดข้อมูลแปลงได้");
+        setError(err?.message || t.loadPlotsFailed);
         setPlots([]);
       } finally {
         if (alive) setLoadingPlots(false);
@@ -527,7 +549,7 @@ export default function HistoryPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     const onDocMouseDown = (e) => {
@@ -570,15 +592,15 @@ export default function HistoryPage() {
 
   const selectedSensorNames = useMemo(() => {
     return selectedSensors
-      .map((key) => SENSOR_OPTIONS.find((s) => s.key === key)?.label)
+      .map((key) => sensorOptionsI18n.find((s) => s.key === key)?.label)
       .filter(Boolean);
-  }, [selectedSensors]);
+  }, [selectedSensors, sensorOptionsI18n]);
 
   const sensorDropdownLabel = useMemo(() => {
-    if (!selectedSensorNames.length) return "เลือกประเภทเซนเซอร์";
+    if (!selectedSensorNames.length) return t.selectSensorType;
     if (selectedSensorNames.length === 1) return selectedSensorNames[0];
     return `${selectedSensorNames[0]} +${selectedSensorNames.length - 1}`;
-  }, [selectedSensorNames]);
+  }, [selectedSensorNames, t]);
 
   const sensorTargets = useMemo(() => {
     const targets = [];
@@ -607,7 +629,7 @@ export default function HistoryPage() {
               sensorUid: rawSensor?.uid || "",
               rawSensorType: rawSensor?.sensorType || rawSensor?.name || rawSensor?.uid || "",
               sensorKey,
-              sensorLabel: sensorLabelFromKey(sensorKey),
+              sensorLabel: sensorLabelFromKey(sensorKey, t),
               unit: sensorUnitFromKey(sensorKey),
               latestValue: rawSensor?.latestValue,
               latestTimestamp: rawSensor?.latestTimestamp,
@@ -629,7 +651,7 @@ export default function HistoryPage() {
     }
 
     return targets;
-  }, [filteredPlots, selectedSensors]);
+  }, [filteredPlots, selectedSensors, t]);
 
   useEffect(() => {
     let alive = true;
@@ -673,7 +695,7 @@ export default function HistoryPage() {
         setReadingMap(Object.fromEntries(results));
       } catch (err) {
         if (!alive) return;
-        setError(err?.message || "ไม่สามารถโหลดข้อมูลย้อนหลังได้");
+        setError(err?.message || t.loadHistoryFailed);
         setReadingMap({});
       } finally {
         if (alive) setLoadingReadings(false);
@@ -684,7 +706,7 @@ export default function HistoryPage() {
     return () => {
       alive = false;
     };
-  }, [sensorTargets]);
+  }, [sensorTargets, t]);
 
   const dateKeys = useMemo(() => buildDateRange(startDate, endDate), [startDate, endDate]);
 
@@ -787,8 +809,8 @@ export default function HistoryPage() {
   }, [sensorTargets, readingMap, startDate, endDate]);
 
   const selectedSensorOptions = useMemo(() => {
-    return SENSOR_OPTIONS.filter((s) => selectedSensors.includes(s.key));
-  }, [selectedSensors]);
+    return sensorOptionsI18n.filter((s) => selectedSensors.includes(s.key));
+  }, [selectedSensors, sensorOptionsI18n]);
 
   const chartGroups = useMemo(() => {
     if (!selectedSensorOptions.length) return [];
@@ -937,11 +959,11 @@ export default function HistoryPage() {
     const end = formatDateInput(now);
     let start = end;
 
-    if (label === "วันนี้") {
+    if (label === t.todayShort) {
       start = end;
-    } else if (label === "7 วันล่าสุด") {
+    } else if (label === t.last7Days) {
       start = formatDateInput(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
-    } else if (label === "30 วันล่าสุด") {
+    } else if (label === t.last30Days) {
       start = formatDateInput(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29));
     }
 
@@ -964,22 +986,22 @@ export default function HistoryPage() {
 
   const loadInfo =
     loadingPlots || loadingReadings
-      ? "กำลังโหลดข้อมูล..."
+      ? t.loadingData
       : error
       ? error
-      : `พบ ${visibleNodes.length} node ในหน้าที่เลือก • ทั้งหมดจาก backend ${allNodeCount} node • ข้อมูลย้อนหลัง ${filteredReadingRows.length} รายการ`;
+      : t.nodesFoundText(visibleNodes.length, allNodeCount, filteredReadingRows.length);
 
   return (
     <DuwimsStaticPage current="history">
       <div id="history-page-root">
         <div className="history-card filter-card">
-          <div className="history-title">🔍 ฟิลเตอร์ข้อมูลย้อนหลัง</div>
-          <div className="history-sub">เลือกช่วงวันที่ / เซนเซอร์ / แปลง เพื่อดูข้อมูลย้อนหลังและกราฟ</div>
+          <div className="history-title">{t.historyFilterTitle}</div>
+          <div className="history-sub">{t.historyFilterSub}</div>
 
           <div style={{ marginBottom: 12 }}>
-            <div className="history-label">ช่วงเวลาเร็ว</div>
+            <div className="history-label">{t.quickRange}</div>
             <div className="quick-wrap">
-              {["วันนี้", "7 วันล่าสุด", "30 วันล่าสุด"].map((label) => (
+              {quickRangeOptions.map((label) => (
                 <button
                   key={label}
                   type="button"
@@ -994,7 +1016,7 @@ export default function HistoryPage() {
 
           <div className="history-grid" style={{ marginBottom: 14 }}>
             <div>
-              <label className="history-label">วันที่เริ่มต้น</label>
+              <label className="history-label">{t.startDate}</label>
               <input
                 className="history-input"
                 type="date"
@@ -1004,7 +1026,7 @@ export default function HistoryPage() {
             </div>
 
             <div>
-              <label className="history-label">วันที่สิ้นสุด</label>
+              <label className="history-label">{t.endDate}</label>
               <input
                 className="history-input"
                 type="date"
@@ -1014,13 +1036,13 @@ export default function HistoryPage() {
             </div>
 
             <div>
-              <label className="history-label">แปลง</label>
+              <label className="history-label">{t.plotSelect}</label>
               <select
                 className="history-select"
                 value={selectedPlotId}
                 onChange={(e) => setSelectedPlotId(e.target.value)}
               >
-                <option value="all">ทุกแปลง</option>
+                <option value="all">{t.allPlots}</option>
                 {plots.map((plot) => (
                   <option key={plot.id} value={plot.id}>
                     {plot.plotName}
@@ -1031,7 +1053,7 @@ export default function HistoryPage() {
           </div>
 
           <div className="sensor-wrap-block">
-            <label className="history-label">ประเภทเซนเซอร์</label>
+            <label className="history-label">{t.sensorType}</label>
 
             <div className="sensor-dd-wrap" ref={sensorWrapRef}>
               <button
@@ -1046,7 +1068,7 @@ export default function HistoryPage() {
               {sensorDropdownOpen && (
                 <div className="sensor-dd-menu open">
                   <div className="sensor-dd-header">
-                    <span className="sensor-dd-header-title">เลือกได้หลายตัว</span>
+                    <span className="sensor-dd-header-title">{t.selectMultiple}</span>
                     <button
                       type="button"
                       className="sensor-dd-clear"
@@ -1055,12 +1077,12 @@ export default function HistoryPage() {
                         resetSensors();
                       }}
                     >
-                      ล้าง
+                      {t.clear}
                     </button>
                   </div>
 
                   <div className="sensor-dd-grid">
-                    {SENSOR_OPTIONS.map((sensor) => {
+                    {sensorOptionsI18n.map((sensor) => {
                       const checked = selectedSensors.includes(sensor.key);
                       return (
                         <label
@@ -1085,7 +1107,7 @@ export default function HistoryPage() {
                       className="sensor-dd-done"
                       onClick={() => setSensorDropdownOpen(false)}
                     >
-                      Done
+                      {t.done}
                     </button>
                   </div>
                 </div>
@@ -1093,7 +1115,7 @@ export default function HistoryPage() {
             </div>
 
             <div className="mini-info">
-              เลือกแล้ว: {selectedSensorNames.length ? selectedSensorNames.join(", ") : "—"}
+              {t.selectedAlready}: {selectedSensorNames.length ? selectedSensorNames.join(", ") : "—"}
             </div>
           </div>
 
@@ -1106,16 +1128,16 @@ export default function HistoryPage() {
               <div className="chart-head">
                 <div>
                   <div className="history-title" style={{ marginBottom: 4 }}>
-                    📈 กราฟเปรียบเทียบแปลง ({group.unit})
+                    {t.chartComparePlots} ({group.unit})
                   </div>
                   <div className="history-sub" style={{ marginBottom: 0 }}>
-                    sensor: {group.sensors.map((s) => s.label).join(", ")} • แปลง:{" "}
-                    {filteredPlots.map((p) => p.plotName || "ไม่ทราบชื่อแปลง").join(", ") || "ไม่มีข้อมูล"}
+                    {t.sensorWord}: {group.sensors.map((s) => s.label).join(", ")} • {t.plotCol}:{" "}
+                    {filteredPlots.map((p) => p.plotName || t.unknownPlot).join(", ") || t.noChartData}
                   </div>
                 </div>
 
                 <button type="button" className="export-btn" onClick={exportCsv}>
-                  ⬇ EXPORT CSV
+                  {t.exportCsv}
                 </button>
               </div>
 
@@ -1130,7 +1152,7 @@ export default function HistoryPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="chart-empty-inline">ไม่มีข้อมูลสำหรับกราฟในช่วงที่เลือก</div>
+                  <div className="chart-empty-inline">{t.noChartData}</div>
                 )}
               </div>
 
@@ -1174,38 +1196,38 @@ export default function HistoryPage() {
                   }}
                 >
                   {dateKeys.map((d) => (
-                    <div key={d}>{formatThaiDateLabel(d)}</div>
+                    <div key={d}>{formatThaiDateLabel(d, lang)}</div>
                   ))}
                 </div>
               </div>
 
-              <div className="chart-note">* กราฟนี้แยกตามหน่วย โดยแต่ละเส้น = sensor + plot</div>
+              <div className="chart-note">{t.chartNote}</div>
             </div>
           ))
         ) : (
           <div className="history-card chart-card">
-            <div className="chart-empty-inline">ไม่มีข้อมูลสำหรับกราฟในช่วงที่เลือก</div>
+            <div className="chart-empty-inline">{t.noChartData}</div>
           </div>
         )}
 
         <div className="history-card">
-          <div className="history-title">📋 สรุปการวัดข้อมูล (เฉลี่ยช่วงที่เลือก)</div>
-          <div className="history-sub">เฉลี่ยจากข้อมูลย้อนหลังในช่วงวันที่ที่เลือก</div>
+          <div className="history-title">{t.summaryTitle}</div>
+          <div className="history-sub">{t.summarySub}</div>
 
           <div className="summary-wrap">
             <table className="summary-table">
               <thead>
                 <tr>
-                  <th>แปลง</th>
-                  <th>NODE</th>
-                  <th>ประเภท</th>
-                  <th>อุณหภูมิ (°C)</th>
-                  <th>ความชื้นสัมพัทธ์ (%)</th>
-                  <th>วัดความเร็วลม (m/s)</th>
-                  <th>ความเข้มแสง (lux)</th>
-                  <th>ปริมาณน้ำฝน (mm)</th>
-                  <th>ความชื้นในดิน (%)</th>
-                  <th>ความพร้อมใช้น้ำ (%)</th>
+                  <th>{t.plotCol}</th>
+                  <th>{t.nodeCol}</th>
+                  <th>{t.typeCol}</th>
+                  <th>{t.temperature} (°C)</th>
+                  <th>{t.relativeHumidity} (%)</th>
+                  <th>{t.windSpeed} (m/s)</th>
+                  <th>{t.lightIntensity} (lux)</th>
+                  <th>{t.rainfall} (mm)</th>
+                  <th>{t.soilMoisture} (%)</th>
+                  <th>{t.waterAvailability} (%)</th>
                   <th>N (%)</th>
                   <th>P (ppm)</th>
                   <th>K (cmol/kg)</th>
@@ -1218,7 +1240,7 @@ export default function HistoryPage() {
                       <td>{row.plotName}</td>
                       <td>{row.nodeName}</td>
                       <td>
-                        <span className="node-pill">{row.nodeType === "soil" ? "Soil Node" : "Air Node"}</span>
+                        <span className="node-pill">{row.nodeType === "soil" ? t.soilNodeText : t.airNodeText}</span>
                       </td>
                       <td>{Number.isFinite(row.values.temp) ? Number(row.values.temp).toFixed(2) : "-"}</td>
                       <td>{Number.isFinite(row.values.rh) ? Number(row.values.rh).toFixed(2) : "-"}</td>
@@ -1235,7 +1257,7 @@ export default function HistoryPage() {
                 ) : (
                   <tr>
                     <td colSpan={13} style={{ textAlign: "center", color: "#64748b" }}>
-                      ไม่มีข้อมูลสรุปในช่วงที่เลือก
+                      {t.noSummaryData}
                     </td>
                   </tr>
                 )}
@@ -1254,7 +1276,7 @@ export default function HistoryPage() {
             position: relative;
             overflow: visible !important;
             width: 100%;
-            max-width: 1400px;
+            max-width: 1300px;
             margin: 0 auto;
             padding: 16px 20px;
             z-index: 2;

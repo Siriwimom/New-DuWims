@@ -1,3 +1,5 @@
+import { LanguageProvider } from "./components/language-context";
+
 export const metadata = {
   title: "DUWIMS",
   description: "DUWIMS split pages",
@@ -6,7 +8,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="th">
-      <body style={{ margin: 0 }}>{children}</body>
+      <body style={{ margin: 0 }}>
+        <LanguageProvider>{children}</LanguageProvider>
+      </body>
     </html>
   );
 }

@@ -3,12 +3,15 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useDuwimsT } from "./language-context";
 
 const AUTH_KEY = "AUTH_TOKEN_V1";
 
 export default function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { lang, setLang, t } = useDuwimsT();
+
   const [hasToken, setHasToken] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -30,12 +33,12 @@ export default function TopBar() {
   };
 
   const tabs = [
-    { key: "dashboard", href: "/", label: "แดชบอร์ด" },
-    { key: "history", href: "/history", label: "ประวัติ" },
-    { key: "heatmap", href: "/heatmap", label: "🌡 Heat Map" },
-    { key: "planting-plot", href: "/planting-plot", label: "แปลงปลูก" },
-    { key: "node-sensor", href: "/node-sensor", label: "📡 Node Sensor" },
-    { key: "yield", href: "/yield", label: "ผลผลิต" },
+    { key: "dashboard", href: "/", label: t.dashboard },
+    { key: "history", href: "/history", label: t.history },
+    { key: "heatmap", href: "/heatmap", label: t.heatmap },
+    { key: "planting-plot", href: "/planting-plot", label: t.plantingPlot },
+    { key: "node-sensor", href: "/node-sensor", label: t.nodeSensor },
+    { key: "yield", href: "/yield", label: t.yield },
   ];
 
   const isActive = (href) => {
@@ -67,10 +70,27 @@ export default function TopBar() {
       </div>
 
       <div className="hdr-right topbar-right-tools">
+        <div className="lang-switch">
+          <button
+            type="button"
+            className={`lang-btn ${lang === "th" ? "active" : ""}`}
+            onClick={() => setLang("th")}
+          >
+            ไทย
+          </button>
+          <button
+            type="button"
+            className={`lang-btn ${lang === "en" ? "active" : ""}`}
+            onClick={() => setLang("en")}
+          >
+            EN
+          </button>
+        </div>
+
         <div className="topbar-auth">
           {!hasToken ? (
             <Link href="/login" className="auth-btn auth-btn-ghost">
-              เข้าสู่ระบบ
+              {t.login}
             </Link>
           ) : (
             <button
@@ -78,19 +98,51 @@ export default function TopBar() {
               className="auth-btn auth-btn-primary"
               onClick={logout}
             >
-              ออกจากระบบ
+              {t.logout}
             </button>
           )}
         </div>
 
         <div className="topbar-status-text">
           {!mounted
-            ? "สถานะ: กำลังตรวจสอบ..."
+            ? t.statusChecking
             : hasToken
-            ? "สถานะ: เข้าสู่ระบบแล้ว"
-            : "สถานะ: ยังไม่ได้เข้าสู่ระบบ"}
+            ? t.statusLoggedIn
+            : t.statusLoggedOut}
         </div>
       </div>
+
+      <style jsx>{`
+        .lang-switch {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 4px;
+          border-radius: 999px;
+          background: #edf7ee;
+          border: 1px solid #cfe5d1;
+        }
+
+        .lang-btn {
+          border: 0;
+          cursor: pointer;
+          padding: 8px 12px;
+          border-radius: 999px;
+          background: transparent;
+          color: #2f5d31;
+          font-weight: 700;
+          transition: all 0.2s ease;
+        }
+
+        .lang-btn:hover {
+          background: rgba(47, 93, 49, 0.08);
+        }
+
+        .lang-btn.active {
+          background: #2f8f46;
+          color: #fff;
+        }
+      `}</style>
     </header>
   );
 }

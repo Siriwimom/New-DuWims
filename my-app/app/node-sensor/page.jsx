@@ -1598,7 +1598,11 @@ export default function NodeSensorPage() {
 
               <div className="filter-field">
                 <div className="filter-field-label">แปลง</div>
-                <select className="form-select" value={formPlotId} disabled>
+              <select
+  className="form-select form-disabled-gray"
+  value={formPlotId}
+  disabled
+>
                   {plots.map((plot) => (
                     <option key={plot.id} value={plot.id}>
                       {plot.plotName}
@@ -1613,15 +1617,11 @@ export default function NodeSensorPage() {
                     UID <span className="required-star">*</span>
                   </div>
                   <input
-                    className={`form-input ${uidInvalid ? "input-error" : ""}`}
-                    placeholder="กรอก UID ที่มีอยู่ในฐานข้อมูลเท่านั้น"
-                    value={formUid}
-                    onChange={(e) => {
-                      setFormUid(e.target.value);
-                      setUidTouched(true);
-                    }}
-                    onBlur={() => setUidTouched(true)}
-                  />
+  className={`form-input form-disabled-gray ${uidInvalid ? "input-error" : ""}`}
+  placeholder="กรอก UID ที่มีอยู่ในฐานข้อมูลเท่านั้น"
+  value={formUid}
+  disabled
+/>
                   {uidInvalid ? <div className="field-error-text">กรุณากรอก UID</div> : null}
                   {formUid.trim() ? (
                     <div
@@ -1857,6 +1857,16 @@ export default function NodeSensorPage() {
             font-size: 12px;
             transition: 0.18s ease;
           }
+          
+          .form-disabled-gray {
+  color: #8a8f98 !important;
+  background: #f3f4f6 !important;
+  border-color: #d7dbe0 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  -webkit-text-fill-color: #8a8f98 !important;
+  opacity: 1 !important;
+}
 
           .form-input:focus,
           .form-select:focus,
