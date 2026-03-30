@@ -2,10 +2,27 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDuwimsT } from "./language-context";
 
 const AUTH_KEY = "AUTH_TOKEN_V1";
+
+function parseJwt(token) {
+  try {
+    const base64Url = token.split(".")[1];
+    if (!base64Url) return null;
+    const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
+}
 
 export default function TopBar() {
   const pathname = usePathname();
@@ -14,25 +31,58 @@ export default function TopBar() {
 
   const [hasToken, setHasToken] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [role, setRole] = useState("");
 
   useEffect(() => {
     setMounted(true);
+
     try {
-      setHasToken(!!window.localStorage.getItem(AUTH_KEY));
+      const token = window.localStorage.getItem(AUTH_KEY);
+      setHasToken(!!token);
+
+      if (token) {
+        const payload = parseJwt(token);
+        const nextRole = String(payload?.role || "").toLowerCase();
+        setRole(nextRole);
+      } else {
+        setRole("");
+      }
     } catch {
       setHasToken(false);
+      setRole("");
     }
   }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    const employeeBlockedPaths = [
+      "/heatmap",
+      "/planting-plot",
+      "/node-sensor",
+      "/yield",
+    ];
+
+    if (
+      role === "employee" &&
+      employeeBlockedPaths.some(
+        (blocked) => pathname === blocked || pathname.startsWith(`${blocked}/`)
+      )
+    ) {
+      router.replace("/");
+    }
+  }, [mounted, pathname, role, router]);
 
   const logout = () => {
     try {
       window.localStorage.removeItem(AUTH_KEY);
       setHasToken(false);
+      setRole("");
     } catch {}
     router.push("/login");
   };
 
-  const tabs = [
+  const allTabs = [
     { key: "dashboard", href: "/", label: t.dashboard },
     { key: "history", href: "/history", label: t.history },
     { key: "heatmap", href: "/heatmap", label: t.heatmap },
@@ -40,6 +90,15 @@ export default function TopBar() {
     { key: "node-sensor", href: "/node-sensor", label: t.nodeSensor },
     { key: "yield", href: "/yield", label: t.yield },
   ];
+
+  const tabs = useMemo(() => {
+    if (role === "employee") {
+      return allTabs.filter(
+        (tab) => tab.href === "/" || tab.href === "/history"
+      );
+    }
+    return allTabs;
+  }, [role, t]);
 
   const isActive = (href) => {
     if (href === "/") return pathname === "/";
