@@ -172,6 +172,71 @@ export default function TopBar() {
       </div>
 
       <style jsx>{`
+        .topbar-shell,
+        .topbar-shell * {
+          box-sizing: border-box;
+        }
+
+        .topbar-shell {
+          width: 100%;
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .topbar-left,
+        .topbar-center,
+        .topbar-right-tools {
+          min-width: 0;
+        }
+
+        .topbar-left {
+          display: flex;
+          align-items: center;
+        }
+
+        .topbar-center {
+          min-width: 0;
+          width: 100%;
+        }
+
+        .topbar-right-tools {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 10px;
+          flex-wrap: wrap;
+          min-width: 0;
+        }
+
+        .logo {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          white-space: nowrap;
+        }
+
+        .logo-dot {
+          flex: 0 0 auto;
+        }
+
+        .nav-tabs {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          flex-wrap: wrap;
+          min-width: 0;
+        }
+
+        .nav-tab {
+          white-space: nowrap;
+          max-width: 100%;
+        }
+
         .lang-switch {
           display: inline-flex;
           align-items: center;
@@ -180,6 +245,8 @@ export default function TopBar() {
           border-radius: 999px;
           background: #edf7ee;
           border: 1px solid #cfe5d1;
+          flex: 0 0 auto;
+          max-width: 100%;
         }
 
         .lang-btn {
@@ -191,6 +258,7 @@ export default function TopBar() {
           color: #2f5d31;
           font-weight: 700;
           transition: all 0.2s ease;
+          white-space: nowrap;
         }
 
         .lang-btn:hover {
@@ -200,6 +268,133 @@ export default function TopBar() {
         .lang-btn.active {
           background: #2f8f46;
           color: #fff;
+        }
+
+        .topbar-auth,
+        .topbar-status-text {
+          min-width: 0;
+        }
+
+        .topbar-status-text {
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 220px;
+        }
+
+        @media (max-width: 1200px) {
+          .topbar-shell {
+            grid-template-columns: auto minmax(0, 1fr);
+            grid-template-areas:
+              "left right"
+              "center center";
+            align-items: start;
+          }
+
+          .topbar-left {
+            grid-area: left;
+          }
+
+          .topbar-center {
+            grid-area: center;
+          }
+
+          .topbar-right-tools {
+            grid-area: right;
+          }
+
+          .nav-tabs {
+            justify-content: flex-start;
+          }
+        }
+
+        @media (max-width: 900px) {
+          .topbar-shell {
+            grid-template-columns: 1fr;
+            grid-template-areas:
+              "left"
+              "right"
+              "center";
+            gap: 10px;
+          }
+
+          .topbar-left {
+            justify-content: center;
+          }
+
+          .topbar-right-tools {
+            justify-content: center;
+          }
+
+          .topbar-center {
+            width: 100%;
+          }
+
+          .nav-tabs {
+            justify-content: center;
+          }
+
+          .topbar-status-text {
+            max-width: 100%;
+            text-align: center;
+          }
+        }
+
+        @media (max-width: 640px) {
+          .topbar-shell {
+            gap: 8px;
+          }
+
+          .topbar-right-tools {
+            gap: 8px;
+          }
+
+          .lang-switch {
+            width: 100%;
+            justify-content: center;
+          }
+
+          .lang-btn {
+            flex: 1 1 0;
+            text-align: center;
+          }
+
+          .topbar-auth {
+            width: 100%;
+          }
+
+          .topbar-auth :global(.auth-btn),
+          .topbar-auth button {
+            width: 100%;
+          }
+
+          .nav-tabs {
+            gap: 6px;
+          }
+
+          .nav-tab {
+            flex: 1 1 calc(50% - 6px);
+            text-align: center;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .logo {
+            font-size: 14px;
+          }
+
+          .lang-btn {
+            padding: 8px 10px;
+            font-size: 12px;
+          }
+
+          .nav-tab {
+            flex: 1 1 100%;
+          }
+
+          .topbar-status-text {
+            font-size: 12px;
+          }
         }
       `}</style>
     </header>

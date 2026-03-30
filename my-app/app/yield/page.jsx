@@ -468,7 +468,7 @@ export default function YieldPage() {
 
         {error ? <div className="yield-error-banner">{error}</div> : null}
 
-        <div className="yield-filters">
+        <div className="yield-filters responsive-yield-filters">
           <div className="yield-filter-col">
             <div className="filter-label">{tx.plot}</div>
             <select
@@ -884,152 +884,244 @@ export default function YieldPage() {
             </div>
           </div>
         )}
+<style jsx>{`
+  .yield-error-banner {
+    margin-bottom: 10px;
+    border-radius: 12px;
+    padding: 10px 12px;
+    background: #fff3f3;
+    border: 1px solid #ffd1d1;
+    color: #b42318;
+    font-size: 12px;
+    line-height: 1.45;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
 
-        <style jsx>{`
-          .yield-error-banner {
-            margin-bottom: 10px;
-            border-radius: 12px;
-            padding: 10px 12px;
-            background: #fff3f3;
-            border: 1px solid #ffd1d1;
-            color: #b42318;
-            font-size: 12px;
-            line-height: 1.45;
-          }
+  .yield-table-card {
+    min-height: 200px;
+    background: #163d0b !important;
+    border: 2px solid #163d0b !important;
+    border-radius: 22px !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    width: 100%;
+    min-width: 0;
+  }
 
-          .yield-table-card {
-            min-height: 200px;
-            background: #163d0b !important;
-            border: 2px solid #163d0b !important;
-            border-radius: 22px !important;
-            box-shadow: none !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-          }
+  .yield-table-card > div {
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-radius: 20px;
+  }
 
-          .yield-table-card > div {
-            width: 100%;
-            overflow-x: auto;
-            border-radius: 20px;
-          }
+  .yield-table {
+    width: 100%;
+    min-width: 900px;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: fixed;
+    background: #ffffff;
+  }
 
-          .yield-table {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
-            table-layout: fixed;
-            background: #ffffff;
-          }
+  .yield-table thead th {
+    white-space: nowrap;
+    text-align: center;
+    vertical-align: middle;
+    padding: 16px 18px;
+    background: #163d0b;
+    color: #ffffff;
+    font-weight: 800;
+  }
 
-          .yield-table thead th {
-            white-space: nowrap;
-            text-align: center;
-            vertical-align: middle;
-            padding: 16px 18px;
-            background: #163d0b;
-            color: #ffffff;
-            font-weight: 800;
-          }
+  .yield-table thead th:first-child {
+    border-top-left-radius: 18px;
+  }
 
-          .yield-table thead th:first-child {
-            border-top-left-radius: 18px;
-          }
+  .yield-table thead th:last-child {
+    border-top-right-radius: 18px;
+  }
 
-          .yield-table thead th:last-child {
-            border-top-right-radius: 18px;
-          }
+  .yield-table tbody td {
+    text-align: center;
+    vertical-align: middle;
+    padding: 14px 18px;
+    background: #ffffff !important;
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
 
-          .yield-table tbody td {
-            text-align: center;
-            vertical-align: middle;
-            padding: 14px 18px;
-            background: #ffffff !important;
-          }
+  .yield-table tbody tr {
+    height: 76px;
+  }
 
-          .yield-table tbody tr {
-            height: 76px;
-          }
+  .yield-table tbody tr:last-child td:first-child {
+    border-bottom-left-radius: 18px;
+  }
 
-          .yield-table tbody tr:last-child td:first-child {
-            border-bottom-left-radius: 18px;
-          }
+  .yield-table tbody tr:last-child td:last-child {
+    border-bottom-right-radius: 18px;
+  }
 
-          .yield-table tbody tr:last-child td:last-child {
-            border-bottom-right-radius: 18px;
-          }
+  .yield-table tbody tr:last-child td {
+    border-bottom: none;
+  }
 
-          .yield-table tbody tr:last-child td {
-            border-bottom: none;
-          }
+  .yield-table th:nth-child(1),
+  .yield-table td:nth-child(1) {
+    width: 16%;
+    text-align: center;
+  }
 
-          .yield-table th:nth-child(1),
-          .yield-table td:nth-child(1) {
-            width: 16%;
-            text-align: center;
-          }
+  .yield-table th:nth-child(2),
+  .yield-table td:nth-child(2) {
+    width: 20%;
+    text-align: center;
+  }
 
-          .yield-table th:nth-child(2),
-          .yield-table td:nth-child(2) {
-            width: 20%;
-            text-align: center;
-          }
+  .yield-table th:nth-child(3),
+  .yield-table td:nth-child(3) {
+    width: 15%;
+  }
 
-          .yield-table th:nth-child(3),
-          .yield-table td:nth-child(3) {
-            width: 15%;
-          }
+  .yield-table th:nth-child(4),
+  .yield-table td:nth-child(4) {
+    width: 15%;
+  }
 
-          .yield-table th:nth-child(4),
-          .yield-table td:nth-child(4) {
-            width: 15%;
-          }
+  .yield-table th:nth-child(5),
+  .yield-table td:nth-child(5) {
+    width: 14%;
+  }
 
-          .yield-table th:nth-child(5),
-          .yield-table td:nth-child(5) {
-            width: 14%;
-          }
+ .yield-table th:nth-child(6),
+.yield-table td:nth-child(6) {
+  width: auto;
+  min-width: 140px;
+}
 
-          .yield-table th:nth-child(6),
-          .yield-table td:nth-child(6) {
-            width: 20%;
-          }
+  .yield-empty-cell {
+    text-align: center !important;
+    vertical-align: middle;
+    padding: 54px 18px !important;
+    color: #7b8794;
+    font-weight: 600;
+    background: #ffffff !important;
+  }
 
-          .yield-empty-cell {
-            text-align: center !important;
-            vertical-align: middle;
-            padding: 54px 18px !important;
-            color: #7b8794;
-            font-weight: 600;
-            background: #ffffff !important;
-          }
+  .yield-actions-cell {
+    display: flex;
+    gap: 8px;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: center;
+  }
 
-          .yield-actions-cell {
-            display: flex;
-            gap: 8px;
-            flex-wrap: nowrap;
-            align-items: center;
-            justify-content: center;
-          }
+  @media (max-width: 1200px) {
+    .yield-filters {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
 
-          @media (max-width: 900px) {
-            .yield-filters {
-              display: grid;
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-              gap: 10px;
-            }
+    .yield-filter-col {
+      min-width: 0;
+    }
 
-            .yield-filter-col .form-select,
-            .yield-filter-col .form-input {
-              width: 100% !important;
-            }
-          }
+    .yield-filter-col .form-select,
+    .yield-filter-col .form-input {
+      width: 100% !important;
+      min-width: 0;
+    }
 
-          @media (max-width: 640px) {
-            .yield-filters {
-              grid-template-columns: 1fr;
-            }
-          }
-        `}</style>
+    .yield-table {
+      min-width: 860px;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .yield-filters {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .yield-filter-col {
+      min-width: 0;
+    }
+
+    .yield-filter-col .form-select,
+    .yield-filter-col .form-input {
+      width: 100% !important;
+      min-width: 0;
+    }
+
+    .yield-table {
+      min-width: 820px;
+    }
+
+    .yield-table thead th,
+    .yield-table tbody td {
+      padding: 13px 14px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .yield-filters {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    .yield-filter-col {
+      min-width: 0;
+    }
+
+    .yield-filter-col .form-select,
+    .yield-filter-col .form-input {
+      width: 100% !important;
+      min-width: 0;
+    }
+
+    .yield-table {
+      min-width: 760px;
+    }
+
+    .yield-table thead th,
+    .yield-table tbody td {
+      padding: 12px 12px;
+      font-size: 12px;
+    }
+
+    .yield-actions-cell {
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .yield-actions-cell > * {
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .yield-table {
+      min-width: 700px;
+    }
+
+    .yield-table thead th,
+    .yield-table tbody td {
+      padding: 10px 10px;
+      font-size: 11px;
+    }
+
+    .yield-empty-cell {
+      padding: 40px 12px !important;
+      font-size: 12px;
+    }
+  }
+`}</style>
       </div>
     </DuwimsStaticPage>
   );

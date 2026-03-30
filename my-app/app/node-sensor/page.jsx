@@ -2833,6 +2833,122 @@ export default function NodeSensorPage() {
 
             .node-summary-sep {
               display: none;
+              /* ===== FIX RESPONSIVE เพิ่ม ===== */
+
+.page-content,
+.card,
+.node-card {
+  min-width: 0;
+}
+
+/* ป้องกัน text ล้น */
+.card-title,
+.alert-text,
+.coord-read,
+.node-summary-value {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* ===== NODE FLEX FIX ===== */
+.node-header-left {
+  min-width: 0;
+}
+
+.node-summary-item {
+  max-width: 100%;
+}
+
+/* ===== ACTION BUTTON ===== */
+.node-actions {
+  flex-wrap: wrap;
+}
+
+/* ===== TABLE SCROLL ===== */
+.node-sensor-table {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+}
+
+/* ===== MAP RESPONSIVE ===== */
+@media (max-width: 768px) {
+  .map-wrapper {
+    min-height: 260px;
+  }
+
+  #currentMapHost,
+  #createMapHost,
+  #editMapHost {
+    min-height: 260px;
+  }
+
+  .leaflet-box {
+    height: 260px !important;
+    min-height: 260px !important;
+  }
+}
+
+/* ===== MOBILE ===== */
+@media (max-width: 640px) {
+
+  .page-content {
+    padding: 12px;
+  }
+
+  .create-btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  .node-actions {
+    flex-direction: column;
+  }
+
+  .node-actions .btn-sm {
+    width: 100%;
+  }
+
+  .node-summary-item {
+    width: 100%;
+  }
+
+  .node-summary-sep {
+    display: none;
+  }
+
+  .coord-read {
+    width: 100%;
+  }
+}
+
+/* ===== SMALL MOBILE ===== */
+@media (max-width: 480px) {
+
+  .map-wrapper {
+    min-height: 220px;
+  }
+
+  #currentMapHost,
+  #createMapHost,
+  #editMapHost {
+    min-height: 220px;
+  }
+
+  .leaflet-box {
+    height: 220px !important;
+    min-height: 220px !important;
+  }
+
+  .node-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .node-header-btn {
+    padding: 12px;
+  }
+}
             }
           }
         `}</style>
