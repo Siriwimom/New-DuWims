@@ -972,17 +972,28 @@ export default function HistoryPage() {
     setEndDate(end);
   }
 
-  function exportCsv() {
-    const blob = new Blob([csvRef.current], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `history-${startDate}-to-${endDate}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+function exportCsv() {
+  if (!filteredReadingRows.length) {
+    alert(lang === "en" ? "No data to export." : "ไม่มีข้อมูลสำหรับส่งออก CSV");
+    return;
   }
+
+  const bom = "\uFEFF";
+  const csvText = bom + csvRef.current;
+
+  const blob = new Blob([csvText], {
+    type: "text/csv;charset=utf-8;",
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `history-${startDate}-to-${endDate}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
   const loadInfo =
     loadingPlots || loadingReadings
@@ -1611,8 +1622,8 @@ export default function HistoryPage() {
   .chart-y {
     position: absolute;
     left: 0;
-    top: 0;
-    bottom: 0;
+    top: 10px;
+    bottom: 28px;
     width: 50px;
     display: flex;
     flex-direction: column;
@@ -1621,12 +1632,31 @@ export default function HistoryPage() {
     font-size: 11px;
     color: #475569;
     font-weight: 700;
+    padding-right: 6px;
+    text-align: right;
+    z-index: 2;
+  }
+
+  .chart-svg-box {
+    position: relative;
+    min-width: 720px;
+    width: 100%;
+    height: 220px;
+    padding-left: 54px;
+  }
+
+  .chart-svg {
+    display: block;
+    width: 100%;
+    height: 220px;
   }
 
   .chart-x {
+    min-width: 720px;
     display: grid;
     gap: 0;
     margin-top: 8px;
+    margin-left: 54px;
     padding-bottom: 8px;
     font-size: 11px;
     color: #475569;
@@ -1794,11 +1824,18 @@ export default function HistoryPage() {
       padding: 8px 6px;
     }
 
-    
-
     .summary-table td {
       font-size: 10px;
       padding: 8px 6px;
+    }
+
+    .chart-svg-box,
+    .chart-x {
+      min-width: 640px;
+    }
+
+    .chart-x {
+      margin-left: 54px;
     }
   }
 
