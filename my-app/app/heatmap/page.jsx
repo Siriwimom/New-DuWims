@@ -255,14 +255,13 @@ const SENSOR_KEYS = Object.keys(SENSOR_META);
 const GLOBAL_SENSORS = ["temp", "humidity", "wind_speed", "rain"];
 
 const HEAT_COLORS = [
-  "#fff7ec",
-  "#fee8c8",
-  "#fdd49e",
-  "#fdbb84",
-  "#fc8d59",
-  "#ef6548",
-  "#d7301f",
-  "#990000",
+  "#6e40aa",
+  "#3b82f6",
+  "#22c55e",
+  "#fde047",
+  "#fb923c",
+  "#ef4444",
+  "#b91c1c",
 ];
 
 const THAILAND_BOUNDS = {
@@ -519,6 +518,33 @@ function getHeatColor(sensorKey, value) {
   return getHeatColorByRatio(getSensorRatio(sensorKey, value));
 }
 
+function getContrastText(color) {
+  if (!color) return "#ffffff";
+
+  const rgbMatch = String(color).match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/i);
+  let r;
+  let g;
+  let b;
+
+  if (rgbMatch) {
+    r = Number(rgbMatch[1]);
+    g = Number(rgbMatch[2]);
+    b = Number(rgbMatch[3]);
+  } else if (String(color).startsWith("#")) {
+    const hex = String(color).slice(1);
+    const normalized = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+    const num = parseInt(normalized, 16);
+    r = (num >> 16) & 255;
+    g = (num >> 8) & 255;
+    b = num & 255;
+  } else {
+    return "#ffffff";
+  }
+
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.68 ? "#111827" : "#ffffff";
+}
+
 function getSensorStatus(sensorKey, value) {
   const meta = SENSOR_META[sensorKey] || {};
   const min = toNum(meta.min);
@@ -534,6 +560,34 @@ function getSensorStatus(sensorKey, value) {
     return { type: "high", label: "สูงกว่าช่วง" };
   }
   return { type: "normal", label: "อยู่ในช่วง" };
+}
+
+
+function formatLegendValue(value) {
+  if (value == null || Number.isNaN(Number(value))) return "-";
+  const n = Number(value);
+  if (Math.abs(n) >= 1000) return n.toLocaleString();
+  if (Math.abs(n) >= 100) return String(Math.round(n));
+  if (Math.abs(n) >= 10) return n % 1 === 0 ? String(n) : n.toFixed(1);
+  return n % 1 === 0 ? String(n) : n.toFixed(2);
+}
+
+function getLegendStops(sensorKey) {
+  const meta = SENSOR_META[sensorKey] || {};
+  const min = toNum(meta.min);
+  const max = toNum(meta.max);
+  if (min == null || max == null || max <= min) return [];
+  const segments = 4;
+  return Array.from({ length: segments + 1 }, (_, i) => {
+    const ratio = i / segments;
+    const value = min + (max - min) * ratio;
+    return {
+      ratio,
+      value,
+      label: formatLegendValue(value),
+      color: getHeatColorByRatio(ratio),
+    };
+  });
 }
 
 const FRAME_STEP_HOURS = 1;
@@ -668,9 +722,7 @@ function interpolateValueBetweenReadings(beforeReading, afterReading, targetTs) 
   return beforeValue + (afterValue - beforeValue) * ratio;
 }
 
-function getSmoothedReadingForFrame(point, currentTs, nextFrameTs, nowFrameStart) {
-  const frameMidTs = currentTs + Math.max(1, nextFrameTs - currentTs) / 2;
-
+function getSmoothedReadingForFrame(point, currentTs, nextFrameTs) {
   const readingInFrame = findLatestReadingInWindow(point.readings, currentTs, nextFrameTs);
   if (readingInFrame) {
     return {
@@ -685,76 +737,15 @@ function getSmoothedReadingForFrame(point, currentTs, nextFrameTs, nowFrameStart
     };
   }
 
-  const beforeReading = findReadingAtOrBefore(point.allSensorHistory || point.readings || [], frameMidTs);
-  const afterReading = findReadingAtOrAfter(point.allSensorHistory || point.readings || [], frameMidTs);
-
-  let latestHistory = null;
-  let latestHistoryTs = -Infinity;
-
-  for (const r of point.allSensorHistory || []) {
-    const ts = getReadingTs(r);
-    if (!Number.isFinite(ts)) continue;
-    if (ts > latestHistoryTs) {
-      latestHistory = r;
-      latestHistoryTs = ts;
-    }
-  }
-
-  const interpolatedValue = interpolateValueBetweenReadings(beforeReading, afterReading, frameMidTs);
-  if (interpolatedValue != null && !Number.isNaN(interpolatedValue)) {
-    const pickedTs =
-      (beforeReading?.timestamp || beforeReading?.ts || beforeReading?.createdAt) ||
-      (afterReading?.timestamp || afterReading?.ts || afterReading?.createdAt) ||
-      null;
-
-    return {
-      chosen: beforeReading || afterReading || null,
-      value: interpolatedValue,
-      ts: pickedTs,
-      mode: "interpolated",
-      readingInFrame: null,
-      beforeReading,
-      afterReading,
-      latestHistory,
-    };
-  }
-
-  const latestSensorValue = point.latestSensorValue;
-  const latestSensorTs = latestSensorValue?.timestamp
-    ? new Date(latestSensorValue.timestamp).getTime()
-    : NaN;
-
-  const frameIsCurrentOrAfter = currentTs >= nowFrameStart;
-  const historyEndedBeforeThisFrame =
-    !Number.isFinite(latestHistoryTs) || latestHistoryTs < currentTs;
-
-  if (
-    latestSensorValue &&
-    Number.isFinite(latestSensorTs) &&
-    frameIsCurrentOrAfter &&
-    historyEndedBeforeThisFrame
-  ) {
-    return {
-      chosen: latestSensorValue,
-      value: toNum(latestSensorValue?.value),
-      ts: latestSensorValue?.timestamp || null,
-      mode: "latest",
-      readingInFrame: null,
-      beforeReading,
-      afterReading,
-      latestHistory,
-    };
-  }
-
   return {
     chosen: null,
     value: null,
     ts: null,
     mode: "none",
     readingInFrame: null,
-    beforeReading,
-    afterReading,
-    latestHistory,
+    beforeReading: null,
+    afterReading: null,
+    latestHistory: null,
   };
 }
 
@@ -1352,7 +1343,7 @@ export default function Page() {
   const frameTimestamps = useMemo(() => buildFrames(startDate, endDate), [startDate, endDate]);
   const framesKey = useMemo(() => frameTimestamps.join("|"), [frameTimestamps]);
   const frameCount = frameTimestamps.length;
-  const isGlobalSensor = GLOBAL_SENSORS.includes(selectedSensor);
+  const isGlobalSensor = false;
   const currentFrameTs = frameTimestamps[frameIndex] || Date.now();
 
   const visiblePlots = useMemo(() => {
@@ -1477,135 +1468,17 @@ export default function Page() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!isGlobalSensor) {
-      setGlobalPoints([]);
-      setGlobalError("");
-      setGlobalLoading(false);
-      setGlobalProgress({ done: 0, total: 0, label: "" });
-      preloadQueueRef.current = [];
-      preloadActiveRef.current = false;
-      globalInflightRef.current = "";
-      return;
-    }
+  
+useEffect(() => {
+  setGlobalPoints([]);
+  setGlobalError("");
+  setGlobalLoading(false);
+  setGlobalProgress({ done: 0, total: 0, label: "" });
+  preloadQueueRef.current = [];
+  preloadActiveRef.current = false;
+  globalInflightRef.current = "";
+}, [selectedSensor, currentFrameTs, selectedPlotId, frameCount, visiblePlotsKey]);
 
-    let alive = true;
-    const currentCacheKey = getCacheKeyForFrame(selectedSensor, currentFrameTs, selectedPlotId);
-    const priorityIndexes = buildPriorityFrameIndexes(frameTimestamps, currentFrameTs);
-    const total = priorityIndexes.length || 1;
-
-    async function loadCurrentAndQueue() {
-      setGlobalError("");
-      setGlobalProgress({ done: 0, total, label: tt("loadingToday") });
-
-      const cachedCountInitial = priorityIndexes.filter((idx) =>
-        globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx], selectedPlotId))
-      ).length;
-
-      if (globalCacheRef.current.has(currentCacheKey)) {
-        setGlobalPoints(globalCacheRef.current.get(currentCacheKey));
-        setGlobalProgress({
-          done: cachedCountInitial,
-          total,
-          label: cachedCountInitial >= total ? tt("readyToShow") : tt("readyToRender"),
-        });
-      } else {
-        const now = Date.now();
-        if (now < globalBackoffUntilRef.current) {
-          const waitSec = Math.max(1, Math.ceil((globalBackoffUntilRef.current - now) / 1000));
-          setGlobalError(tt("globalClimateCooldown", undefined, { waitSec }));
-        } else {
-          try {
-            globalInflightRef.current = currentCacheKey;
-            setGlobalLoading(true);
-            const pts = await fetchOpenMeteoGrid(selectedSensor, currentFrameTs, visiblePlots, selectedPlotId);
-            if (!alive) return;
-            globalCacheRef.current.set(currentCacheKey, pts);
-            setGlobalPoints(pts);
-            const cachedCountAfter = priorityIndexes.filter((idx) =>
-              globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx], selectedPlotId))
-            ).length;
-            setGlobalProgress({
-              done: cachedCountAfter,
-              total,
-              label: cachedCountAfter >= total ? tt("readyToShow") : tt("readyToRender"),
-            });
-          } catch (e) {
-            if (!alive) return;
-            const message = String(e?.message || "");
-            if (message.includes("(429)")) {
-              globalBackoffUntilRef.current = Date.now() + 60000;
-              setGlobalPoints([]);
-              setGlobalError(tt("openMeteoLimit"));
-            } else {
-              setGlobalPoints([]);
-              setGlobalError(message || tt("globalClimateLoadFailed"));
-            }
-          } finally {
-            if (alive) setGlobalLoading(false);
-            if (globalInflightRef.current === currentCacheKey) {
-              globalInflightRef.current = "";
-            }
-          }
-        }
-      }
-
-      preloadQueueRef.current = priorityIndexes
-        .map((idx) => ({ idx, key: getCacheKeyForFrame(selectedSensor, frameTimestamps[idx], selectedPlotId), ts: frameTimestamps[idx] }))
-        .filter((item) => item.key !== currentCacheKey && !globalCacheRef.current.has(item.key));
-
-      async function runPreload() {
-        if (preloadActiveRef.current || !preloadQueueRef.current.length) return;
-        preloadActiveRef.current = true;
-
-        while (alive && preloadQueueRef.current.length) {
-          const item = preloadQueueRef.current.shift();
-          if (!item || globalCacheRef.current.has(item.key)) continue;
-
-          const now = Date.now();
-          if (now < globalBackoffUntilRef.current) break;
-
-          try {
-            await fetchOpenMeteoGrid(selectedSensor, item.ts, visiblePlots, selectedPlotId).then((pts) => {
-              globalCacheRef.current.set(item.key, pts);
-            });
-          } catch (e) {
-            const message = String(e?.message || "");
-            if (message.includes("(429)")) {
-              globalBackoffUntilRef.current = Date.now() + 60000;
-              break;
-            }
-          }
-
-          if (!alive) break;
-          const done = priorityIndexes.filter((idx) =>
-            globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx], selectedPlotId))
-          ).length;
-
-          setGlobalProgress({
-            done,
-            total,
-            label: done >= total ? tt("clipReady") : tt("preparingClip", undefined, { done, total }),
-          });
-
-          await new Promise((resolve) => setTimeout(resolve, 350));
-        }
-
-        preloadActiveRef.current = false;
-      }
-
-      runPreload();
-    }
-
-    loadCurrentAndQueue();
-
-    return () => {
-      alive = false;
-      if (globalInflightRef.current === currentCacheKey) {
-        globalInflightRef.current = "";
-      }
-    };
-  }, [isGlobalSensor, selectedSensor, currentFrameTs, selectedPlotId, frameCount, visiblePlotsKey, tt]);
 
   const historicalReadingsBySensorId = useMemo(() => {
     const grouped = {};
@@ -1616,7 +1489,6 @@ export default function Page() {
       const ts = new Date(r?.timestamp || r?.ts || r?.createdAt || 0).getTime();
 
       if (!sensorId || !Number.isFinite(ts)) return;
-      if (sensorName && sensorName !== selectedSensor) return;
 
       if (!grouped[sensorId]) grouped[sensorId] = [];
       grouped[sensorId].push({
@@ -1635,7 +1507,7 @@ export default function Page() {
     });
 
     return grouped;
-  }, [allReadings, selectedSensor]);
+  }, [allReadings]);
 
   const readingsBySensorId = useMemo(() => {
     const startTs = new Date(`${startDate}T00:00:00`).getTime();
@@ -1734,15 +1606,12 @@ export default function Page() {
           ? Math.max(1, frameTimestamps[1] - frameTimestamps[0])
           : FRAME_STEP_HOURS * 60 * 60 * 1000);
 
-  const nowFrameStart = alignBangkokFrameStart(Date.now());
-
   return activeSensorPoints
     .map((point) => {
       const smoothed = getSmoothedReadingForFrame(
         point,
         currentTs,
-        nextFrameTs,
-        nowFrameStart
+        nextFrameTs
       );
 
       const value = smoothed?.value ?? null;
@@ -1776,81 +1645,59 @@ export default function Page() {
     .filter((point) => point.value != null && !Number.isNaN(point.value));
 }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
 
-  const globalDisplayPoints = useMemo(() => {
-    if (!isGlobalSensor) return [];
-    if (selectedPlotId === "all") return globalPoints;
+  
+const globalDisplayPoints = useMemo(() => {
+  return [];
+}, []);
 
-    const validPlots = visiblePlots.filter((plot) => plot.coords.length >= 3);
-    if (!validPlots.length) return [];
 
-    return globalPoints.filter((point) =>
-      validPlots.some((plot) => pointInPolygon({ lat: point.lat, lng: point.lng }, plot.coords))
-    );
-  }, [isGlobalSensor, globalPoints, selectedPlotId, visiblePlots]);
+  
+const heatCells = useMemo(() => {
+  const density = selectedPlotId === "all" ? 48 : 60;
+  return buildLocalHeatCells(visiblePlots, renderedPoints, selectedSensor, density);
+}, [selectedSensor, selectedPlotId, visiblePlots, renderedPoints]);
 
-  const heatCells = useMemo(() => {
-    if (isGlobalSensor) {
-      return buildGlobalClimateCells(
-        globalDisplayPoints,
-        selectedSensor,
-        selectedPlotId === "all" ? GLOBAL_GRID_STEP : 0.2,
-        visiblePlots
-      );
-    }
 
-    const density = selectedPlotId === "all" ? 48 : 60;
-    return buildLocalHeatCells(visiblePlots, renderedPoints, selectedSensor, density);
-  }, [isGlobalSensor, globalDisplayPoints, selectedSensor, selectedPlotId, visiblePlots, renderedPoints]);
+  
+const stats = useMemo(() => {
+  const values = renderedPoints
+    .map((point) => point.value)
+    .filter((v) => v != null && !Number.isNaN(v));
 
-  const stats = useMemo(() => {
-    const source = isGlobalSensor ? globalDisplayPoints : renderedPoints;
-    const values = source
-      .map((point) => point.value)
-      .filter((v) => v != null && !Number.isNaN(v));
-
-    if (!values.length) {
-      return {
-        avg: null,
-        min: null,
-        max: null,
-        count: 0,
-        low: 0,
-        normal: 0,
-        high: 0,
-      };
-    }
-
-    let low = 0;
-    let normal = 0;
-    let high = 0;
-
-    const globalLowCut = isGlobalSensor ? getPercentile(values, 0.2) : null;
-    const globalHighCut = isGlobalSensor ? getPercentile(values, 0.8) : null;
-
-    values.forEach((v) => {
-      let type;
-      if (isGlobalSensor && globalLowCut != null && globalHighCut != null) {
-        if (v < globalLowCut) type = "low";
-        else if (v > globalHighCut) type = "high";
-        else type = "normal";
-      } else {
-        type = getSensorStatus(selectedSensor, v).type;
-      }
-      if (type === "low") low += 1;
-      else if (type === "high") high += 1;
-      else if (type === "normal") normal += 1;
-    });
-
+  if (!values.length) {
     return {
-      avg: Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(2)),
-      min: Number(Math.min(...values).toFixed(2)),
-      max: Number(Math.max(...values).toFixed(2)),
-      count: values.length,
-      low,
-      normal,
-      high,
+      avg: null,
+      min: null,
+      max: null,
+      count: 0,
+      low: 0,
+      normal: 0,
+      high: 0,
     };
-  }, [isGlobalSensor, globalDisplayPoints, renderedPoints, selectedSensor]);
+  }
+
+  let low = 0;
+  let normal = 0;
+  let high = 0;
+
+  values.forEach((v) => {
+    const type = getSensorStatus(selectedSensor, v).type;
+    if (type === "low") low += 1;
+    else if (type === "high") high += 1;
+    else if (type === "normal") normal += 1;
+  });
+
+  return {
+    avg: Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(2)),
+    min: Number(Math.min(...values).toFixed(2)),
+    max: Number(Math.max(...values).toFixed(2)),
+    count: values.length,
+    low,
+    normal,
+    high,
+  };
+}, [renderedPoints, selectedSensor]);
+
 
   useEffect(() => {
     if (!playing) {
@@ -1887,6 +1734,116 @@ export default function Page() {
 
   const sensorMeta = SENSOR_META[selectedSensor] || SENSOR_META.soil_moisture;
 
+  const legendStops = useMemo(() => getLegendStops(selectedSensor), [selectedSensor]);
+
+  const legendSensorItems = useMemo(() => {
+    const currentTs = frameTimestamps[frameIndex] || alignBangkokFrameStart(Date.now());
+    const nextFrameTs =
+      frameIndex < frameTimestamps.length - 1
+        ? frameTimestamps[frameIndex + 1]
+        : currentTs + FRAME_STEP_HOURS * 60 * 60 * 1000;
+
+    return (SENSOR_KEYS || []).map((sensorKey) => {
+      const meta = SENSOR_META[sensorKey] || {};
+
+      const pointsForSensor = visiblePlots.flatMap((plot) =>
+        plot.nodes.flatMap((node) => {
+          const sensor = (node.sensors || []).find((s) => s.name === sensorKey);
+          if (!sensor) return [];
+
+          const sensorHistoryAll = Array.isArray(historicalReadingsBySensorId[sensor._id])
+            ? historicalReadingsBySensorId[sensor._id].filter((r) => {
+                return (
+                  toText(r?.plotId) === toText(plot.id) &&
+                  toText(r?.nodeId) === toText(node._id) &&
+                  toText(r?.sensorId) === toText(sensor._id)
+                );
+              })
+            : [];
+
+          const sensorHistoryInDateRange = Array.isArray(readingsBySensorId[sensor._id])
+            ? readingsBySensorId[sensor._id].filter((r) => {
+                return (
+                  toText(r?.plotId) === toText(plot.id) &&
+                  toText(r?.nodeId) === toText(node._id) &&
+                  toText(r?.sensorId) === toText(sensor._id)
+                );
+              })
+            : [];
+
+          return [
+            {
+              id: `${plot.id}-${node._id}-${sensor._id}`,
+              plotId: plot.id,
+              plotName: plot.name,
+              nodeId: node._id,
+              nodeName: node.nodeName,
+              nodeUid: node.uid,
+              lat: node.lat,
+              lng: node.lng,
+              sensorId: sensor._id,
+              sensorKey: sensor.name,
+              sensorDisplayName: sensor.rawName || sensor.name,
+              readings: sensorHistoryInDateRange,
+              allSensorHistory: sensorHistoryAll,
+              latestSensorValue:
+                sensor.latestValue != null
+                  ? {
+                      value: toNum(sensor.latestValue),
+                      timestamp: sensor.latestTimestamp || null,
+                      plotId: plot.id,
+                      nodeId: node._id,
+                      sensorId: sensor._id,
+                    }
+                  : null,
+            },
+          ];
+        })
+      );
+
+      const candidates = pointsForSensor
+        .map((point) => {
+          const smoothed = getSmoothedReadingForFrame(point, currentTs, nextFrameTs);
+          const value = smoothed?.value ?? null;
+          const ts = smoothed?.ts ?? null;
+          const sortTs = new Date(ts || 0).getTime();
+
+          return {
+            ...point,
+            value,
+            ts,
+            sortTs: Number.isFinite(sortTs) ? sortTs : 0,
+          };
+        })
+        .filter((item) => item.value != null && !Number.isNaN(item.value))
+        .sort((a, b) => b.sortTs - a.sortTs);
+
+      const bestPoint = candidates[0] || null;
+      const bestValue = bestPoint?.value ?? null;
+      const ratio = bestValue != null ? Math.round(getSensorRatio(sensorKey, bestValue) * 100) : null;
+
+      return {
+        key: sensorKey,
+        label: getLocalizedSensorLabel(sensorKey, uiLang),
+        scoreText: ratio != null ? `${ratio}/100` : tt("noData"),
+        rawText:
+          bestValue != null
+            ? `${Number(bestValue).toLocaleString()} ${meta.unit || ""}`.trim()
+            : "-",
+        color: bestValue != null ? getHeatColor(sensorKey, bestValue) : "#d1d5db",
+        active: selectedSensor === sensorKey,
+      };
+    });
+  }, [
+    frameIndex,
+    frameTimestamps,
+    historicalReadingsBySensorId,
+    readingsBySensorId,
+    selectedSensor,
+    uiLang,
+    visiblePlots,
+  ]);
+
   return (
     <DuwimsStaticPage current="heatmap">
       <div className="heat-page">
@@ -1911,24 +1868,6 @@ export default function Page() {
             </select>
           </div>
 
-          <div className="plot-card">
-            <div className="top-label">{tt("sensorType")}</div>
-            <select
-              className="plot-select"
-              value={selectedSensor}
-              onChange={(e) => {
-                setPlaying(false);
-                setFrameIndex(frameTimestamps.length ? frameTimestamps.length - 1 : 0);
-                setSelectedSensor(e.target.value);
-              }}
-            >
-              {SENSOR_KEYS.map((key) => (
-                <option key={key} value={key}>
-                  {getLocalizedSensorLabel(key, uiLang)}
-                </option>
-              ))}
-            </select>
-          </div>
 
           <div className="plot-card">
             <div className="top-label">{tt("startDate")}</div>
@@ -1984,8 +1923,22 @@ export default function Page() {
                   <FitToSelection
                     polygons={visiblePlots}
                     selectedPlotId={selectedPlotId}
-                    lockToWorld={selectedPlotId === "all" && isGlobalSensor}
+                    lockToWorld={false}
                   />
+
+                  {visiblePlots.filter((plot) => plot.coords.length >= 3).map((plot) => (
+                    <Polygon
+                      key={`plot-${plot.id}`}
+                      positions={plot.coords.map((c) => [c.lat, c.lng])}
+                      pathOptions={{
+                        color: plot.id === selectedPlotId ? "#166534" : "#14532d",
+                        weight: plot.id === selectedPlotId ? 4 : 3,
+                        fill: false,
+                      }}
+                    >
+                      <Tooltip sticky>{plot.name}</Tooltip>
+                    </Polygon>
+                  ))}
 
                   {heatCells.map((cell) => (
                     <Polygon
@@ -1997,26 +1950,6 @@ export default function Page() {
                         fillOpacity: cell.opacity,
                       }}
                     />
-                  ))}
-
-                  {visiblePlots.filter((plot) => plot.coords.length >= 3).map((plot) => (
-                    <Polygon
-                      key={`plot-${plot.id}`}
-                      positions={plot.coords.map((c) => [c.lat, c.lng])}
-                      pathOptions={{
-                        color: plot.id === selectedPlotId ? "#166534" : "#14532d",
-                        weight: plot.id === selectedPlotId ? 4 : 3,
-                        fillColor: "#166534",
-                        fillOpacity:
-                          selectedPlotId === "all"
-                            ? 0.03
-                            : plot.id === selectedPlotId
-                            ? 0.08
-                            : 0.03,
-                      }}
-                    >
-                      <Tooltip sticky>{plot.name}</Tooltip>
-                    </Polygon>
                   ))}
 
                   {allNodes.map((node) => {
@@ -2068,44 +2001,44 @@ export default function Page() {
                 <div className="map-loading-placeholder">{tt("preparingMap")}</div>
               )}
 
-              {(loading || globalLoading || (isGlobalSensor && globalProgress.total > 0 && globalProgress.done < globalProgress.total)) && (
+              {!loading && !error && !!legendStops.length && (
+                <div className="map-scale-overlay">
+                  <div className="map-scale-steps">
+                    {[...legendStops].reverse().map((stop) => (
+                      <div
+                        key={`map-scale-${selectedSensor}-${stop.ratio}`}
+                        className="map-scale-step"
+                        style={{
+                          background: stop.color,
+                          color: getContrastText(stop.color),
+                        }}
+                      >
+                        <span className="map-scale-step-value">{stop.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="map-scale-range-note map-scale-range-note-overlay">
+                    ช่วงอ้างอิง: {formatLegendValue(sensorMeta.min)} - {formatLegendValue(sensorMeta.max)} {sensorMeta.unit || ""}
+                  </div>
+                </div>
+              )}
+
+              {loading && (
                 <div className="map-overlay loading-card">
                   <div className="loading-title">
-                    {loading ? tt("loadingData") : globalProgress.label || tt("loadingGlobalClimate")}
+                    {tt("loadingData")}
                   </div>
-                  {!loading && isGlobalSensor && globalProgress.total > 0 && (
-                    <>
-                      <div className="loading-sub">
-                        {tt("loadedCount", undefined, { done: globalProgress.done, total: globalProgress.total })}
-                      </div>
-                      <div className="loading-bar">
-                        <span
-                          style={{
-                            width: `${Math.max(6, Math.round((globalProgress.done / globalProgress.total) * 100))}%`,
-                          }}
-                        />
-                      </div>
-                    </>
-                  )}
+                  
                 </div>
               )}
 
               {!loading && error && <div className="map-overlay error">{error}</div>}
-
-              {!loading && !error && !!globalError && (
-                <div className="map-overlay error">{globalError}</div>
-              )}
-              {!loading && !error && !globalError && !!sensorReadingsNotice && !isGlobalSensor && (
+              {!loading && !error && !!sensorReadingsNotice && (
                 <div className="map-overlay">{sensorReadingsNotice}</div>
-              )}
-
-              {!loading && !error && !globalError && isGlobalSensor && !globalDisplayPoints.length && (
-                <div className="map-overlay warn">{tt("noGlobalClimateData")}</div>
               )}
 
               {!loading &&
                 !error &&
-                !isGlobalSensor &&
                 !renderedPoints.length && (
                   <div className="map-overlay warn">{tt("noSensorDataSelectedRange")}</div>
                 )}
@@ -2150,98 +2083,49 @@ export default function Page() {
             </div>
           </div>
 
-          <div className="side-panel">
-            <div className="info-card">
-              <div className="info-title">{tt("heatmapSummary")}</div>
-              <div className="info-row">
-                <span>{tt("sensor")}</span>
-                <strong>
-                  {getLocalizedSensorLabel(selectedSensor, uiLang)}
-                </strong>
-              </div>
-              <div className="info-row">
-                <span>{tt("dataMode")}</span>
-                <strong>{isGlobalSensor ? tt("dataGlobalClimate") : tt("dataLocalSensor")}</strong>
-              </div>
-              {isGlobalSensor && (
-                <div className="info-row">
-                  <span>{tt("clipStatus")}</span>
-                  <strong>{globalProgress.label || tt("readyToRender")}</strong>
-                </div>
-              )}
-              <div className="info-row">
-                <span>{tt("pointsUsed")}</span>
-                <strong>{stats.count}</strong>
-              </div>
-              <div className="info-row">
-                <span>{tt("averageValue")}</span>
-                <strong>{stats.avg != null ? `${stats.avg} ${sensorMeta.unit}` : "-"}</strong>
-              </div>
-              <div className="info-row">
-                <span>{tt("minValue")}</span>
-                <strong>{stats.min != null ? `${stats.min} ${sensorMeta.unit}` : "-"}</strong>
-              </div>
-              <div className="info-row">
-                <span>{tt("maxValue")}</span>
-                <strong>{stats.max != null ? `${stats.max} ${sensorMeta.unit}` : "-"}</strong>
-              </div>
-            </div>
+          
+<div className="side-panel">
+  <div className="info-card legend-sensor-card">
+    <div className="legend-main-title">
+      Legend ({getLocalizedSensorLabel(selectedSensor, uiLang)})
+    </div>
 
-            <div className="info-card">
-              <div className="info-title">Legend</div>
-              <div className="legend-bar heat">
-                {HEAT_COLORS.map((color, i) => (
-                  <span key={`${color}-${i}`} style={{ background: color }} />
-                ))}
-              </div>
-              <div className="legend-labels">
-                <span>{tt("low")}</span>
-                <span>{tt("high")}</span>
-              </div>
-              <div className="legend-range">
-                {tt("referenceRange")}: {sensorMeta.min} - {sensorMeta.max} {sensorMeta.unit}
-              </div>
-            </div>
+    <div className="legend-gradient-wrap">
+      <div className="legend-gradient-bar" />
+      <div className="legend-labels legend-labels-strong">
+        <span>น้อย</span>
+        <span>มาก</span>
+      </div>
+    </div>
 
-            <div className="info-card">
-              <div className="info-title">{tt("valueStatus")}</div>
-              <div className="status-grid">
-                <div className="status-chip low">{tt("low")}: {stats.low}</div>
-                <div className="status-chip normal">{tt("normal")}: {stats.normal}</div>
-                <div className="status-chip high">{tt("high")}: {stats.high}</div>
-              </div>
-            </div>
+    <div className="legend-sample-title">จุดข้อมูลตัวอย่าง</div>
 
-            {!isGlobalSensor ? (
-              <div className="info-card">
-                <div className="info-title">{tt("nodesUsedForCalc")}</div>
-                <div className="node-list">
-                  {renderedPoints.length ? (
-                    renderedPoints.map((point) => (
-                      <div className="node-item" key={point.id}>
-                        <div className="node-item-top">
-                          <span className="node-dot" style={{ background: point.color }} />
-                          <strong>{point.nodeName}</strong>
-                        </div>
-                        <div className="node-sub">{point.plotName}</div>
-                        <div className="node-value">
-                          {point.value} {sensorMeta.unit}
-                        </div>
-                        <div className="node-sub">{formatDateTimeThai(point.ts)}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="empty-text">{tt("noReadingInFrame")}</div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="info-card">
-                <div className="info-title">{tt("dataGlobalClimate")}</div>
-                <div className="empty-text">{tt("climateModeOverlay")}</div>
-              </div>
-            )}
+    <div className="legend-sensor-list">
+      {legendSensorItems.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          className={`legend-sensor-item ${item.active ? "active" : ""}`}
+          onClick={() => {
+            setPlaying(false);
+            setFrameIndex(frameTimestamps.length ? frameTimestamps.length - 1 : 0);
+            setSelectedSensor(item.key);
+          }}
+        >
+          <span
+            className="legend-sensor-dot"
+            style={{ background: item.color }}
+          />
+          <div className="legend-sensor-text">
+            <div className="legend-sensor-name">{item.label}</div>
+            <div className="legend-sensor-value">ความเข้ม: {item.scoreText}</div>
+            <div className="legend-sensor-raw">{item.rawText}</div>
           </div>
+        </button>
+      ))}
+    </div>
+  </div>
+</div>
         </div>
 
         <style jsx>{`
@@ -2255,7 +2139,7 @@ export default function Page() {
 
           .top-grid {
             display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 12px;
           }
 
@@ -2427,6 +2311,117 @@ export default function Page() {
             gap: 12px;
           }
 
+
+.legend-sensor-card {
+  background: #ffffff;
+  border: 1px solid #dbe7dc;
+  border-radius: 22px;
+  padding: 18px;
+}
+
+.legend-main-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: #111827;
+  margin-bottom: 14px;
+}
+
+.legend-gradient-wrap {
+  margin-bottom: 14px;
+}
+
+.legend-gradient-bar {
+  width: 100%;
+  height: 16px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    #6e40aa 0%,
+    #3b82f6 18%,
+    #22c55e 40%,
+    #fde047 60%,
+    #fb923c 80%,
+    #ef4444 100%
+  );
+}
+
+.legend-labels.legend-labels-strong {
+  margin-top: 8px;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.legend-sample-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+  margin: 12px 0 8px;
+}
+
+.legend-sensor-list {
+  display: grid;
+  gap: 8px;
+}
+
+.legend-sensor-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: #ffffff;
+  border: 1px solid #d9ebe5;
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: 0.18s ease;
+}
+
+.legend-sensor-item:hover {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.legend-sensor-item.active {
+  border-color: #16a34a;
+  background: #ecfdf5;
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.10);
+}
+
+.legend-sensor-dot {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  border-radius: 999px;
+  margin-top: 4px;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.08);
+}
+
+.legend-sensor-text {
+  min-width: 0;
+}
+
+.legend-sensor-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.35;
+}
+
+.legend-sensor-value {
+  font-size: 12px;
+  color: #374151;
+  margin-top: 2px;
+}
+
+.legend-sensor-raw {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
           .info-row {
             display: flex;
             align-items: center;
@@ -2467,6 +2462,59 @@ export default function Page() {
             font-size: 13px;
             color: #334155;
             font-weight: 700;
+          }
+
+          .map-scale-overlay {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            z-index: 600;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 10px;
+            pointer-events: none;
+          }
+
+          .map-scale-steps {
+            width: 54px;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.24);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(2px);
+          }
+
+          .map-scale-step {
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 900;
+            letter-spacing: 0.2px;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+          }
+
+          .map-scale-step + .map-scale-step {
+            border-top: 1px solid rgba(255, 255, 255, 0.15);
+          }
+
+          .map-scale-step-value {
+            line-height: 1;
+          }
+
+          .map-scale-range-note.map-scale-range-note-overlay {
+            max-width: 180px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.9);
+            color: #0f172a;
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 1.35;
+            text-align: right;
+            box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
           }
 
           .status-grid {
@@ -2542,6 +2590,20 @@ export default function Page() {
           }
 
           @media (max-width: 1100px) {
+            .map-scale-overlay {
+              top: 10px;
+              right: 10px;
+            }
+
+            .map-scale-steps {
+              width: 48px;
+            }
+
+            .map-scale-step {
+              height: 32px;
+              font-size: 11px;
+            }
+
             .top-grid {
               grid-template-columns: repeat(2, minmax(0, 1fr));
             }
