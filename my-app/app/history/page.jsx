@@ -11,6 +11,7 @@ const AUTH_KEYS = [
   "pmtool_token",
   "duwims_token",
 ];
+
 const SENSOR_OPTIONS = [
   { key: "temp", labelKey: "temperature", unit: "°C" },
   { key: "rh", labelKey: "relativeHumidity", unit: "%" },
@@ -92,6 +93,24 @@ function average(nums) {
   return arr.reduce((a, b) => a + b, 0) / arr.length;
 }
 
+function median(nums) {
+  const arr = nums.filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (!arr.length) return null;
+  const mid = Math.floor(arr.length / 2);
+  return arr.length % 2 ? arr[mid] : (arr[mid - 1] + arr[mid]) / 2;
+}
+
+function percentile(nums, p) {
+  const arr = nums.filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+  if (!arr.length) return null;
+  if (arr.length === 1) return arr[0];
+  const idx = (arr.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  const w = idx - lo;
+  return arr[lo] * (1 - w) + arr[hi] * w;
+}
+
 function colorOfIndex(i) {
   const colors = [
     "#3b82f6",
@@ -106,23 +125,12 @@ function colorOfIndex(i) {
     "#6366f1",
     "#84cc16",
     "#a855f7",
+    "#0ea5e9",
+    "#10b981",
+    "#eab308",
+    "#dc2626",
   ];
   return colors[i % colors.length];
-}
-
-function polylinePoints(values, minY, maxY, width = 900, height = 220) {
-  if (!values.length) return "";
-  const stepX = values.length === 1 ? 0 : width / Math.max(values.length - 1, 1);
-
-  return values
-    .map((v, i) => {
-      const x = Math.round(i * stepX);
-      const safeV = Number.isFinite(v) ? v : minY;
-      const ratio = maxY === minY ? 0.5 : (safeV - minY) / (maxY - minY);
-      const y = Math.round(height - ratio * height);
-      return `${x},${y}`;
-    })
-    .join(" ");
 }
 
 function makeCsv(rows) {
@@ -133,7 +141,6 @@ function makeCsv(rows) {
     }
     return s;
   };
-
   return rows.map((row) => row.map(esc).join(",")).join("\n");
 }
 
@@ -453,13 +460,55 @@ function normalizeReading(item) {
   return {
     id: getId(item),
     sensorId: item?.sensorId || item?.sensor_id || item?.sensor?.id || item?.sensor?._id || "",
+    sensorUid: item?.sensorUid || item?.sensor_uid || item?.sensor?.uid || "",
+    sensorType:
+      item?.sensorType || item?.sensorName || item?.sensor?.sensorType || item?.sensor?.name || "",
     nodeId: item?.nodeId || item?.node_id || item?.node?.id || item?.node?._id || "",
+    nodeUid: item?.nodeUid || item?.node_uid || item?.node?.uid || "",
     plotId: item?.plotId || item?.plot_id || item?.plot?.id || item?.plot?._id || "",
     timestamp: getTimestampFromReading(item),
     value: pickValueForSensorKey(item, canonicalSensorKey(item?.sensorType || item?.sensorName || "")),
     rawItem: item,
     status: item?.status || item?.state || "",
   };
+}
+
+function allowedSensorKeysForNodeType(nodeType) {
+  return nodeType === "soil"
+    ? ["soil", "water", "n", "p", "k"]
+    : ["temp", "rh", "wind", "light", "rain"];
+}
+
+function sameText(a, b) {
+  return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+}
+
+function readingMatchesTarget(raw, target) {
+  const itemPlotId = raw?.plotId || raw?.plot_id || raw?.plot?.id || raw?.plot?._id || "";
+  const itemNodeId = raw?.nodeId || raw?.node_id || raw?.node?.id || raw?.node?._id || "";
+  const itemNodeUid = raw?.nodeUid || raw?.node_uid || raw?.node?.uid || "";
+  const itemSensorId = raw?.sensorId || raw?.sensor_id || raw?.sensor?.id || raw?.sensor?._id || "";
+  const itemSensorUid = raw?.sensorUid || raw?.sensor_uid || raw?.sensor?.uid || "";
+  const itemSensorType =
+    raw?.sensorType || raw?.sensorName || raw?.sensor?.sensorType || raw?.sensor?.name || "";
+
+  if (itemPlotId && !sameText(itemPlotId, target.plotId)) return false;
+
+  const nodeMatched =
+    (!itemNodeId && !itemNodeUid) ||
+    sameText(itemNodeId, target.nodeId) ||
+    sameText(itemNodeUid, target.nodeUid);
+
+  if (!nodeMatched) return false;
+
+  const readingKey = canonicalSensorKey(itemSensorType);
+
+  return (
+    (target.sensorId && sameText(itemSensorId, target.sensorId)) ||
+    (target.sensorUid && sameText(itemSensorUid, target.sensorUid)) ||
+    (itemSensorType && sameText(readingKey, target.sensorKey)) ||
+    (!target.sensorId && !target.sensorUid)
+  );
 }
 
 async function apiGet(path) {
@@ -481,6 +530,107 @@ async function apiGet(path) {
   return res.json();
 }
 
+function normalizeSeriesValues(values) {
+  const clean = values.map((v) => (Number.isFinite(v) ? v : null));
+  const valid = clean.filter((v) => Number.isFinite(v));
+
+  if (!valid.length) return clean.map(() => null);
+
+  if (valid.length === 1) {
+    return clean.map((v) => (Number.isFinite(v) ? 50 : null));
+  }
+
+  let lo = percentile(valid, 0.05);
+  let hi = percentile(valid, 0.95);
+
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+    lo = Math.min(...valid);
+    hi = Math.max(...valid);
+  }
+
+  if (lo === hi) {
+    const med = median(valid) ?? lo;
+    return clean.map((v) => (Number.isFinite(v) ? (v >= med ? 60 : 40) : null));
+  }
+
+  return clean.map((v) => {
+    if (!Number.isFinite(v)) return null;
+    const clamped = Math.max(lo, Math.min(hi, v));
+    return ((clamped - lo) / (hi - lo)) * 100;
+  });
+}
+
+function safeDisplayValue(sensorKey, value) {
+  if (!Number.isFinite(value)) return null;
+
+  if (sensorKey === "rh") return Math.max(0, Math.min(100, value));
+  if (sensorKey === "water") return Math.max(0, Math.min(100, value));
+  if (sensorKey === "soil") return Math.max(0, Math.min(100, value));
+  if (sensorKey === "temp") return Math.max(-20, Math.min(100, value));
+  if (sensorKey === "wind") return Math.max(0, Math.min(200, value));
+  if (sensorKey === "rain") return Math.max(0, Math.min(1000, value));
+  if (sensorKey === "n") return Math.max(0, Math.min(1000, value));
+  if (sensorKey === "p") return Math.max(0, Math.min(100000, value));
+  if (sensorKey === "k") return Math.max(0, Math.min(100000, value));
+  if (sensorKey === "light") return Math.max(0, Math.min(1000000, value));
+
+  return value;
+}
+
+function buildPathFromValues(values, width = 900, height = 260) {
+  const stepX = values.length <= 1 ? 0 : width / Math.max(values.length - 1, 1);
+  let path = "";
+  let started = false;
+
+  for (let i = 0; i < values.length; i += 1) {
+    const v = values[i];
+    const x = i * stepX;
+
+    if (!Number.isFinite(v)) {
+      started = false;
+      continue;
+    }
+
+    const y = height - (v / 100) * height;
+
+    if (!started) {
+      path += `M ${x} ${y}`;
+      started = true;
+    } else {
+      path += ` L ${x} ${y}`;
+    }
+  }
+
+  return path;
+}
+
+function getPointCoords(values, width = 900, height = 260) {
+  const stepX = values.length <= 1 ? 0 : width / Math.max(values.length - 1, 1);
+  return values.map((v, i) => {
+    if (!Number.isFinite(v)) return null;
+    return {
+      x: i * stepX,
+      y: height - (v / 100) * height,
+      value: v,
+      index: i,
+    };
+  });
+}
+
+function buildAreaPathFromValues(values, width = 900, height = 260) {
+  const points = getPointCoords(values, width, height).filter(Boolean);
+  if (!points.length) return "";
+  if (points.length === 1) {
+    const p = points[0];
+    return `M ${p.x} ${height} L ${p.x} ${p.y} L ${p.x} ${height} Z`;
+  }
+
+  const linePath = buildPathFromValues(values, width, height);
+  const first = points[0];
+  const last = points[points.length - 1];
+  return `${linePath} L ${last.x} ${height} L ${first.x} ${height} Z`;
+}
+
 export default function HistoryPage() {
   const { t, lang } = useDuwimsT();
   const today = useMemo(() => new Date(), []);
@@ -499,17 +649,15 @@ export default function HistoryPage() {
   const [endDate, setEndDate] = useState(defaultEnd);
   const [selectedPlotId, setSelectedPlotId] = useState("all");
 
-  const [selectedSensors, setSelectedSensors] = useState([]);
+  const [selectedSensors, setSelectedSensors] = useState(SENSOR_OPTIONS.map((s) => s.key));
   const [sensorDropdownOpen, setSensorDropdownOpen] = useState(false);
 
   const [readingMap, setReadingMap] = useState({});
   const csvRef = useRef("");
   const sensorWrapRef = useRef(null);
+  const [hoverInfo, setHoverInfo] = useState(null);
 
-  const quickRangeOptions = useMemo(
-    () => [t.todayShort, t.last7Days, t.last30Days],
-    [t]
-  );
+  const quickRangeOptions = useMemo(() => [t.todayShort, t.last7Days, t.last30Days], [t]);
 
   const sensorOptionsI18n = useMemo(
     () =>
@@ -585,11 +733,6 @@ export default function HistoryPage() {
     return rows;
   }, [filteredPlots]);
 
-  const allNodeCount = useMemo(
-    () => plots.reduce((sum, plot) => sum + safeArray(plot?.nodes).length, 0),
-    [plots]
-  );
-
   const selectedSensorNames = useMemo(() => {
     return selectedSensors
       .map((key) => sensorOptionsI18n.find((s) => s.key === key)?.label)
@@ -598,8 +741,7 @@ export default function HistoryPage() {
 
   const sensorDropdownLabel = useMemo(() => {
     if (!selectedSensorNames.length) return t.selectSensorType;
-    if (selectedSensorNames.length === 1) return selectedSensorNames[0];
-    return `${selectedSensorNames[0]} +${selectedSensorNames.length - 1}`;
+    return selectedSensorNames.join(", ");
   }, [selectedSensorNames, t]);
 
   const sensorTargets = useMemo(() => {
@@ -608,40 +750,74 @@ export default function HistoryPage() {
 
     for (const plot of filteredPlots) {
       for (const node of safeArray(plot?.nodes)) {
-        for (const rawSensor of safeArray(node?.sensors)) {
-          const keys =
-            safeArray(rawSensor?._frontendSensorKeys).length > 0
-              ? rawSensor._frontendSensorKeys
-              : expandSensorKeys(rawSensor);
+        const nodeId = getId(node);
+        const nodeUid = node?.uid || "";
+        const nodeName = node?.nodeName || node?.name || nodeUid || "Node";
+        const nodeType = inferNodeType(node);
+        const sensors = safeArray(node?.sensors);
+        const fallbackKeys = selectedSensors.filter((key) =>
+          allowedSensorKeysForNodeType(nodeType).includes(key)
+        );
 
-          for (const sensorKey of keys) {
-            if (!sensorKey) continue;
-            if (!selectedSensors.includes(sensorKey)) continue;
+        if (sensors.length) {
+          for (const rawSensor of sensors) {
+            const keys =
+              safeArray(rawSensor?._frontendSensorKeys).length > 0
+                ? rawSensor._frontendSensorKeys
+                : expandSensorKeys(rawSensor);
 
+            for (const sensorKey of keys) {
+              if (!sensorKey || !selectedSensors.includes(sensorKey)) continue;
+
+              const target = {
+                plotId: plot.id,
+                plotName: plot.plotName,
+                nodeId,
+                nodeUid,
+                nodeName,
+                nodeType,
+                sensorId: getId(rawSensor),
+                sensorUid: rawSensor?.uid || "",
+                rawSensorType: rawSensor?.sensorType || rawSensor?.name || rawSensor?.uid || "",
+                sensorKey,
+                sensorLabel: sensorLabelFromKey(sensorKey, t),
+                unit: sensorUnitFromKey(sensorKey),
+                latestValue: rawSensor?.latestValue,
+                latestTimestamp: rawSensor?.latestTimestamp,
+              };
+
+              const uniq = [
+                target.plotId,
+                target.nodeId || target.nodeUid,
+                target.sensorId || target.sensorUid || target.rawSensorType || target.sensorKey,
+                target.sensorKey,
+              ].join("|");
+
+              if (seen.has(uniq)) continue;
+              seen.add(uniq);
+              targets.push(target);
+            }
+          }
+        } else {
+          for (const sensorKey of fallbackKeys) {
             const target = {
               plotId: plot.id,
               plotName: plot.plotName,
-              nodeId: getId(node),
-              nodeUid: node?.uid || "",
-              nodeName: node?.nodeName || node?.name || node?.uid || "Node",
-              nodeType: inferNodeType(node),
-              sensorId: getId(rawSensor),
-              sensorUid: rawSensor?.uid || "",
-              rawSensorType: rawSensor?.sensorType || rawSensor?.name || rawSensor?.uid || "",
+              nodeId,
+              nodeUid,
+              nodeName,
+              nodeType,
+              sensorId: "",
+              sensorUid: "",
+              rawSensorType: sensorKey,
               sensorKey,
               sensorLabel: sensorLabelFromKey(sensorKey, t),
               unit: sensorUnitFromKey(sensorKey),
-              latestValue: rawSensor?.latestValue,
-              latestTimestamp: rawSensor?.latestTimestamp,
+              latestValue: null,
+              latestTimestamp: null,
             };
 
-            const uniq = [
-              target.plotId,
-              target.nodeId || target.nodeUid,
-              target.sensorId || target.sensorUid || target.rawSensorType,
-              target.sensorKey,
-            ].join("|");
-
+            const uniq = [target.plotId, target.nodeId || target.nodeUid, target.sensorKey].join("|");
             if (seen.has(uniq)) continue;
             seen.add(uniq);
             targets.push(target);
@@ -677,7 +853,7 @@ export default function HistoryPage() {
 
             try {
               const qs = new URLSearchParams();
-              qs.set("limit", "500");
+              qs.set("limit", "2000");
               if (target.plotId) qs.set("plotId", String(target.plotId));
               if (target.nodeId) qs.set("nodeId", String(target.nodeId));
               if (target.sensorId) qs.set("sensorId", String(target.sensorId));
@@ -710,6 +886,10 @@ export default function HistoryPage() {
 
   const dateKeys = useMemo(() => buildDateRange(startDate, endDate), [startDate, endDate]);
 
+  const maxXAxisLabels = 7;
+  const totalDateKeys = Array.isArray(dateKeys) ? dateKeys.length : 0;
+  const xLabelStep = Math.max(1, Math.ceil(totalDateKeys / maxXAxisLabels));
+
   const filteredReadingRows = useMemo(() => {
     const rows = [];
 
@@ -731,18 +911,13 @@ export default function HistoryPage() {
         if (!dateKey) continue;
         if (dateKey < startDate || dateKey > endDate) continue;
 
-        const itemPlotId = raw?.plotId || raw?.plot_id || raw?.plot?.id || raw?.plot?._id || "";
-        const itemNodeId = raw?.nodeId || raw?.node_id || raw?.node?.id || raw?.node?._id || "";
-        const itemSensorId = raw?.sensorId || raw?.sensor_id || raw?.sensor?.id || raw?.sensor?._id || "";
+        if (!readingMatchesTarget(raw, target)) continue;
 
-        if (itemPlotId && String(itemPlotId) !== String(target.plotId)) continue;
-        if (itemNodeId && String(itemNodeId) !== String(target.nodeId)) continue;
-        if (itemSensorId && target.sensorId && String(itemSensorId) !== String(target.sensorId)) continue;
-
-        const value = pickValueForSensorKey(raw, target.sensorKey);
+        const rawValue = pickValueForSensorKey(raw, target.sensorKey);
+        const value = safeDisplayValue(target.sensorKey, rawValue);
         if (value === null) continue;
 
-        const rowKey = `${target.plotId}|${target.nodeId}|${target.sensorKey}|${dateKey}|${value}`;
+        const rowKey = `${target.plotId}|${target.nodeId || target.nodeUid}|${target.sensorKey}|${timestamp}|${value}`;
         if (seenRowKeys.has(rowKey)) continue;
         seenRowKeys.add(rowKey);
 
@@ -767,14 +942,14 @@ export default function HistoryPage() {
 
       const hasHistoryForTarget = rows.some(
         (r) =>
-          r.plotId === target.plotId &&
-          r.nodeId === target.nodeId &&
-          r.sensorId === target.sensorId &&
+          sameText(r.plotId, target.plotId) &&
+          (sameText(r.nodeId, target.nodeId) || sameText(r.nodeUid, target.nodeUid)) &&
           r.sensorKey === target.sensorKey
       );
 
       if (!hasHistoryForTarget) {
-        const fallbackValue = pickValueForSensorKey({ latestValue: target.latestValue }, target.sensorKey);
+        const fallbackRawValue = pickValueForSensorKey({ latestValue: target.latestValue }, target.sensorKey);
+        const fallbackValue = safeDisplayValue(target.sensorKey, fallbackRawValue);
         const fallbackTs = target.latestTimestamp || null;
         const fallbackDateKey = normalizeDateKey(fallbackTs || endDate);
 
@@ -812,98 +987,56 @@ export default function HistoryPage() {
     return sensorOptionsI18n.filter((s) => selectedSensors.includes(s.key));
   }, [selectedSensors, sensorOptionsI18n]);
 
-  const chartGroups = useMemo(() => {
-    if (!selectedSensorOptions.length) return [];
+  const combinedChart = useMemo(() => {
+    if (!selectedSensorOptions.length) return null;
 
-    const unitMap = new Map();
+    const series = [];
 
     for (const sensor of selectedSensorOptions) {
-      const unitKey = sensor.unit || "-";
-      if (!unitMap.has(unitKey)) {
-        unitMap.set(unitKey, {
-          unit: unitKey,
-          sensors: [],
-        });
-      }
-      unitMap.get(unitKey).sensors.push(sensor);
-    }
+      for (const plot of filteredPlots) {
+        const valuesByDate = new Map(dateKeys.map((d) => [d, []]));
 
-    const groups = [];
+        filteredReadingRows
+          .filter((row) => row.plotId === plot.id && row.sensorKey === sensor.key)
+          .forEach((row) => {
+            const list = valuesByDate.get(row.dateKey) || [];
+            list.push(row.value);
+            valuesByDate.set(row.dateKey, list);
+          });
 
-    for (const [, unitGroup] of unitMap) {
-      const seriesList = [];
+        const avgValues = dateKeys.map((d) => average(valuesByDate.get(d) || []));
+        const normalizedValues = normalizeSeriesValues(avgValues);
 
-      for (const sensor of unitGroup.sensors) {
-        const byPlot = new Map();
-
-        for (const plot of filteredPlots) {
-          const valuesByDate = new Map(dateKeys.map((d) => [d, []]));
-
-          filteredReadingRows
-            .filter((row) => row.plotId === plot.id && row.sensorKey === sensor.key)
-            .forEach((row) => {
-              const list = valuesByDate.get(row.dateKey) || [];
-              list.push(row.value);
-              valuesByDate.set(row.dateKey, list);
-            });
-
-          const avgValues = dateKeys.map((d) => average(valuesByDate.get(d) || []));
-          if (avgValues.some((v) => Number.isFinite(v))) {
-            byPlot.set(plot.id, {
-              key: `${sensor.key}-${plot.id}`,
-              plotId: plot.id,
-              plotName: plot.plotName,
-              sensorKey: sensor.key,
-              sensorLabel: sensor.label,
-              unit: sensor.unit,
-              values: avgValues,
-            });
-          }
-        }
-
-        seriesList.push(...byPlot.values());
-      }
-
-      const vals = seriesList.flatMap((s) => s.values).filter((n) => Number.isFinite(n));
-
-      let min = 0;
-      let max = 100;
-
-      if (vals.length) {
-        min = Math.min(...vals);
-        max = Math.max(...vals);
-
-        if (min === max) {
-          min = min - 1;
-          max = max + 1;
-        } else {
-          const pad = (max - min) * 0.1;
-          min = min - pad;
-          max = max + pad;
+        if (normalizedValues.some((v) => Number.isFinite(v))) {
+          series.push({
+            key: `${sensor.key}-${plot.id}`,
+            plotId: plot.id,
+            plotName: plot.plotName,
+            sensorKey: sensor.key,
+            sensorLabel: sensor.label,
+            unit: sensor.unit,
+            values: avgValues,
+            normalizedValues,
+          });
         }
       }
-
-      const step = (max - min) / 4;
-      const yLabels = [max, max - step, max - step * 2, max - step * 3, min].map((n) =>
-        Number.isFinite(n) ? Number(n.toFixed(2)) : "-"
-      );
-
-      groups.push({
-        unit: unitGroup.unit,
-        sensors: unitGroup.sensors,
-        series: seriesList,
-        min,
-        max,
-        yLabels,
-      });
     }
 
-    return groups;
+    return {
+      series,
+      min: 0,
+      max: 100,
+      yLabels: ["100", "75", "50", "25", "0"],
+    };
   }, [selectedSensorOptions, filteredPlots, filteredReadingRows, dateKeys]);
 
   const summaryRows = useMemo(() => {
     return visibleNodes.map((node) => {
-      const nodeRows = filteredReadingRows.filter((r) => r.nodeId === node.nodeId);
+      const nodeRows = filteredReadingRows.filter(
+        (r) =>
+          sameText(r.plotId, node.plotId) &&
+          (sameText(r.nodeId, node.nodeId) || sameText(r.nodeUid, node.nodeUid))
+      );
 
       const values = {};
       for (const opt of SENSOR_OPTIONS) {
@@ -915,10 +1048,21 @@ export default function HistoryPage() {
         nodeName: node.nodeName,
         nodeType: node.nodeType,
         values,
-        hasAnyValue: Object.values(values).some((v) => Number.isFinite(v)),
       };
     });
   }, [visibleNodes, filteredReadingRows]);
+
+  const airNodeSummaryRows = useMemo(
+    () => summaryRows.filter((row) => row.nodeType === "air"),
+    [summaryRows]
+  );
+
+  const soilNodeSummaryRows = useMemo(
+    () => summaryRows.filter((row) => row.nodeType === "soil"),
+    [summaryRows]
+  );
+
+  const hoverDate = hoverInfo?.dateKey || null;
 
   const csvRows = useMemo(() => {
     const header = ["plot", "node", "nodeType", "sensor", "unit", "value", "timestamp", "status", "source"];
@@ -954,6 +1098,10 @@ export default function HistoryPage() {
     setSelectedSensors([]);
   }
 
+  function selectAllSensors() {
+    setSelectedSensors(sensorOptionsI18n.map((s) => s.key));
+  }
+
   function handleQuick(label) {
     const now = new Date();
     const end = formatDateInput(now);
@@ -963,7 +1111,7 @@ export default function HistoryPage() {
       start = end;
     } else if (label === t.last7Days) {
       start = formatDateInput(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
-    } else if (label === t.last30Days) {
+    } else {
       start = formatDateInput(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29));
     }
 
@@ -972,35 +1120,28 @@ export default function HistoryPage() {
     setEndDate(end);
   }
 
-function exportCsv() {
-  if (!filteredReadingRows.length) {
-    alert(lang === "en" ? "No data to export." : "ไม่มีข้อมูลสำหรับส่งออก CSV");
-    return;
+  function exportCsv() {
+    if (!filteredReadingRows.length) {
+      alert(lang === "en" ? "No data to export." : "ไม่มีข้อมูลสำหรับส่งออก CSV");
+      return;
+    }
+
+    const bom = "\uFEFF";
+    const csvText = bom + csvRef.current;
+
+    const blob = new Blob([csvText], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `history-${startDate}-to-${endDate}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
-
-  const bom = "\uFEFF";
-  const csvText = bom + csvRef.current;
-
-  const blob = new Blob([csvText], {
-    type: "text/csv;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `history-${startDate}-to-${endDate}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-  const loadInfo =
-    loadingPlots || loadingReadings
-      ? t.loadingData
-      : error
-      ? error
-      : t.nodesFoundText(visibleNodes.length, allNodeCount, filteredReadingRows.length);
 
   return (
     <DuwimsStaticPage current="history">
@@ -1063,8 +1204,12 @@ function exportCsv() {
             </div>
           </div>
 
-          <div className="sensor-wrap-block">
-            <label className="history-label">{t.sensorType}</label>
+          <div className="sensor-wrap-block sensor-wrap-block-inline">
+            <div className="sensor-inline-head">
+              <div className="history-label" style={{ marginBottom: 0 }}>
+                {t.sensorType}
+              </div>
+            </div>
 
             <div className="sensor-dd-wrap" ref={sensorWrapRef}>
               <button
@@ -1078,17 +1223,27 @@ function exportCsv() {
 
               {sensorDropdownOpen && (
                 <div className="sensor-dd-menu open">
-                  <div className="sensor-dd-header">
-                    <span className="sensor-dd-header-title">{t.selectMultiple}</span>
+                  <div className="sensor-dd-actions">
                     <button
                       type="button"
-                      className="sensor-dd-clear"
+                      className="sensor-dd-action"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        selectAllSensors();
+                      }}
+                    >
+                      เลือกทั้งหมด
+                    </button>
+
+                    <button
+                      type="button"
+                      className="sensor-dd-action danger"
                       onClick={(e) => {
                         e.stopPropagation();
                         resetSensors();
                       }}
                     >
-                      {t.clear}
+                      ลบ
                     </button>
                   </div>
 
@@ -1124,758 +1279,901 @@ function exportCsv() {
                 </div>
               )}
             </div>
-
-            <div className="mini-info">
-              {t.selectedAlready}: {selectedSensorNames.length ? selectedSensorNames.join(", ") : "—"}
-            </div>
           </div>
-
-          <div className="status-line">{loadInfo}</div>
         </div>
 
-        {chartGroups.length ? (
-          chartGroups.map((group, groupIndex) => (
-            <div key={`${group.unit}-${groupIndex}`} className="history-card chart-card">
-              <div className="chart-head">
-                <div>
-                  <div className="history-title" style={{ marginBottom: 4 }}>
-                    {t.chartComparePlots} ({group.unit})
-                  </div>
-                  <div className="history-sub" style={{ marginBottom: 0 }}>
-                    {t.sensorWord}: {group.sensors.map((s) => s.label).join(", ")} • {t.plotCol}:{" "}
-                    {filteredPlots.map((p) => p.plotName || t.unknownPlot).join(", ") || t.noChartData}
-                  </div>
+        {error ? (
+          <div className="history-card">
+            <div className="chart-empty-inline">{error}</div>
+          </div>
+        ) : null}
+
+        {combinedChart && combinedChart.series.length ? (
+          <div className="history-card chart-card">
+            <div className="chart-head">
+              <div>
+                <div className="history-title" style={{ marginBottom: 4 }}>
+                  {t.chartComparePlots}
                 </div>
-
-                <button type="button" className="export-btn" onClick={exportCsv}>
-                  {t.exportCsv}
-                </button>
+                <div className="history-sub" style={{ marginBottom: 0 }}>
+                  {lang === "en"
+                    ? "Combined chart uses normalized scale (0–100) so different sensor units can be compared in one graph."
+                    : "กราฟรวมนี้ใช้สเกลปรับเทียบ 0–100 เพื่อให้เซนเซอร์ต่างหน่วยดูรวมกันในกราฟเดียวได้"}
+                </div>
               </div>
 
-              <div className="chart-legend">
-                {group.series.length ? (
-                  group.series.map((item, i) => (
-                    <div key={item.key} className="legend-item">
-                      <div className="legend-dot" style={{ background: colorOfIndex(i) }} />
-                      <span>
-                        {item.sensorLabel} • {item.plotName}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="chart-empty-inline">{t.noChartData}</div>
-                )}
-              </div>
+              <button type="button" className="export-btn" onClick={exportCsv}>
+                {t.exportCsv}
+              </button>
+            </div>
 
-              <div className="chart-wrap">
-  <div className="chart-svg-box">
-    <svg viewBox="0 0 900 220" preserveAspectRatio="none" className="chart-svg">
-                    <line x1="0" y1="44" x2="900" y2="44" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
-                    <line x1="0" y1="88" x2="900" y2="88" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
-                    <line x1="0" y1="132" x2="900" y2="132" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
-                    <line x1="0" y1="176" x2="900" y2="176" stroke="rgba(93,184,102,0.12)" strokeWidth="1" />
+            <div className="chart-legend">
+              {combinedChart.series.map((item, i) => (
+                <div key={item.key} className="legend-item">
+                  <div className="legend-dot" style={{ background: colorOfIndex(i) }} />
+                  <span>
+                    {item.sensorLabel} • {item.plotName} ({item.unit})
+                  </span>
+                </div>
+              ))}
+            </div>
 
-                    {group.series.map((series, i) => {
-                      const safeValues = series.values.map((v) => (Number.isFinite(v) ? v : group.min));
-                      const points = polylinePoints(safeValues, group.min, group.max, 900, 220);
+            <div className="chart-wrap">
+              <div className="chart-svg-box">
+                <svg
+                  viewBox="0 0 900 260"
+                  preserveAspectRatio="none"
+                  className="chart-svg"
+                  onMouseLeave={() => setHoverInfo(null)}
+                >
+                  {[0, 25, 50, 75, 100].map((tick) => {
+                    const y = 260 - (tick / 100) * 260;
+                    return (
+                      <line
+                        key={tick}
+                        x1="0"
+                        y1={y}
+                        x2="900"
+                        y2={y}
+                        stroke="rgba(93,184,102,0.12)"
+                        strokeWidth="1"
+                      />
+                    );
+                  })}
 
+                  {dateKeys.map((d, index) => {
+                    const stepX = dateKeys.length <= 1 ? 900 : 900 / Math.max(dateKeys.length - 1, 1);
+                    const x = index * stepX;
+                    return (
+                      <line
+                        key={d}
+                        x1={x}
+                        y1="0"
+                        x2={x}
+                        y2="260"
+                        stroke={hoverDate === d ? "rgba(59,130,246,0.18)" : "rgba(148,163,184,0.10)"}
+                        strokeWidth={hoverDate === d ? "2" : "1"}
+                      />
+                    );
+                  })}
+
+                  {combinedChart.series.map((series, i) => {
+                    const color = colorOfIndex(i);
+                    const path = buildPathFromValues(series.normalizedValues, 900, 260);
+                    const points = getPointCoords(series.normalizedValues, 900, 260).filter(Boolean);
+
+                    if (!points.length) return null;
+
+                    if (points.length === 1) {
+                      const p = points[0];
+                      const x1 = Math.max(0, p.x - 8);
+                      const x2 = Math.min(900, p.x + 8);
                       return (
-                        <polyline
+                        <path
                           key={series.key}
+                          d={`M ${x1} ${p.y} L ${x2} ${p.y}`}
                           fill="none"
-                          stroke={colorOfIndex(i)}
+                          stroke={color}
                           strokeWidth="2.5"
                           strokeLinejoin="round"
                           strokeLinecap="round"
-                          points={points}
                         />
                       );
-                    })}
-                  </svg>
+                    }
 
-                  <div className="chart-y">
-                    {group.yLabels.map((label, index) => (
-                      <div key={index}>{label}</div>
-                    ))}
-                  </div>
-                </div>
+                    return (
+                      <path
+                        key={series.key}
+                        d={path}
+                        fill="none"
+                        stroke={color}
+                        strokeWidth="2.5"
+                        strokeLinejoin="round"
+                        strokeLinecap="round"
+                      />
+                    );
+                  })}
 
-<div
-  className="chart-x"
-  style={{
-    gridTemplateColumns: `repeat(${Math.max(dateKeys.length, 1)}, minmax(72px,1fr))`,
-  }}
->
-                  {dateKeys.map((d) => (
-                    <div key={d}>{formatThaiDateLabel(d, lang)}</div>
+                  {dateKeys.map((d, index) => {
+                    const stepX = dateKeys.length <= 1 ? 900 : 900 / Math.max(dateKeys.length - 1, 1);
+                    const x = index * stepX;
+                    const rowsAtDate = filteredReadingRows.filter((row) => row.dateKey === d);
+                    return (
+                      <rect
+                        key={`hover-${d}`}
+                        x={Math.max(0, x - stepX / 2)}
+                        y="0"
+                        width={dateKeys.length <= 1 ? 900 : Math.max(20, stepX)}
+                        height="260"
+                        fill="transparent"
+                        onMouseEnter={() => setHoverInfo({ dateKey: d, x, rows: rowsAtDate })}
+                        onFocus={() => setHoverInfo({ dateKey: d, x, rows: rowsAtDate })}
+                      />
+                    );
+                  })}
+
+                  {hoverInfo ? (
+                    <line
+                      x1={hoverInfo.x}
+                      y1="0"
+                      x2={hoverInfo.x}
+                      y2="260"
+                      stroke="rgba(37,99,235,0.35)"
+                      strokeDasharray="4 4"
+                      strokeWidth="1.5"
+                    />
+                  ) : null}
+                </svg>
+
+                <div className="chart-y">
+                  {combinedChart.yLabels.map((label, index) => (
+                    <div key={index}>{label}</div>
                   ))}
                 </div>
+
+                {hoverInfo ? (
+                  <div
+                    className="chart-tooltip"
+                    style={{ left: `clamp(64px, calc(${(hoverInfo.x / 900) * 100}% + 24px), calc(100% - 280px))` }}
+                  >
+                    <div className="chart-tooltip-date">{formatThaiDateLabel(hoverInfo.dateKey, lang)}</div>
+                    <div className="chart-tooltip-list">
+                      {combinedChart.series.map((series, i) => {
+                        const dateIndex = dateKeys.indexOf(hoverInfo.dateKey);
+                        const rawValue = dateIndex >= 0 ? series.values[dateIndex] : null;
+                        if (!Number.isFinite(rawValue)) return null;
+                        return (
+                          <div key={`${series.key}-${hoverInfo.dateKey}`} className="chart-tooltip-row">
+                            <span className="chart-tooltip-dot" style={{ background: colorOfIndex(i) }} />
+                            <span className="chart-tooltip-name">
+                              {series.sensorLabel} • {series.plotName}
+                            </span>
+                            <span className="chart-tooltip-value">
+                              {Number(rawValue).toFixed(2)} {series.unit}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
-              <div className="chart-note">{t.chartNote}</div>
+              <div
+                className="chart-x"
+                style={{
+                  gridTemplateColumns: `repeat(${Math.max(dateKeys.length, 1)}, minmax(0, 1fr))`,
+                }}
+              >
+                {dateKeys.map((d, index) => (
+                  <div key={d} className={hoverDate === d ? "active" : ""}>
+                    {index % xLabelStep === 0 || index === dateKeys.length - 1
+                      ? formatThaiDateLabel(d, lang)
+                      : ""}
+                  </div>
+                ))}
+              </div>
             </div>
-          ))
+
+            <div className="chart-note">
+              {lang === "en"
+                ? "Usable combined chart: all selected sensors are drawn together in one graph with normalized 0–100 scale, area fill, and real values shown in the tooltip and summary tables below."
+                : "กราฟรวมนี้ใช้งานจริงได้สำหรับทุกเซนเซอร์ที่เลือก โดยวาดรวมในกราฟเดียวด้วยสเกลปรับเทียบ 0–100 มีพื้นใต้เส้น และดูค่าจริงได้จาก tooltip และตารางสรุปด้านล่าง"}
+            </div>
+          </div>
         ) : (
           <div className="history-card chart-card">
             <div className="chart-empty-inline">{t.noChartData}</div>
           </div>
         )}
 
-        <div className="history-card">
-          <div className="history-title">{t.summaryTitle}</div>
-          <div className="history-sub">{t.summarySub}</div>
+        <div className="summary-stack">
+          <div className="history-card">
+            <div className="history-title">Air Node 1</div>
+            <div className="history-sub">{t.summarySub}</div>
 
-          <div className="summary-wrap">
-            <table className="summary-table">
-              <thead>
-                <tr>
-                  <th>{t.plotCol}</th>
-                  <th>{t.nodeCol}</th>
-                  <th>{t.typeCol}</th>
-                  <th>{t.temperature}</th>
-                  <th>{t.relativeHumidity}</th>
-                  <th>{t.windSpeed}</th>
-                  <th>{t.lightIntensity}</th>
-                  <th>{t.rainfall}</th>
-                  <th>{t.soilMoisture}</th>
-                  <th>{t.waterAvailability}</th>
-                  <th>N</th>
-                  <th>P</th>
-                  <th>K</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summaryRows.length ? (
-                  summaryRows.map((row, index) => (
-                    <tr key={`${row.plotName}-${row.nodeName}-${index}`}>
-                      <td>{row.plotName}</td>
-                      <td>{row.nodeName}</td>
-                      <td>
-                        <span className="node-pill">{row.nodeType === "soil" ? t.soilNodeText : t.airNodeText}</span>
-                      </td>
-                      <td>{Number.isFinite(row.values.temp) ? Number(row.values.temp).toFixed(2) : "-"}</td>
-                      <td>{Number.isFinite(row.values.rh) ? Number(row.values.rh).toFixed(2) : "-"}</td>
-                      <td>{Number.isFinite(row.values.wind) ? Number(row.values.wind).toFixed(2) : "-"}</td>
-                      <td>{Number.isFinite(row.values.light) ? Number(row.values.light).toFixed(2) : "-"}</td>
-                      <td>{Number.isFinite(row.values.rain) ? Number(row.values.rain).toFixed(2) : "-"}</td>
-                      <td>{Number.isFinite(row.values.soil) ? Number(row.values.soil).toFixed(2) : "-"}</td>
-                      <td>{Number.isFinite(row.values.water) ? Number(row.values.water).toFixed(2) : "-"}</td>
-                      <td>{Number.isFinite(row.values.n) ? Number(row.values.n).toFixed(2) : "-"}</td>
-                      <td>{Number.isFinite(row.values.p) ? Number(row.values.p).toFixed(2) : "-"}</td>
-                      <td>{Number.isFinite(row.values.k) ? Number(row.values.k).toFixed(2) : "-"}</td>
-                    </tr>
-                  ))
-                ) : (
+            <div className="summary-wrap">
+              <table className="summary-table">
+                <thead>
                   <tr>
-                    <td colSpan={13} style={{ textAlign: "center", color: "#64748b" }}>
-                      {t.noSummaryData}
-                    </td>
+                    <th>{t.plotCol}</th>
+                    <th>{t.nodeCol}</th>
+                    <th>{t.temperature}</th>
+                    <th>{t.relativeHumidity}</th>
+                    <th>{t.windSpeed}</th>
+                    <th>{t.lightIntensity}</th>
+                    <th>{t.rainfall}</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {airNodeSummaryRows.length ? (
+                    airNodeSummaryRows.map((row, index) => (
+                      <tr key={`${row.plotName}-${row.nodeName}-air-${index}`}>
+                        <td>{row.plotName}</td>
+                        <td>{row.nodeName}</td>
+                        <td>{Number.isFinite(row.values.temp) ? Number(row.values.temp).toFixed(2) : "-"}</td>
+                        <td>{Number.isFinite(row.values.rh) ? Number(row.values.rh).toFixed(2) : "-"}</td>
+                        <td>{Number.isFinite(row.values.wind) ? Number(row.values.wind).toFixed(2) : "-"}</td>
+                        <td>{Number.isFinite(row.values.light) ? Number(row.values.light).toFixed(2) : "-"}</td>
+                        <td>{Number.isFinite(row.values.rain) ? Number(row.values.rain).toFixed(2) : "-"}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", color: "#64748b" }}>
+                        {t.noSummaryData}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="history-card">
+            <div className="history-title">Soil Node 1</div>
+            <div className="history-sub">{t.summarySub}</div>
+
+            <div className="summary-wrap">
+              <table className="summary-table">
+                <thead>
+                  <tr>
+                    <th>{t.plotCol}</th>
+                    <th>{t.nodeCol}</th>
+                    <th>{t.soilMoisture}</th>
+                    <th>{t.waterAvailability}</th>
+                    <th>N</th>
+                    <th>P</th>
+                    <th>K</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {soilNodeSummaryRows.length ? (
+                    soilNodeSummaryRows.map((row, index) => (
+                      <tr key={`${row.plotName}-${row.nodeName}-soil-${index}`}>
+                        <td>{row.plotName}</td>
+                        <td>{row.nodeName}</td>
+                        <td>{Number.isFinite(row.values.soil) ? Number(row.values.soil).toFixed(2) : "-"}</td>
+                        <td>{Number.isFinite(row.values.water) ? Number(row.values.water).toFixed(2) : "-"}</td>
+                        <td>{Number.isFinite(row.values.n) ? Number(row.values.n).toFixed(2) : "-"}</td>
+                        <td>{Number.isFinite(row.values.p) ? Number(row.values.p).toFixed(2) : "-"}</td>
+                        <td>{Number.isFinite(row.values.k) ? Number(row.values.k).toFixed(2) : "-"}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "center", color: "#64748b" }}>
+                        {t.noSummaryData}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
-<style jsx>{`
-  #history-page-root,
-  #history-page-root * {
-    box-sizing: border-box;
-  }
-
-  #history-page-root {
-    position: relative;
-    overflow: visible !important;
-    width: 100%;
-    max-width: 1300px;
-    margin: 0 auto;
-    padding: 16px 20px;
-    z-index: 2;
-    display: grid;
-    gap: 18px;
-  }
-
-  .history-card {
-    width: 100%;
-    max-width: 1180px;
-    margin-left: auto;
-    margin-right: auto;
-    background: #fff;
-    border: 1px solid #dfe7dc;
-    border-radius: 18px;
-    padding: 18px;
-    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
-    overflow: visible !important;
-    position: relative;
-    min-width: 0;
-  }
-
-  .history-card.filter-card {
-    z-index: 100;
-  }
-
-  .history-title {
-    font-size: 18px;
-    font-weight: 900;
-    color: #244f15;
-    margin-bottom: 6px;
-    line-height: 1.35;
-    word-break: break-word;
-  }
-
-  .history-sub {
-    font-size: 13px;
-    color: #64748b;
-    margin-bottom: 14px;
-    line-height: 1.5;
-    word-break: break-word;
-  }
-
-  .history-label {
-    display: block;
-    margin-bottom: 6px;
-    font-size: 13px;
-    font-weight: 800;
-    color: #244f15;
-  }
-
-  .history-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-  }
-
-  .history-input,
-  .history-select {
-    width: 100%;
-    min-width: 0;
-    border: 1px solid #d8e7d2;
-    background: #fff;
-    border-radius: 12px;
-    padding: 11px 12px;
-    font-size: 14px;
-    color: #0f172a;
-    outline: none;
-  }
-
-  .history-input:focus,
-  .history-select:focus {
-    border-color: #5db866;
-    box-shadow: 0 0 0 3px rgba(93, 184, 102, 0.15);
-  }
-
-  .quick-wrap {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-  }
-
-  .quick-btn {
-    border: 1px solid #cfe3c7;
-    background: #fff;
-    color: #244f15;
-    border-radius: 999px;
-    padding: 9px 14px;
-    font-size: 13px;
-    font-weight: 800;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .quick-btn.active {
-    background: #244f15;
-    border-color: #244f15;
-    color: #fff;
-  }
-
-  .sensor-wrap-block {
-    margin-bottom: 8px;
-  }
-
-  .sensor-dd-wrap {
-    position: relative;
-  }
-
-  .sensor-dd-trigger {
-    width: 100%;
-    min-height: 46px;
-    border: 1px solid #d8e7d2;
-    background: #fff;
-    border-radius: 14px;
-    padding: 11px 14px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 800;
-    color: #0f172a;
-    min-width: 0;
-  }
-
-  .sensor-dd-trigger.open {
-    border-color: #5db866;
-    box-shadow: 0 0 0 3px rgba(93, 184, 102, 0.15);
-  }
-
-  .sensor-dd-trigger-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-align: left;
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-
-  .sensor-dd-trigger-arrow {
-    color: #244f15;
-    font-size: 12px;
-    font-weight: 900;
-    flex: 0 0 auto;
-  }
-
-  .sensor-dd-menu {
-    position: absolute;
-    z-index: 30;
-    left: 0;
-    right: 0;
-    top: calc(100% + 8px);
-    background: #fff;
-    border: 1px solid #dbead5;
-    border-radius: 16px;
-    box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);
-    padding: 12px;
-    max-width: 100%;
-  }
-
-  .sensor-dd-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-    flex-wrap: wrap;
-  }
-
-  .sensor-dd-header-title {
-    font-size: 13px;
-    font-weight: 900;
-    color: #244f15;
-  }
-
-  .sensor-dd-clear {
-    border: none;
-    background: transparent;
-    color: #ef4444;
-    font-size: 12px;
-    font-weight: 900;
-    cursor: pointer;
-  }
-
-  .sensor-dd-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-
-  .sensor-dd-item {
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    padding: 10px 12px;
-    display: grid;
-    grid-template-columns: 20px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    user-select: none;
-    background: #fff;
-    min-width: 0;
-  }
-
-  .sensor-dd-item.checked {
-    border-color: #5db866;
-    background: #f4fff3;
-  }
-
-  .sensor-dd-box {
-    width: 18px;
-    height: 18px;
-    border: 1.5px solid #9ca3af;
-    border-radius: 6px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: 900;
-    color: #fff;
-    background: transparent;
-  }
-
-  .sensor-dd-item.checked .sensor-dd-box {
-    border-color: #244f15;
-    background: #244f15;
-  }
-
-  .sensor-dd-name {
-    font-size: 13px;
-    font-weight: 800;
-    color: #0f172a;
-    word-break: break-word;
-    min-width: 0;
-  }
-
-  .sensor-dd-unit {
-    font-size: 12px;
-    font-weight: 900;
-    color: #64748b;
-    white-space: nowrap;
-  }
-
-  .sensor-dd-footer {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 12px;
-  }
-
-  .sensor-dd-done {
-    border: none;
-    border-radius: 12px;
-    padding: 10px 14px;
-    background: #244f15;
-    color: #fff;
-    font-weight: 900;
-    cursor: pointer;
-  }
-
-  .mini-info {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #475569;
-    font-weight: 700;
-    line-height: 1.5;
-    word-break: break-word;
-  }
-
-  .status-line {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #64748b;
-    font-weight: 800;
-    line-height: 1.5;
-    word-break: break-word;
-  }
-
-  .chart-card {
-    overflow: hidden;
-  }
-
-  .chart-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-    flex-wrap: wrap;
-  }
-
-  .chart-legend {
-    display: flex;
-    gap: 16px;
-    flex-wrap: wrap;
-    margin-bottom: 10px;
-    font-size: 12px;
-    color: #334155;
-    font-weight: 700;
-  }
-
-  .chart-empty-inline {
-    font-size: 12px;
-    color: #64748b;
-  }
-
-  .legend-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-  }
-
-  .legend-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    flex: 0 0 auto;
-  }
-
-  .chart-wrap {
-    position: relative;
-    border: 1px solid #e6efe4;
-    border-radius: 14px;
-    padding: 10px 10px 0;
-    background: #fcfffc;
-    overflow-x: auto;
-    overflow-y: hidden;
-    width: 100%;
-  }
-
-  .chart-y {
-    position: absolute;
-    left: 0;
-    top: 10px;
-    bottom: 28px;
-    width: 50px;
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    pointer-events: none;
-    font-size: 11px;
-    color: #475569;
-    font-weight: 700;
-    padding-right: 6px;
-    text-align: right;
-    z-index: 2;
-  }
-
-  .chart-svg-box {
-    position: relative;
-    min-width: 720px;
-    width: 100%;
-    height: 220px;
-    padding-left: 54px;
-  }
-
-  .chart-svg {
-    display: block;
-    width: 100%;
-    height: 220px;
-  }
-
-  .chart-x {
-    min-width: 720px;
-    display: grid;
-    gap: 0;
-    margin-top: 8px;
-    margin-left: 54px;
-    padding-bottom: 8px;
-    font-size: 11px;
-    color: #475569;
-    font-weight: 700;
-    text-align: center;
-  }
-
-  .chart-note {
-    margin-top: 8px;
-    font-size: 11px;
-    color: #64748b;
-    line-height: 1.5;
-  }
-
-  .export-btn {
-    border: none;
-    border-radius: 12px;
-    padding: 10px 14px;
-    background: #244f15;
-    color: #fff;
-    font-weight: 900;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .summary-wrap {
-    overflow-x: auto;
-    width: 100%;
-  }
-
-  .summary-table {
-    width: 100%;
-    min-width: 1100px;
-    border-collapse: collapse;
-  }
-
-  .summary-table th {
-    background: #244f15;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 300;
-    padding: 10px 8px;
-    text-align: center;
-    white-space: nowrap;
-  }
-
-  .summary-table td {
-    border-bottom: 1px solid #e5e7eb;
-    padding: 10px 8px;
-    font-size: 13px;
-    text-align: center;
-    white-space: nowrap;
-  }
-
-  .node-pill {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    padding: 4px 10px;
-    font-size: 11px;
-    font-weight: 900;
-    color: #fff;
-    background: #5db866;
-  }
-
-  @media (max-width: 1200px) {
-    #history-page-root {
-      max-width: 100%;
-      padding: 16px;
-    }
-
-    .history-card {
-      max-width: 100%;
-    }
-  }
-
-  @media (max-width: 900px) {
-    #history-page-root {
-      max-width: 100%;
-      padding: 14px;
-    }
-
-    .history-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .sensor-dd-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .chart-head {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .export-btn {
-      width: 100%;
-    }
-
-    .history-card {
-      padding: 16px;
-      border-radius: 16px;
-    }
-  }
-
-  @media (max-width: 640px) {
-    #history-page-root {
-      padding: 12px;
-      gap: 14px;
-    }
-
-    .history-card {
-      padding: 14px;
-      border-radius: 14px;
-    }
-
-    .history-title {
-      font-size: 16px;
-    }
-
-    .history-sub,
-    .history-label,
-    .mini-info,
-    .status-line {
-      font-size: 12px;
-    }
-
-    .history-input,
-    .history-select,
-    .sensor-dd-trigger {
-      font-size: 14px;
-      min-height: 44px;
-      padding: 10px 12px;
-    }
-
-    .quick-wrap {
-      gap: 8px;
-    }
-
-    .quick-btn {
-      flex: 1 1 calc(50% - 8px);
-      text-align: center;
-      padding: 10px 12px;
-    }
-
-    .sensor-dd-menu {
-      padding: 10px;
-      border-radius: 14px;
-    }
-
-    .sensor-dd-item {
-      grid-template-columns: 20px minmax(0, 1fr);
-      gap: 8px;
-    }
-
-    .sensor-dd-unit {
-      grid-column: 2 / 3;
-      justify-self: start;
-      white-space: normal;
-    }
-
-    .summary-table th {
-      font-size: 9px;
-      padding: 8px 6px;
-    }
-
-    .summary-table td {
-      font-size: 10px;
-      padding: 8px 6px;
-    }
-
-    .chart-svg-box,
-    .chart-x {
-      min-width: 640px;
-    }
-
-    .chart-x {
-      margin-left: 54px;
-    }
-  }
-
-  @media (max-width: 480px) {
-    #history-page-root {
-      padding: 10px;
-    }
-
-    .history-card {
-      padding: 12px;
-      border-radius: 12px;
-    }
-
-    .quick-btn {
-      flex: 1 1 100%;
-      font-size: 12px;
-    }
-
-    .history-title {
-      font-size: 15px;
-    }
-
-    .history-sub {
-      font-size: 11px;
-    }
-
-    .sensor-dd-name,
-    .sensor-dd-unit,
-    .chart-legend,
-    .chart-note,
-    .chart-empty-inline {
-      font-size: 11px;
-    }
-
-    .node-pill {
-      font-size: 10px;
-      padding: 4px 8px;
-    }
-  }
-`}</style>
+        <style jsx>{`
+          #history-page-root,
+          #history-page-root * {
+            box-sizing: border-box;
+          }
+
+          #history-page-root {
+            position: relative;
+            overflow: visible !important;
+            width: 100%;
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 16px 20px;
+            z-index: 2;
+            display: grid;
+            gap: 18px;
+          }
+
+          .history-card {
+            width: 100%;
+            max-width: 1180px;
+            margin-left: auto;
+            margin-right: auto;
+            background: #fff;
+            border: 1px solid #dfe7dc;
+            border-radius: 18px;
+            padding: 18px;
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+            overflow: visible !important;
+            position: relative;
+            min-width: 0;
+          }
+
+          .history-card.filter-card {
+            z-index: 100;
+          }
+
+          .history-title {
+            font-size: 18px;
+            font-weight: 900;
+            color: #244f15;
+            margin-bottom: 6px;
+            line-height: 1.35;
+            word-break: break-word;
+          }
+
+          .history-sub {
+            font-size: 13px;
+            color: #64748b;
+            margin-bottom: 14px;
+            line-height: 1.5;
+            word-break: break-word;
+          }
+
+          .history-label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            font-weight: 800;
+            color: #244f15;
+          }
+
+          .history-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+          }
+
+          .history-input,
+          .history-select {
+            width: 100%;
+            min-width: 0;
+            border: 1px solid #d8e7d2;
+            background: #fff;
+            border-radius: 12px;
+            padding: 11px 12px;
+            font-size: 14px;
+            color: #0f172a;
+            outline: none;
+          }
+
+          .history-input:focus,
+          .history-select:focus {
+            border-color: #5db866;
+            box-shadow: 0 0 0 3px rgba(93, 184, 102, 0.15);
+          }
+
+          .quick-wrap {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+          }
+
+          .quick-btn {
+            border: 1px solid #cfe3c7;
+            background: #fff;
+            color: #244f15;
+            border-radius: 999px;
+            padding: 9px 14px;
+            font-size: 13px;
+            font-weight: 800;
+            cursor: pointer;
+            white-space: nowrap;
+          }
+
+          .quick-btn.active {
+            background: #244f15;
+            border-color: #244f15;
+            color: #fff;
+          }
+
+          .sensor-wrap-block-inline {
+            display: grid;
+            gap: 10px;
+          }
+
+          .sensor-inline-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+          }
+
+          .sensor-dd-wrap {
+            position: relative;
+          }
+
+          .sensor-dd-trigger {
+            width: 100%;
+            min-height: 46px;
+            border: 1px solid #d8e7d2;
+            background: #fff;
+            border-radius: 14px;
+            padding: 11px 14px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 800;
+            color: #0f172a;
+            min-width: 0;
+            text-align: left;
+          }
+
+          .sensor-dd-trigger.open {
+            border-color: #5db866;
+            box-shadow: 0 0 0 3px rgba(93, 184, 102, 0.15);
+          }
+
+          .sensor-dd-trigger-text {
+            overflow: visible;
+            white-space: normal;
+            text-align: left;
+            min-width: 0;
+            flex: 1 1 auto;
+            line-height: 1.55;
+            word-break: break-word;
+          }
+
+          .sensor-dd-trigger-arrow {
+            color: #244f15;
+            font-size: 12px;
+            font-weight: 900;
+            flex: 0 0 auto;
+            padding-top: 2px;
+          }
+
+          .sensor-dd-menu {
+            position: absolute;
+            z-index: 30;
+            left: 0;
+            right: 0;
+            top: calc(100% + 8px);
+            background: #fff;
+            border: 1px solid #dbead5;
+            border-radius: 16px;
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.12);
+            padding: 12px;
+            max-width: 100%;
+          }
+
+          .sensor-dd-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+          }
+
+          .sensor-dd-action {
+            border: 1px solid #d8e7d2;
+            background: #fff;
+            color: #244f15;
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 900;
+            cursor: pointer;
+          }
+
+          .sensor-dd-action.danger {
+            color: #ef4444;
+            border-color: #fecaca;
+          }
+
+          .sensor-dd-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+          }
+
+          .sensor-dd-item {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 10px 12px;
+            display: grid;
+            grid-template-columns: 20px minmax(0, 1fr) auto;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            user-select: none;
+            background: #fff;
+            min-width: 0;
+          }
+
+          .sensor-dd-item.checked {
+            border-color: #5db866;
+            background: #f4fff3;
+          }
+
+          .sensor-dd-box {
+            width: 18px;
+            height: 18px;
+            border: 1.5px solid #9ca3af;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 900;
+            color: #fff;
+            background: transparent;
+          }
+
+          .sensor-dd-item.checked .sensor-dd-box {
+            border-color: #244f15;
+            background: #244f15;
+          }
+
+          .sensor-dd-name {
+            font-size: 13px;
+            font-weight: 800;
+            color: #0f172a;
+            word-break: break-word;
+            min-width: 0;
+          }
+
+          .sensor-dd-unit {
+            font-size: 12px;
+            font-weight: 900;
+            color: #64748b;
+            white-space: nowrap;
+          }
+
+          .sensor-dd-footer {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 12px;
+          }
+
+          .sensor-dd-done {
+            border: none;
+            border-radius: 12px;
+            padding: 10px 14px;
+            background: #244f15;
+            color: #fff;
+            font-weight: 900;
+            cursor: pointer;
+          }
+
+          .chart-card {
+            overflow: hidden;
+          }
+
+          .chart-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+          }
+
+          .chart-legend {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+            font-size: 12px;
+            color: #334155;
+            font-weight: 700;
+          }
+
+          .chart-empty-inline {
+            font-size: 12px;
+            color: #64748b;
+          }
+
+          .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+          }
+
+          .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            flex: 0 0 auto;
+          }
+
+          .chart-wrap {
+            position: relative;
+            border: 1px solid #e6efe4;
+            border-radius: 14px;
+            padding: 10px 10px 0;
+            background: #fcfffc;
+            overflow: hidden;
+            width: 100%;
+          }
+
+          .chart-y {
+            position: absolute;
+            left: 0;
+            top: 10px;
+            bottom: 28px;
+            width: 50px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            pointer-events: none;
+            font-size: 11px;
+            color: #475569;
+            font-weight: 700;
+            padding-right: 6px;
+            text-align: right;
+            z-index: 2;
+          }
+
+          .chart-svg-box {
+            position: relative;
+            min-width: 0;
+            width: 100%;
+            height: 260px;
+            padding-left: 54px;
+          }
+
+          .chart-svg {
+            display: block;
+            width: 100%;
+            height: 260px;
+          }
+
+          .chart-x {
+            min-width: 0;
+            display: grid;
+            gap: 0;
+            margin-top: 8px;
+            margin-left: 54px;
+            padding-bottom: 8px;
+            font-size: 11px;
+            color: #475569;
+            font-weight: 700;
+            text-align: center;
+          }
+
+          .chart-x > div.active {
+            color: #1d4ed8;
+            font-weight: 900;
+          }
+
+          .chart-tooltip {
+            position: absolute;
+            top: 12px;
+            z-index: 4;
+            width: min(260px, calc(100% - 70px));
+            background: rgba(255, 255, 255, 0.97);
+            border: 1px solid #dbe8d7;
+            border-radius: 14px;
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
+            padding: 10px 12px;
+            pointer-events: none;
+          }
+
+          .chart-tooltip-date {
+            font-size: 12px;
+            font-weight: 900;
+            color: #244f15;
+            margin-bottom: 8px;
+          }
+
+          .chart-tooltip-list {
+            display: grid;
+            gap: 6px;
+          }
+
+          .chart-tooltip-row {
+            display: grid;
+            grid-template-columns: 10px minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            font-size: 11px;
+            color: #334155;
+          }
+
+          .chart-tooltip-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+          }
+
+          .chart-tooltip-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+          }
+
+          .chart-tooltip-value {
+            font-weight: 900;
+            color: #0f172a;
+            white-space: nowrap;
+          }
+
+          .chart-note {
+            margin-top: 8px;
+            font-size: 11px;
+            color: #64748b;
+            line-height: 1.5;
+          }
+
+          .export-btn {
+            border: none;
+            border-radius: 12px;
+            padding: 10px 14px;
+            background: #244f15;
+            color: #fff;
+            font-weight: 900;
+            cursor: pointer;
+            white-space: nowrap;
+          }
+
+          .summary-stack {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 18px;
+          }
+
+          .summary-wrap {
+            overflow-x: auto;
+            width: 100%;
+          }
+
+          .summary-table {
+            width: 100%;
+            min-width: 900px;
+            border-collapse: collapse;
+          }
+
+          .summary-table th {
+            background: #244f15;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 300;
+            padding: 10px 8px;
+            text-align: center;
+            white-space: nowrap;
+          }
+
+          .summary-table td {
+            border-bottom: 1px solid #e5e7eb;
+            padding: 10px 8px;
+            font-size: 13px;
+            text-align: center;
+            white-space: nowrap;
+          }
+
+          @media (max-width: 1200px) {
+            #history-page-root {
+              max-width: 100%;
+              padding: 16px;
+            }
+
+            .history-card {
+              max-width: 100%;
+            }
+          }
+
+          @media (max-width: 900px) {
+            #history-page-root {
+              max-width: 100%;
+              padding: 14px;
+            }
+
+            .history-grid {
+              grid-template-columns: 1fr;
+            }
+
+            .sensor-dd-grid {
+              grid-template-columns: 1fr;
+            }
+
+            .chart-head {
+              flex-direction: column;
+              align-items: stretch;
+            }
+
+            .export-btn {
+              width: 100%;
+            }
+
+            .history-card {
+              padding: 16px;
+              border-radius: 16px;
+            }
+          }
+
+          @media (max-width: 640px) {
+            #history-page-root {
+              padding: 12px;
+              gap: 14px;
+            }
+
+            .history-card {
+              padding: 14px;
+              border-radius: 14px;
+            }
+
+            .history-title {
+              font-size: 16px;
+            }
+
+            .history-sub,
+            .history-label {
+              font-size: 12px;
+            }
+
+            .history-input,
+            .history-select,
+            .sensor-dd-trigger {
+              font-size: 14px;
+              min-height: 44px;
+              padding: 10px 12px;
+            }
+
+            .quick-wrap {
+              gap: 8px;
+            }
+
+            .quick-btn {
+              flex: 1 1 calc(50% - 8px);
+              text-align: center;
+              padding: 10px 12px;
+            }
+
+            .sensor-dd-menu {
+              padding: 10px;
+              border-radius: 14px;
+            }
+
+            .sensor-dd-item {
+              grid-template-columns: 20px minmax(0, 1fr);
+              gap: 8px;
+            }
+
+            .sensor-dd-unit {
+              grid-column: 2 / 3;
+              justify-self: start;
+              white-space: normal;
+            }
+
+            .summary-table th {
+              font-size: 9px;
+              padding: 8px 6px;
+            }
+
+            .summary-table td {
+              font-size: 10px;
+              padding: 8px 6px;
+            }
+
+            .chart-svg-box,
+            .chart-x {
+              min-width: 0;
+            }
+          }
+        `}</style>
       </div>
     </DuwimsStaticPage>
   );

@@ -664,45 +664,45 @@ export default function Page() {
         <div className="top-head">
           <div className="page-title">{t.plantingPolygonTitle}</div>
 
-          <div className="head-actions">
-            {(isCreateMode || isEditMode) && (
-              <button
-                type="button"
-                className="cancel-btn"
-                onClick={cancelEditOrCreate}
-                disabled={busy}
-              >
-                {t.cancel}
-              </button>
-            )}
+<div className="head-actions">
+  <button
+    type="button"
+    className="add-btn"
+    onClick={enterCreateMode}
+    disabled={busy}
+  >
+    {t.addPlot}
+  </button>
 
-            <button
-              type="button"
-              className="add-btn"
-              onClick={enterCreateMode}
-              disabled={busy}
-            >
-              {t.addPlot}
-            </button>
+  <button
+    type="button"
+    className={`edit-btn top-edit-btn ${isEditMode ? "active" : ""}`}
+    onClick={enterEditMode}
+    disabled={busy || isCreateMode || !selectedPlotId}
+  >
+    {t.editDelete}
+  </button>
 
-            <button
-              type="button"
-              className={`edit-btn top-edit-btn ${isEditMode ? "active" : ""}`}
-              onClick={enterEditMode}
-              disabled={busy || isCreateMode || !selectedPlotId}
-            >
-              {t.editDelete}
-            </button>
+  {(isCreateMode || isEditMode) && (
+    <button
+      type="button"
+      className="cancel-btn"
+      onClick={cancelEditOrCreate}
+      disabled={busy}
+    >
+      {t.cancel}
+    </button>
+  )}
 
-            <button
-              type="button"
-              className="delete-btn"
-              onClick={handleDeleteClick}
-              disabled={busy || !selectedPlotId || isCreateMode}
-            >
-              {t.deletePlot}
-            </button>
-          </div>
+  <button
+    type="button"
+    className="delete-btn"
+    onClick={handleDeleteClick}
+    disabled={busy || !selectedPlotId || isCreateMode}
+  >
+    {t.deletePlot}
+  </button>
+</div>
         </div>
 
         <div className="top-select-wrap">
@@ -743,14 +743,13 @@ export default function Page() {
               <div className="field-label">
                 {t.plotInfoLabel} <span className="field-sub">{infoPlotLabel}</span>
               </div>
-              <input
-                className="field-input"
-                value={draftPlotName}
-                onChange={(e) => setDraftPlotName(e.target.value)}
-                placeholder={`${t.plotWord} A`}
-                readOnly={!isEditable}
-                disabled={busy}
-              />
+       <input
+  className="field-input"
+  value={draftPlotName}
+  onChange={(e) => setDraftPlotName(e.target.value)}
+  placeholder={`${t.plotWord} A`}
+  disabled={busy || !isEditable}
+/>
             </div>
 
             <div className="field field-full">

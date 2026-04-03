@@ -1,7 +1,7 @@
 "use client";
 
 import "leaflet/dist/leaflet.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useMap } from "react-leaflet";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
@@ -92,9 +92,9 @@ const UI_TEXT = {
     valueStatus: "สถานะค่า",
     normal: "ปกติ",
     nodesUsedForCalc: "Node ที่ใช้คำนวณ (อิง reading ย้อนหลังตามเฟรม)",
-    climateModeOverlay: "โหมด Climate ใช้ Thailand grid ส่วน node ยังแสดงเป็น overlay",
+    climateModeOverlay: "โหมด Climate ใช้ grid ที่ตัดเฉพาะในแปลงที่เลือก",
     noReadingInFrame: "ยังไม่มี reading ของเซนเซอร์นี้ในช่วงเฟรมที่เลือก",
-    globalOverlayNote: "Global Climate แสดงบนแผนที่ทั้งโลก ส่วน node เป็น overlay",
+    globalOverlayNote: "โหมด Climate แสดงค่าจาก grid ที่ตัดเฉพาะบริเวณแปลง",
     noSensorForNode: "ไม่มีข้อมูลของเซนเซอร์ที่เลือกใน node นี้",
     dataGlobalClimate: "Global Climate",
     dataLocalSensor: "Local Sensor",
@@ -147,9 +147,9 @@ const UI_TEXT = {
     valueStatus: "Value Status",
     normal: "Normal",
     nodesUsedForCalc: "Nodes used for calculation (based on historical readings by frame)",
-    climateModeOverlay: "Climate mode uses a Thailand grid while nodes remain as overlays",
+    climateModeOverlay: "Climate mode uses a grid clipped to the selected plots",
     noReadingInFrame: "No reading for this sensor in the selected frame",
-    globalOverlayNote: "Global Climate is shown across the map while nodes stay as overlays",
+    globalOverlayNote: "Climate mode shows clipped grid values only around the plots",
     noSensorForNode: "No data for the selected sensor in this node",
     dataGlobalClimate: "Global Climate",
     dataLocalSensor: "Local Sensor",
@@ -272,7 +272,7 @@ const THAILAND_BOUNDS = {
   maxLng: 105.8,
 };
 
-const GLOBAL_GRID_STEP = 1.15;
+const GLOBAL_GRID_STEP = 0.35;
 const GLOBAL_BATCH_SIZE = 120;
 const GLOBAL_MAX_PARALLEL_PRELOAD = 1;
 
@@ -536,8 +536,8 @@ function getSensorStatus(sensorKey, value) {
   return { type: "normal", label: "อยู่ในช่วง" };
 }
 
-const FRAME_STEP_HOURS = 6;
-const MAX_FRAMES = 6;
+const FRAME_STEP_HOURS = 1;
+const MAX_FRAMES = 24;
 const BANGKOK_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 function parseBangkokDate(dateText, endOfDay = false) {
@@ -611,6 +611,151 @@ function findLatestReadingInWindow(readings, startTs, endTs) {
   }
 
   return bestInWindow;
+}
+
+function findReadingAtOrBefore(readings, targetTs) {
+  if (!Array.isArray(readings) || !readings.length) return null;
+
+  let best = null;
+  let bestTs = -Infinity;
+
+  for (const reading of readings) {
+    const rts = getReadingTs(reading);
+    if (!Number.isFinite(rts) || rts > targetTs) continue;
+    if (rts > bestTs) {
+      best = reading;
+      bestTs = rts;
+    }
+  }
+
+  return best;
+}
+
+function findReadingAtOrAfter(readings, targetTs) {
+  if (!Array.isArray(readings) || !readings.length) return null;
+
+  let best = null;
+  let bestTs = Infinity;
+
+  for (const reading of readings) {
+    const rts = getReadingTs(reading);
+    if (!Number.isFinite(rts) || rts < targetTs) continue;
+    if (rts < bestTs) {
+      best = reading;
+      bestTs = rts;
+    }
+  }
+
+  return best;
+}
+
+function interpolateValueBetweenReadings(beforeReading, afterReading, targetTs) {
+  const beforeTs = getReadingTs(beforeReading);
+  const afterTs = getReadingTs(afterReading);
+  const beforeValue = toNum(beforeReading?.value);
+  const afterValue = toNum(afterReading?.value);
+
+  if (!Number.isFinite(beforeValue) && !Number.isFinite(afterValue)) return null;
+  if (!Number.isFinite(beforeTs) || !Number.isFinite(afterTs) || afterTs <= beforeTs) {
+    if (Number.isFinite(beforeValue)) return beforeValue;
+    return Number.isFinite(afterValue) ? afterValue : null;
+  }
+
+  if (!Number.isFinite(beforeValue)) return Number.isFinite(afterValue) ? afterValue : null;
+  if (!Number.isFinite(afterValue)) return Number.isFinite(beforeValue) ? beforeValue : null;
+
+  const ratio = clamp((targetTs - beforeTs) / (afterTs - beforeTs), 0, 1);
+  return beforeValue + (afterValue - beforeValue) * ratio;
+}
+
+function getSmoothedReadingForFrame(point, currentTs, nextFrameTs, nowFrameStart) {
+  const frameMidTs = currentTs + Math.max(1, nextFrameTs - currentTs) / 2;
+
+  const readingInFrame = findLatestReadingInWindow(point.readings, currentTs, nextFrameTs);
+  if (readingInFrame) {
+    return {
+      chosen: readingInFrame,
+      value: toNum(readingInFrame?.value),
+      ts: readingInFrame?.timestamp || readingInFrame?.ts || readingInFrame?.createdAt || null,
+      mode: "frame",
+      readingInFrame,
+      beforeReading: null,
+      afterReading: null,
+      latestHistory: null,
+    };
+  }
+
+  const beforeReading = findReadingAtOrBefore(point.allSensorHistory || point.readings || [], frameMidTs);
+  const afterReading = findReadingAtOrAfter(point.allSensorHistory || point.readings || [], frameMidTs);
+
+  let latestHistory = null;
+  let latestHistoryTs = -Infinity;
+
+  for (const r of point.allSensorHistory || []) {
+    const ts = getReadingTs(r);
+    if (!Number.isFinite(ts)) continue;
+    if (ts > latestHistoryTs) {
+      latestHistory = r;
+      latestHistoryTs = ts;
+    }
+  }
+
+  const interpolatedValue = interpolateValueBetweenReadings(beforeReading, afterReading, frameMidTs);
+  if (interpolatedValue != null && !Number.isNaN(interpolatedValue)) {
+    const pickedTs =
+      (beforeReading?.timestamp || beforeReading?.ts || beforeReading?.createdAt) ||
+      (afterReading?.timestamp || afterReading?.ts || afterReading?.createdAt) ||
+      null;
+
+    return {
+      chosen: beforeReading || afterReading || null,
+      value: interpolatedValue,
+      ts: pickedTs,
+      mode: "interpolated",
+      readingInFrame: null,
+      beforeReading,
+      afterReading,
+      latestHistory,
+    };
+  }
+
+  const latestSensorValue = point.latestSensorValue;
+  const latestSensorTs = latestSensorValue?.timestamp
+    ? new Date(latestSensorValue.timestamp).getTime()
+    : NaN;
+
+  const frameIsCurrentOrAfter = currentTs >= nowFrameStart;
+  const historyEndedBeforeThisFrame =
+    !Number.isFinite(latestHistoryTs) || latestHistoryTs < currentTs;
+
+  if (
+    latestSensorValue &&
+    Number.isFinite(latestSensorTs) &&
+    frameIsCurrentOrAfter &&
+    historyEndedBeforeThisFrame
+  ) {
+    return {
+      chosen: latestSensorValue,
+      value: toNum(latestSensorValue?.value),
+      ts: latestSensorValue?.timestamp || null,
+      mode: "latest",
+      readingInFrame: null,
+      beforeReading,
+      afterReading,
+      latestHistory,
+    };
+  }
+
+  return {
+    chosen: null,
+    value: null,
+    ts: null,
+    mode: "none",
+    readingInFrame: null,
+    beforeReading,
+    afterReading,
+    latestHistory,
+  };
 }
 
 function getBoundsFromCoords(coords) {
@@ -776,7 +921,7 @@ function getRectPolygon(minLat, maxLat, minLng, maxLng) {
   ];
 }
 
-function buildLocalHeatCells(plots, points, sensorKey, density = 48) {
+function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
   if (!plots.length || !points.length) return [];
 
   const allCoords = plots.flatMap((p) => p.coords || []);
@@ -853,10 +998,11 @@ function buildLocalHeatCells(plots, points, sensorKey, density = 48) {
   return cells;
 }
 
-function buildWorldGrid(step = GLOBAL_GRID_STEP) {
+function buildGridPoints(bounds, step = GLOBAL_GRID_STEP) {
+  const safeBounds = bounds || THAILAND_BOUNDS;
   const out = [];
-  for (let lat = THAILAND_BOUNDS.minLat; lat <= THAILAND_BOUNDS.maxLat; lat += step) {
-    for (let lng = THAILAND_BOUNDS.minLng; lng <= THAILAND_BOUNDS.maxLng; lng += step) {
+  for (let lat = safeBounds.minLat; lat <= safeBounds.maxLat; lat += step) {
+    for (let lng = safeBounds.minLng; lng <= safeBounds.maxLng; lng += step) {
       out.push({
         lat: Number(lat.toFixed(4)),
         lng: Number(lng.toFixed(4)),
@@ -864,6 +1010,19 @@ function buildWorldGrid(step = GLOBAL_GRID_STEP) {
     }
   }
   return out;
+}
+
+function getExpandedBoundsFromPlots(plots, padding = GLOBAL_GRID_STEP) {
+  const coords = (Array.isArray(plots) ? plots : []).flatMap((plot) => plot?.coords || []);
+  const bounds = getBoundsFromCoords(coords);
+  if (!bounds) return { ...THAILAND_BOUNDS };
+
+  return {
+    minLat: clamp(bounds.minLat - padding, THAILAND_BOUNDS.minLat, THAILAND_BOUNDS.maxLat),
+    maxLat: clamp(bounds.maxLat + padding, THAILAND_BOUNDS.minLat, THAILAND_BOUNDS.maxLat),
+    minLng: clamp(bounds.minLng - padding, THAILAND_BOUNDS.minLng, THAILAND_BOUNDS.maxLng),
+    maxLng: clamp(bounds.maxLng + padding, THAILAND_BOUNDS.minLng, THAILAND_BOUNDS.maxLng),
+  };
 }
 
 function chunkArray(arr, size) {
@@ -895,35 +1054,62 @@ function pickOpenMeteoValue(item, variable, targetIsoHour) {
 
   if (!Array.isArray(series) || !Array.isArray(times) || !times.length) return null;
 
-  let idx = times.indexOf(targetIsoHour);
-  if (idx >= 0) return toNum(series[idx]);
-
-  let bestIdx = -1;
-  let bestDiff = Infinity;
   const target = new Date(`${targetIsoHour}:00Z`).getTime();
+  if (!Number.isFinite(target)) return null;
+
+  let exactIdx = times.indexOf(targetIsoHour);
+  if (exactIdx >= 0) return toNum(series[exactIdx]);
+
+  let beforeIdx = -1;
+  let afterIdx = -1;
 
   for (let i = 0; i < times.length; i += 1) {
-    const t = new Date(`${times[i]}:00Z`).getTime();
-    if (!Number.isFinite(t)) continue;
-    const diff = Math.abs(t - target);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      bestIdx = i;
+    const ts = new Date(`${times[i]}:00Z`).getTime();
+    if (!Number.isFinite(ts)) continue;
+    if (ts <= target) beforeIdx = i;
+    if (ts >= target) {
+      afterIdx = i;
+      break;
     }
   }
 
-  return bestIdx >= 0 ? toNum(series[bestIdx]) : null;
+  if (beforeIdx >= 0 && afterIdx >= 0 && beforeIdx !== afterIdx) {
+    const t1 = new Date(`${times[beforeIdx]}:00Z`).getTime();
+    const t2 = new Date(`${times[afterIdx]}:00Z`).getTime();
+    const v1 = toNum(series[beforeIdx]);
+    const v2 = toNum(series[afterIdx]);
+
+    if ([t1, t2, v1, v2].every((v) => Number.isFinite(v)) && t2 > t1) {
+      const ratio = (target - t1) / (t2 - t1);
+      return Number((v1 + (v2 - v1) * ratio).toFixed(2));
+    }
+  }
+
+  const fallbackIdx = beforeIdx >= 0 ? beforeIdx : afterIdx;
+  return fallbackIdx >= 0 ? toNum(series[fallbackIdx]) : null;
 }
 
-async function fetchOpenMeteoGrid(sensorKey, ts) {
+async function fetchOpenMeteoGrid(sensorKey, ts, clipPlots = [], selectedPlotId = "all") {
   const variable = getOpenMeteoVariable(sensorKey);
   if (!variable) return [];
+
+  const usePlotBounds =
+    selectedPlotId !== "all" &&
+    Array.isArray(clipPlots) &&
+    clipPlots.some((plot) => (plot?.coords || []).length >= 3);
+
+  const step = usePlotBounds ? 0.2 : GLOBAL_GRID_STEP;
+  const requestBounds = usePlotBounds
+    ? getExpandedBoundsFromPlots(clipPlots, Math.max(step, 0.15))
+    : THAILAND_BOUNDS;
 
   const targetTs = new Date(ts).getTime();
   const now = Date.now();
   const useArchive = targetTs < now - 36 * 60 * 60 * 1000;
 
-  const grid = buildWorldGrid();
+  const grid = buildGridPoints(requestBounds, step);
+  if (!grid.length) return [];
+
   const targetIsoHour = toIsoHour(targetTs);
   const targetDate = targetIsoHour.slice(0, 10);
 
@@ -947,24 +1133,49 @@ async function fetchOpenMeteoGrid(sensorKey, ts) {
     cell_selection: "nearest",
   });
 
-  const res = await fetch(`${base}?${params.toString()}`, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Open-Meteo failed (${res.status})`);
-  const json = await res.json();
+  let lastError = null;
 
-  const list = Array.isArray(json) ? json : [json];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const res = await fetch(`${base}?${params.toString()}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`Open-Meteo failed (${res.status})`);
+      const json = await res.json();
 
-  return list
-    .map((item, index) => {
-      const value = pickOpenMeteoValue(item, variable, targetIsoHour);
-      if (value == null || Number.isNaN(value)) return null;
+      const list = Array.isArray(json) ? json : [json];
 
-      const lat = toNum(item?.latitude ?? grid[index]?.lat);
-      const lng = toNum(item?.longitude ?? grid[index]?.lng);
-      if (lat == null || lng == null) return null;
+      return list
+        .map((item, index) => {
+          const value = pickOpenMeteoValue(item, variable, targetIsoHour);
+          if (value == null || Number.isNaN(value)) return null;
 
-      return { lat, lng, value };
-    })
-    .filter(Boolean);
+          const lat = toNum(item?.latitude ?? grid[index]?.lat);
+          const lng = toNum(item?.longitude ?? grid[index]?.lng);
+          if (lat == null || lng == null) return null;
+
+          return { lat, lng, value, step };
+        })
+        .filter(Boolean);
+    } catch (error) {
+      lastError = error;
+      if (String(error?.message || "").includes("(429)")) break;
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    }
+  }
+
+  throw lastError || new Error("Open-Meteo failed");
+}
+
+function getPercentile(values, percentile) {
+  const nums = (Array.isArray(values) ? values : [])
+    .filter((v) => v != null && !Number.isNaN(v))
+    .sort((a, b) => a - b);
+  if (!nums.length) return null;
+  const idx = (nums.length - 1) * percentile;
+  const lower = Math.floor(idx);
+  const upper = Math.ceil(idx);
+  if (lower === upper) return nums[lower];
+  const weight = idx - lower;
+  return nums[lower] * (1 - weight) + nums[upper] * weight;
 }
 
 function buildGlobalClimateCells(points, sensorKey, step = GLOBAL_GRID_STEP, clipPlots = []) {
@@ -996,7 +1207,7 @@ function buildGlobalClimateCells(points, sensorKey, step = GLOBAL_GRID_STEP, cli
           positions: clippedPolygon.map((point) => [point.lat, point.lng]),
           value: p.value,
           color: getHeatColorByRatio(ratio),
-          opacity: 0.68,
+          opacity: 0.52,
         };
       }
 
@@ -1010,7 +1221,7 @@ function buildGlobalClimateCells(points, sensorKey, step = GLOBAL_GRID_STEP, cli
         ],
         value: p.value,
         color: getHeatColorByRatio(ratio),
-        opacity: 0.68,
+        opacity: 0.52,
       };
     })
     .filter(Boolean);
@@ -1064,8 +1275,8 @@ function FitToSelection({ polygons, selectedPlotId, lockToWorld }) {
 }
 
 
-function getCacheKeyForFrame(sensorKey, ts) {
-  return `${sensorKey}-${toIsoHour(ts)}`;
+function getCacheKeyForFrame(sensorKey, ts, plotKey = "all") {
+  return `${sensorKey}-${plotKey}-${toIsoHour(ts)}`;
 }
 
 function buildPriorityFrameIndexes(frameTimestamps, selectedTs) {
@@ -1096,7 +1307,7 @@ function buildPriorityFrameIndexes(frameTimestamps, selectedTs) {
 export default function Page() {
   const { t, lang } = useDuwimsT();
   const uiLang = lang === "en" ? "en" : "th";
-  const tt = (key, fallback, params = {}) => {
+  const tt = useCallback((key, fallback, params = {}) => {
     const raw = t?.[key];
     if (typeof raw === "function") {
       try {
@@ -1106,7 +1317,7 @@ export default function Page() {
     }
     if (typeof raw === "string" && raw) return fillTemplate(raw, params);
     return fillTemplate(fallback ?? getUiText(uiLang, key, params), params);
-  };
+  }, [t, uiLang]);
   const [mounted, setMounted] = useState(false);
   const [plots, setPlots] = useState([]);
   const [allReadings, setAllReadings] = useState([]);
@@ -1139,15 +1350,28 @@ export default function Page() {
   }, []);
 
   const frameTimestamps = useMemo(() => buildFrames(startDate, endDate), [startDate, endDate]);
+  const framesKey = useMemo(() => frameTimestamps.join("|"), [frameTimestamps]);
+  const frameCount = frameTimestamps.length;
   const isGlobalSensor = GLOBAL_SENSORS.includes(selectedSensor);
   const currentFrameTs = frameTimestamps[frameIndex] || Date.now();
 
+  const visiblePlots = useMemo(() => {
+    if (selectedPlotId === "all") return plots;
+    return plots.filter((plot) => plot.id === selectedPlotId);
+  }, [plots, selectedPlotId]);
+  const visiblePlotsKey = useMemo(
+    () => visiblePlots.map((plot) => `${plot.id}:${(plot.coords || []).length}:${(plot.nodes || []).length}`).join("|"),
+    [visiblePlots]
+  );
+
+
+
   useEffect(() => {
-    if (!frameTimestamps.length) return;
-    if (frameIndex >= frameTimestamps.length) {
-      setFrameIndex(frameTimestamps.length - 1);
+    if (!frameCount) return;
+    if (frameIndex >= frameCount) {
+      setFrameIndex(frameCount - 1);
     }
-  }, [frameIndex, frameTimestamps.length]);
+  }, [frameIndex, frameCount]);
 
   useEffect(() => {
     let alive = true;
@@ -1266,7 +1490,7 @@ export default function Page() {
     }
 
     let alive = true;
-    const currentCacheKey = getCacheKeyForFrame(selectedSensor, currentFrameTs);
+    const currentCacheKey = getCacheKeyForFrame(selectedSensor, currentFrameTs, selectedPlotId);
     const priorityIndexes = buildPriorityFrameIndexes(frameTimestamps, currentFrameTs);
     const total = priorityIndexes.length || 1;
 
@@ -1275,7 +1499,7 @@ export default function Page() {
       setGlobalProgress({ done: 0, total, label: tt("loadingToday") });
 
       const cachedCountInitial = priorityIndexes.filter((idx) =>
-        globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx]))
+        globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx], selectedPlotId))
       ).length;
 
       if (globalCacheRef.current.has(currentCacheKey)) {
@@ -1294,12 +1518,12 @@ export default function Page() {
           try {
             globalInflightRef.current = currentCacheKey;
             setGlobalLoading(true);
-            const pts = await fetchOpenMeteoGrid(selectedSensor, currentFrameTs);
+            const pts = await fetchOpenMeteoGrid(selectedSensor, currentFrameTs, visiblePlots, selectedPlotId);
             if (!alive) return;
             globalCacheRef.current.set(currentCacheKey, pts);
             setGlobalPoints(pts);
             const cachedCountAfter = priorityIndexes.filter((idx) =>
-              globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx]))
+              globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx], selectedPlotId))
             ).length;
             setGlobalProgress({
               done: cachedCountAfter,
@@ -1311,8 +1535,10 @@ export default function Page() {
             const message = String(e?.message || "");
             if (message.includes("(429)")) {
               globalBackoffUntilRef.current = Date.now() + 60000;
+              setGlobalPoints([]);
               setGlobalError(tt("openMeteoLimit"));
             } else {
+              setGlobalPoints([]);
               setGlobalError(message || tt("globalClimateLoadFailed"));
             }
           } finally {
@@ -1325,7 +1551,7 @@ export default function Page() {
       }
 
       preloadQueueRef.current = priorityIndexes
-        .map((idx) => ({ idx, key: getCacheKeyForFrame(selectedSensor, frameTimestamps[idx]), ts: frameTimestamps[idx] }))
+        .map((idx) => ({ idx, key: getCacheKeyForFrame(selectedSensor, frameTimestamps[idx], selectedPlotId), ts: frameTimestamps[idx] }))
         .filter((item) => item.key !== currentCacheKey && !globalCacheRef.current.has(item.key));
 
       async function runPreload() {
@@ -1340,7 +1566,7 @@ export default function Page() {
           if (now < globalBackoffUntilRef.current) break;
 
           try {
-            await fetchOpenMeteoGrid(selectedSensor, item.ts).then((pts) => {
+            await fetchOpenMeteoGrid(selectedSensor, item.ts, visiblePlots, selectedPlotId).then((pts) => {
               globalCacheRef.current.set(item.key, pts);
             });
           } catch (e) {
@@ -1353,7 +1579,7 @@ export default function Page() {
 
           if (!alive) break;
           const done = priorityIndexes.filter((idx) =>
-            globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx]))
+            globalCacheRef.current.has(getCacheKeyForFrame(selectedSensor, frameTimestamps[idx], selectedPlotId))
           ).length;
 
           setGlobalProgress({
@@ -1379,12 +1605,7 @@ export default function Page() {
         globalInflightRef.current = "";
       }
     };
-  }, [isGlobalSensor, selectedSensor, currentFrameTs, frameTimestamps]);
-
-  const visiblePlots = useMemo(() => {
-    if (selectedPlotId === "all") return plots;
-    return plots.filter((plot) => plot.id === selectedPlotId);
-  }, [plots, selectedPlotId]);
+  }, [isGlobalSensor, selectedSensor, currentFrameTs, selectedPlotId, frameCount, visiblePlotsKey, tt]);
 
   const historicalReadingsBySensorId = useMemo(() => {
     const grouped = {};
@@ -1517,56 +1738,15 @@ export default function Page() {
 
   return activeSensorPoints
     .map((point) => {
-      // 1) หา reading ในเฟรมนี้ก่อน
-      const readingInFrame = findLatestReadingInWindow(
-        point.readings,
+      const smoothed = getSmoothedReadingForFrame(
+        point,
         currentTs,
-        nextFrameTs
+        nextFrameTs,
+        nowFrameStart
       );
 
-      // 2) latest ปัจจุบันจาก plot
-      const latestSensorValue = point.latestSensorValue;
-      const latestSensorTs = latestSensorValue?.timestamp
-        ? new Date(latestSensorValue.timestamp).getTime()
-        : NaN;
-
-      // 3) หา reading ล่าสุดสุดจาก history ทั้งหมดของ sensor เดิม
-      let latestHistory = null;
-      let latestHistoryTs = -Infinity;
-
-      for (const r of point.allSensorHistory || []) {
-        const ts = getReadingTs(r);
-        if (!Number.isFinite(ts)) continue;
-        if (ts > latestHistoryTs) {
-          latestHistory = r;
-          latestHistoryTs = ts;
-        }
-      }
-
-      let chosen = null;
-
-      // ✅ ถ้าในเฟรมมี reading ให้ใช้ reading ก่อน
-      if (readingInFrame) {
-        chosen = readingInFrame;
-      } else {
-        // ✅ ถ้าเฟรมนี้ "เลยช่วง reading ล่าสุดมาแล้ว"
-        // และเป็นเฟรมปัจจุบัน/อนาคต -> ใช้ latestValue จาก plot
-        const frameIsCurrentOrAfter = currentTs >= nowFrameStart;
-        const historyEndedBeforeThisFrame =
-          !Number.isFinite(latestHistoryTs) || latestHistoryTs < currentTs;
-
-        if (
-          latestSensorValue &&
-          Number.isFinite(latestSensorTs) &&
-          frameIsCurrentOrAfter &&
-          historyEndedBeforeThisFrame
-        ) {
-          chosen = latestSensorValue;
-        }
-      }
-
-      const value = chosen?.value ?? null;
-      const ts = chosen?.timestamp || chosen?.ts || chosen?.createdAt || null;
+      const value = smoothed?.value ?? null;
+      const ts = smoothed?.ts ?? null;
 
       console.log("📍 POINT PICKED:", {
         plotId: point.plotId,
@@ -1574,10 +1754,12 @@ export default function Page() {
         sensorId: point.sensorId,
         frameStart: new Date(currentTs).toISOString(),
         frameEnd: new Date(nextFrameTs).toISOString(),
-        readingInFrame,
-        latestHistory,
-        latestSensorValue,
-        chosen,
+        mode: smoothed?.mode,
+        readingInFrame: smoothed?.readingInFrame || null,
+        beforeReading: smoothed?.beforeReading || null,
+        afterReading: smoothed?.afterReading || null,
+        latestHistory: smoothed?.latestHistory || null,
+        chosen: smoothed?.chosen || null,
         value,
         ts,
       });
@@ -1586,6 +1768,7 @@ export default function Page() {
         ...point,
         value,
         ts,
+        smoothMode: smoothed?.mode || "none",
         status: getSensorStatus(selectedSensor, value),
         color: getHeatColor(selectedSensor, value),
       };
@@ -1593,22 +1776,34 @@ export default function Page() {
     .filter((point) => point.value != null && !Number.isNaN(point.value));
 }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
 
+  const globalDisplayPoints = useMemo(() => {
+    if (!isGlobalSensor) return [];
+    if (selectedPlotId === "all") return globalPoints;
+
+    const validPlots = visiblePlots.filter((plot) => plot.coords.length >= 3);
+    if (!validPlots.length) return [];
+
+    return globalPoints.filter((point) =>
+      validPlots.some((plot) => pointInPolygon({ lat: point.lat, lng: point.lng }, plot.coords))
+    );
+  }, [isGlobalSensor, globalPoints, selectedPlotId, visiblePlots]);
+
   const heatCells = useMemo(() => {
     if (isGlobalSensor) {
       return buildGlobalClimateCells(
-        globalPoints,
+        globalDisplayPoints,
         selectedSensor,
-        GLOBAL_GRID_STEP,
-        selectedPlotId === "all" ? [] : visiblePlots
+        selectedPlotId === "all" ? GLOBAL_GRID_STEP : 0.2,
+        visiblePlots
       );
     }
 
     const density = selectedPlotId === "all" ? 48 : 60;
     return buildLocalHeatCells(visiblePlots, renderedPoints, selectedSensor, density);
-  }, [isGlobalSensor, globalPoints, selectedSensor, selectedPlotId, visiblePlots, renderedPoints]);
+  }, [isGlobalSensor, globalDisplayPoints, selectedSensor, selectedPlotId, visiblePlots, renderedPoints]);
 
   const stats = useMemo(() => {
-    const source = isGlobalSensor ? globalPoints : renderedPoints;
+    const source = isGlobalSensor ? globalDisplayPoints : renderedPoints;
     const values = source
       .map((point) => point.value)
       .filter((v) => v != null && !Number.isNaN(v));
@@ -1629,8 +1824,18 @@ export default function Page() {
     let normal = 0;
     let high = 0;
 
+    const globalLowCut = isGlobalSensor ? getPercentile(values, 0.2) : null;
+    const globalHighCut = isGlobalSensor ? getPercentile(values, 0.8) : null;
+
     values.forEach((v) => {
-      const type = getSensorStatus(selectedSensor, v).type;
+      let type;
+      if (isGlobalSensor && globalLowCut != null && globalHighCut != null) {
+        if (v < globalLowCut) type = "low";
+        else if (v > globalHighCut) type = "high";
+        else type = "normal";
+      } else {
+        type = getSensorStatus(selectedSensor, v).type;
+      }
       if (type === "low") low += 1;
       else if (type === "high") high += 1;
       else if (type === "normal") normal += 1;
@@ -1645,7 +1850,7 @@ export default function Page() {
       normal,
       high,
     };
-  }, [isGlobalSensor, globalPoints, renderedPoints, selectedSensor]);
+  }, [isGlobalSensor, globalDisplayPoints, renderedPoints, selectedSensor]);
 
   useEffect(() => {
     if (!playing) {
@@ -1656,12 +1861,12 @@ export default function Page() {
 
     timerRef.current = setInterval(() => {
       setFrameIndex((prev) => {
-        if (!frameTimestamps.length) return 0;
-        const next = prev >= frameTimestamps.length - 1 ? 0 : prev + 1;
+        if (!frameCount) return 0;
+        const next = prev >= frameCount - 1 ? 0 : prev + 1;
 
         if (!isGlobalSensor) return next;
 
-        const nextKey = getCacheKeyForFrame(selectedSensor, frameTimestamps[next]);
+        const nextKey = getCacheKeyForFrame(selectedSensor, frameTimestamps[next], selectedPlotId);
         if (globalCacheRef.current.has(nextKey)) {
           return next;
         }
@@ -1672,13 +1877,13 @@ export default function Page() {
         }));
         return prev;
       });
-    }, 2200);
+    }, 1200);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       timerRef.current = null;
     };
-  }, [playing, frameTimestamps, isGlobalSensor, selectedSensor]);
+  }, [playing, framesKey, frameCount, isGlobalSensor, selectedSensor, selectedPlotId, tt]);
 
   const sensorMeta = SENSOR_META[selectedSensor] || SENSOR_META.soil_moisture;
 
@@ -1777,9 +1982,9 @@ export default function Page() {
                   />
 
                   <FitToSelection
-                    polygons={plots}
+                    polygons={visiblePlots}
                     selectedPlotId={selectedPlotId}
-                    lockToWorld={selectedPlotId === "all"}
+                    lockToWorld={selectedPlotId === "all" && isGlobalSensor}
                   />
 
                   {heatCells.map((cell) => (
@@ -1794,7 +1999,7 @@ export default function Page() {
                     />
                   ))}
 
-                  {plots.filter((plot) => plot.coords.length >= 3).map((plot) => (
+                  {visiblePlots.filter((plot) => plot.coords.length >= 3).map((plot) => (
                     <Polygon
                       key={`plot-${plot.id}`}
                       positions={plot.coords.map((c) => [c.lat, c.lng])}
@@ -1849,9 +2054,7 @@ export default function Page() {
                                 </>
                               ) : (
                                 <div>
-                                  {isGlobalSensor
-                                    ? tt("globalOverlayNote")
-                                    : tt("noSensorForNode")}
+                                  {isGlobalSensor ? tt("globalOverlayNote") : tt("noSensorForNode")}
                                 </div>
                               )}
                             </div>
@@ -1896,7 +2099,7 @@ export default function Page() {
                 <div className="map-overlay">{sensorReadingsNotice}</div>
               )}
 
-              {!loading && !error && !globalError && isGlobalSensor && !globalPoints.length && (
+              {!loading && !error && !globalError && isGlobalSensor && !globalDisplayPoints.length && (
                 <div className="map-overlay warn">{tt("noGlobalClimateData")}</div>
               )}
 
@@ -2009,32 +2212,35 @@ export default function Page() {
               </div>
             </div>
 
-            <div className="info-card">
-              <div className="info-title">{tt("nodesUsedForCalc")}</div>
-              <div className="node-list">
-                {renderedPoints.length ? (
-                  renderedPoints.map((point) => (
-                    <div className="node-item" key={point.id}>
-                      <div className="node-item-top">
-                        <span className="node-dot" style={{ background: point.color }} />
-                        <strong>{point.nodeName}</strong>
+            {!isGlobalSensor ? (
+              <div className="info-card">
+                <div className="info-title">{tt("nodesUsedForCalc")}</div>
+                <div className="node-list">
+                  {renderedPoints.length ? (
+                    renderedPoints.map((point) => (
+                      <div className="node-item" key={point.id}>
+                        <div className="node-item-top">
+                          <span className="node-dot" style={{ background: point.color }} />
+                          <strong>{point.nodeName}</strong>
+                        </div>
+                        <div className="node-sub">{point.plotName}</div>
+                        <div className="node-value">
+                          {point.value} {sensorMeta.unit}
+                        </div>
+                        <div className="node-sub">{formatDateTimeThai(point.ts)}</div>
                       </div>
-                      <div className="node-sub">{point.plotName}</div>
-                      <div className="node-value">
-                        {point.value} {sensorMeta.unit}
-                      </div>
-                      <div className="node-sub">{formatDateTimeThai(point.ts)}</div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="empty-text">
-                    {isGlobalSensor
-                      ? tt("climateModeOverlay")
-                      : tt("noReadingInFrame")}
-                  </div>
-                )}
+                    ))
+                  ) : (
+                    <div className="empty-text">{tt("noReadingInFrame")}</div>
+                  )}
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="info-card">
+                <div className="info-title">{tt("dataGlobalClimate")}</div>
+                <div className="empty-text">{tt("climateModeOverlay")}</div>
+              </div>
+            )}
           </div>
         </div>
 

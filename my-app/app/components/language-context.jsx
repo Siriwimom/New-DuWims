@@ -141,8 +141,8 @@ const TRANSLATIONS = {
     // planting plot page
     plantingPolygonTitle: "🗺 แปลงปลูก",
     addPlot: "+ เพิ่มแปลง",
-    editDelete: "ลบ/แก้ไข",
-    deletePlot: "ลบแปลง",
+    editDelete: "แก้ไข",
+    deletePlot: "ลบ",
     plotLabel: "เลือกแปลง",
     creatingNewPlot: "กำลังเพิ่มแปลงใหม่",
     noPlots: "ยังไม่มีแปลง",
@@ -328,8 +328,8 @@ const TRANSLATIONS = {
     // planting plot page
     plantingPolygonTitle: "🗺 Planting Plot",
     addPlot: "+ Add Plot",
-    editDelete: "Edit/Delete",
-    deletePlot: "Delete Plot",
+    editDelete: "Edit",
+    deletePlot: "Delete",
     plotLabel: "Select Plot",
     creatingNewPlot: "Creating new plot",
     noPlots: "No plots yet",
