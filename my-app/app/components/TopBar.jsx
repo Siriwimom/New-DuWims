@@ -199,13 +199,7 @@ export default function TopBar() {
           )}
         </div>
 
-        <div className="topbar-status-text">
-          {!mounted
-            ? t.statusChecking || "สถานะ: กำลังตรวจสอบ"
-            : hasToken
-            ? t.statusLoggedIn || "สถานะ: เข้าสู่ระบบแล้ว"
-            : t.statusLoggedOut || "สถานะ: ยังไม่ได้เข้าสู่ระบบ"}
-        </div>
+       
 
         <div className="mobile-menu-box" ref={menuRef}>
           <button
