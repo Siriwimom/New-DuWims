@@ -2,7 +2,36 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
-export default function LoginPage() {
+function GoogleIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 48 48"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path
+        fill="#FFC107"
+        d="M43.611 20.083H42V20H24v8h11.303C33.655 32.657 29.233 36 24 36c-6.627 0-12-5.373-12-12S17.373 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.277 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"
+      />
+      <path
+        fill="#FF3D00"
+        d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.277 4 24 4c-7.682 0-14.347 4.337-17.694 10.691z"
+      />
+      <path
+        fill="#4CAF50"
+        d="M24 44c5.176 0 9.86-1.977 13.409-5.192l-6.19-5.238C29.145 35.091 26.715 36 24 36c-5.212 0-9.62-3.318-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"
+      />
+      <path
+        fill="#1976D2"
+        d="M43.611 20.083H42V20H24v8h11.303a12.05 12.05 0 0 1-4.084 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"
+      />
+    </svg>
+  );
+}
+
+export default function App() {
   const [screen, setScreen] = useState("login");
 
   const [email, setEmail] = useState("");
@@ -14,65 +43,103 @@ export default function LoginPage() {
   const otpRefs = useRef([]);
 
   const [pendingOtpEmail, setPendingOtpEmail] = useState("");
+  const [pendingVerifyEmail, setPendingVerifyEmail] = useState("");
+
   const [err, setErr] = useState("");
+  const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
 
   const [modal, setModal] = useState(null);
   const [resetAllowed, setResetAllowed] = useState(false);
 
-  const [sessionUser, setSessionUser] = useState(null);
-  const [sessionChecking, setSessionChecking] = useState(true);
-  const [signupIsOwner, setSignupIsOwner] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword2, setShowPassword2] = useState(false);
 
-  const TOKEN_KEYS = ["AUTH_TOKEN_V1", "token"];
+  const TOKEN_KEYS_TO_SAVE = ["AUTH_TOKEN_V1", "token"];
 
   const API_BASE =
     process.env.NEXT_PUBLIC_API_BASE_URL ||
     process.env.NEXT_PUBLIC_API_BASE ||
     "http://localhost:3001";
 
+  const [sessionUser, setSessionUser] = useState(null);
+  const [sessionChecking, setSessionChecking] = useState(true);
+
+  const [signupIsOwner, setSignupIsOwner] = useState(false);
+
   function getToken() {
     if (typeof window === "undefined") return null;
-    for (const key of TOKEN_KEYS) {
-      const value = window.localStorage.getItem(key);
-      if (value) return value;
+    for (const k of TOKEN_KEYS_TO_SAVE) {
+      const v = localStorage.getItem(k);
+      if (v) return v;
     }
     return null;
   }
 
   function saveToken(token) {
     if (typeof window === "undefined" || !token) return;
-    TOKEN_KEYS.forEach((key) => window.localStorage.setItem(key, token));
+    TOKEN_KEYS_TO_SAVE.forEach((k) => localStorage.setItem(k, token));
   }
 
   function clearToken() {
     if (typeof window === "undefined") return;
-    TOKEN_KEYS.forEach((key) => window.localStorage.removeItem(key));
+    TOKEN_KEYS_TO_SAVE.forEach((k) => localStorage.removeItem(k));
   }
 
-  function isValidEmail(value) {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+  function isValidEmail(v) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(v || "").trim());
   }
 
-  function isValidPassword(value) {
-    return String(value || "").length >= 6;
+  function getPasswordChecks(v) {
+    const s = String(v || "");
+    return {
+      length: s.length >= 8,
+      upper: /[A-Z]/.test(s),
+      lower: /[a-z]/.test(s),
+      number: /\d/.test(s),
+    };
   }
 
-  function resetSensitiveForm() {
+  function isValidPassword(v) {
+    const c = getPasswordChecks(v);
+    return c.length && c.upper && c.lower && c.number;
+  }
+
+  function resetFormSensitive() {
     setPw("");
     setPw2("");
     setOtp(["", "", "", "", "", ""]);
     setErr("");
+    setInfo("");
+    setNickname("");
+    setShowPassword(false);
+    setShowPassword2(false);
   }
 
   const title = useMemo(() => {
     if (screen === "login") return "Login";
-    if (screen === "signup") return "Sign up";
+    if (screen === "signup") return "Create your account";
+    if (screen === "verifySignup") return "Verify your email";
     if (screen === "forgot") return "Reset Your Password";
-    if (screen === "otp") return "Enter OTP";
-    if (screen === "reset") return "Set a Password";
-    return "Login";
+    if (screen === "otp") return "Verify OTP";
+    if (screen === "reset") return "Set a New Password";
+    return "";
   }, [screen]);
+
+  const passwordChecks = useMemo(() => getPasswordChecks(pw), [pw]);
+
+  async function run(fn) {
+    try {
+      setErr("");
+      setInfo("");
+      setLoading(true);
+      await fn();
+    } catch (e) {
+      setErr(e?.message || "Something went wrong");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function api(path, { method = "GET", body, token } = {}) {
     const res = await fetch(`${API_BASE}${path}`, {
@@ -87,53 +154,33 @@ export default function LoginPage() {
     const data = await res.json().catch(() => ({}));
 
     if (!res.ok) {
-      const message = data?.error
+      const msg = data?.error
         ? `${data.message || "Error"}: ${data.error}`
         : data?.message || `HTTP ${res.status}`;
-      const error = new Error(message);
-      error.status = res.status;
-      error.payload = data;
-      throw error;
+      const err = new Error(msg);
+      err.status = res.status;
+      err.payload = data;
+      throw err;
     }
 
     return data;
   }
 
-  async function run(fn) {
-    try {
-      setErr("");
-      setLoading(true);
-      await fn();
-    } catch (e) {
-      setErr(e?.message || "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function goTo(nextScreen) {
-    setScreen(nextScreen);
-    setErr("");
-    resetSensitiveForm();
-
-    if (nextScreen !== "otp") {
-      setResetAllowed(false);
-    }
+  function onGo(to) {
+    setScreen(to);
+    resetFormSensitive();
+    if (to !== "otp") setResetAllowed(false);
   }
 
   async function handleLogin() {
     await run(async () => {
-      const safeEmail = email.trim().toLowerCase();
-
-      if (!isValidEmail(safeEmail)) throw new Error("Invalid email");
+      const emailN = email.trim().toLowerCase();
+      if (!isValidEmail(emailN)) throw new Error("Invalid email");
       if (!pw) throw new Error("Enter password");
 
       const data = await api("/auth/login", {
         method: "POST",
-        body: {
-          email: safeEmail,
-          password: pw,
-        },
+        body: { email: emailN, password: pw },
       });
 
       if (!data?.token) throw new Error("Login success but token is missing");
@@ -147,46 +194,95 @@ export default function LoginPage() {
 
   async function handleSignup() {
     await run(async () => {
-      const safeEmail = email.trim().toLowerCase();
-      const safeNickname = nickname.trim();
+      const emailN = email.trim().toLowerCase();
+      if (!isValidEmail(emailN)) throw new Error("Invalid email");
 
-      if (!isValidEmail(safeEmail)) throw new Error("Invalid email");
-      if (!safeNickname) throw new Error("กรุณากรอกชื่อนามสกุล");
       if (!isValidPassword(pw)) {
-        throw new Error("Password must be at least 6 characters");
+        throw new Error(
+          "Password must be at least 8 characters and include uppercase, lowercase, and number"
+        );
       }
+
       if (pw !== pw2) throw new Error("Password not match");
 
-      const data = await api("/auth/register", {
+      const nick = String(nickname || "").trim();
+      if (!nick) throw new Error("กรุณากรอกชื่อนามสกุล");
+
+      await api("/auth/register", {
         method: "POST",
         body: {
-          email: safeEmail,
+          email: emailN,
           password: pw,
-          nickname: safeNickname,
+          nickname: nick,
           role: signupIsOwner ? "owner" : "employee",
         },
       });
 
-      if (!data?.token) throw new Error("Signup success but token is missing");
+      // backend ควรส่งเมลยืนยันจริงใน step นี้
+      // เช่น create user แบบ isVerified=false แล้วส่ง code / link ไปที่อีเมล
+      await api("/auth/send-email-verification", {
+        method: "POST",
+        body: { email: emailN },
+      });
 
-      saveToken(data.token);
-      setSessionUser(data.user || null);
-
-      window.location.href = "/";
+      setPendingVerifyEmail(emailN);
+      setOtp(["", "", "", "", "", ""]);
+      setScreen("verifySignup");
+      setInfo("เราได้ส่งรหัสยืนยันอีเมล 6 หลักไปที่อีเมลของคุณแล้ว");
     });
   }
 
-  function handleLogout() {
+  async function handleVerifySignupEmail() {
+    await run(async () => {
+      const emailN = (pendingVerifyEmail || email || "").trim().toLowerCase();
+      if (!isValidEmail(emailN)) throw new Error("Invalid email");
+
+      const code = otp.join("");
+      if (code.length !== 6) throw new Error("Enter 6 digits verification code");
+
+      await api("/auth/verify-email", {
+        method: "POST",
+        body: { email: emailN, code },
+      });
+
+      setModal({
+        title: "Email verified successfully",
+        desc: "ยืนยันอีเมลเรียบร้อยแล้ว ตอนนี้คุณสามารถเข้าสู่ระบบได้",
+        buttonText: "Go to Login",
+        onClose: () => {
+          setModal(null);
+          setPw("");
+          setPw2("");
+          setOtp(["", "", "", "", "", ""]);
+          setScreen("login");
+          setInfo("Email verified. Please login.");
+          setErr("");
+        },
+      });
+    });
+  }
+
+  async function handleResendSignupVerification() {
+    await run(async () => {
+      const emailN = (pendingVerifyEmail || email || "").trim().toLowerCase();
+      if (!isValidEmail(emailN)) throw new Error("Invalid email");
+
+      await api("/auth/send-email-verification", {
+        method: "POST",
+        body: { email: emailN },
+      });
+
+      setInfo("ส่งรหัสยืนยันใหม่ไปที่อีเมลแล้ว");
+    });
+  }
+
+  function logout() {
     clearToken();
     setSessionUser(null);
     setEmail("");
     setPw("");
     setPw2("");
     setNickname("");
-    setPendingOtpEmail("");
-    setOtp(["", "", "", "", "", ""]);
-    setResetAllowed(false);
-    setErr("");
     setScreen("login");
 
     if (typeof window !== "undefined") {
@@ -199,115 +295,94 @@ export default function LoginPage() {
 
   function handleGoogleSignIn() {
     setErr("");
+    setInfo("");
     window.location.href = `${API_BASE}/auth/google/start`;
   }
 
   async function handleSendOtp() {
     await run(async () => {
-      const safeEmail = email.trim().toLowerCase();
-      if (!isValidEmail(safeEmail)) throw new Error("Invalid email");
+      const emailN = email.trim().toLowerCase();
+      if (!isValidEmail(emailN)) throw new Error("Invalid email");
 
       await api("/auth/forgot-password/send-otp", {
         method: "POST",
-        body: { email: safeEmail },
+        body: { email: emailN },
       });
 
-      setPendingOtpEmail(safeEmail);
+      setPendingOtpEmail(emailN);
+      setScreen("otp");
       setOtp(["", "", "", "", "", ""]);
       setResetAllowed(false);
-      setScreen("otp");
-      setErr("OTP has been sent to your email");
+
+      setInfo("OTP has been sent to your email (check inbox/spam).");
     });
   }
 
-  function setOtpAt(index, value) {
-    if (!/^\d?$/.test(value)) return;
-
+  function setOtpAt(i, v) {
+    if (!/^\d?$/.test(v)) return;
     const next = [...otp];
-    next[index] = value;
+    next[i] = v;
     setOtp(next);
-
-    if (value && index < 5) {
-      otpRefs.current[index + 1]?.focus();
-    }
-  }
-
-  function handleOtpKeyDown(index, event) {
-    if (event.key === "Backspace" && !otp[index] && index > 0) {
-      otpRefs.current[index - 1]?.focus();
-    }
-    if (event.key === "ArrowLeft" && index > 0) {
-      otpRefs.current[index - 1]?.focus();
-    }
-    if (event.key === "ArrowRight" && index < 5) {
-      otpRefs.current[index + 1]?.focus();
-    }
+    if (v && i < 5) otpRefs.current[i + 1]?.focus();
   }
 
   async function handleVerifyOtp() {
     await run(async () => {
-      const safeEmail = (pendingOtpEmail || email || "").trim().toLowerCase();
-      const code = otp.join("");
+      const emailN = (pendingOtpEmail || "").trim().toLowerCase();
+      if (!isValidEmail(emailN)) throw new Error("Invalid email");
 
-      if (!isValidEmail(safeEmail)) throw new Error("Invalid email");
+      const code = otp.join("");
       if (code.length !== 6) throw new Error("Enter 6 digits OTP");
 
       await api("/auth/forgot-password/verify-otp", {
         method: "POST",
-        body: { email: safeEmail, code },
+        body: { email: emailN, code },
       });
 
       setResetAllowed(true);
+      setScreen("reset");
       setPw("");
       setPw2("");
       setErr("");
-      setScreen("reset");
+      setInfo("OTP verified. Set your new password.");
     });
   }
 
   async function handleResetPassword() {
     await run(async () => {
-      const safeEmail = (pendingOtpEmail || email || "").trim().toLowerCase();
-
       if (!resetAllowed) throw new Error("Reset not allowed. Verify OTP first.");
-      if (!isValidEmail(safeEmail)) throw new Error("Invalid email");
+
+      const emailN = (pendingOtpEmail || email || "").trim().toLowerCase();
+      if (!isValidEmail(emailN)) throw new Error("Invalid email");
+
       if (!isValidPassword(pw)) {
-        throw new Error("Password must be at least 6 characters");
+        throw new Error(
+          "Password must be at least 8 characters and include uppercase, lowercase, and number"
+        );
       }
+
       if (pw !== pw2) throw new Error("Password not match");
 
       await api("/auth/forgot-password/reset", {
         method: "POST",
-        body: {
-          email: safeEmail,
-          newPassword: pw,
-        },
+        body: { email: emailN, code: otp.join(""), newPassword: pw },
       });
 
       setResetAllowed(false);
 
       setModal({
-        title: "Password Updated Successfully",
-        desc: "Password changed successfully. Please login again.",
+        title: "Password updated successfully",
+        desc: "Password changed successfully, you can login again with new password",
         buttonText: "Back to Login",
         onClose: () => {
           setModal(null);
           setEmail("");
-          setPw("");
-          setPw2("");
           setPendingOtpEmail("");
-          setOtp(["", "", "", "", "", ""]);
+          resetFormSensitive();
           setScreen("login");
-          setErr("");
         },
       });
     });
-  }
-
-  function handleKeySubmit(event, action) {
-    if (event.key === "Enter") {
-      action();
-    }
   }
 
   useEffect(() => {
@@ -344,6 +419,7 @@ export default function LoginPage() {
             if (!mounted) return;
             setSessionUser(me.user || null);
             setSessionChecking(false);
+
             window.location.href = "/";
             return;
           } catch (e) {
@@ -356,9 +432,8 @@ export default function LoginPage() {
           }
         }
 
-        const savedToken = getToken();
-
-        if (!savedToken) {
+        const t = getToken();
+        if (!t) {
           if (!mounted) return;
           setSessionUser(null);
           setSessionChecking(false);
@@ -366,7 +441,7 @@ export default function LoginPage() {
         }
 
         try {
-          const me = await api("/auth/me", { token: savedToken });
+          const me = await api("/auth/me", { token: t });
           if (!mounted) return;
           setSessionUser(me.user || null);
         } catch (e) {
@@ -398,7 +473,7 @@ export default function LoginPage() {
       <div className="panel">
         <div className="sessionBar">
           {sessionChecking ? (
-            <span className="muted">Checking session...</span>
+            <span className="muted">Checking session…</span>
           ) : sessionUser ? (
             <>
               <div className="sessionLeft">
@@ -408,7 +483,7 @@ export default function LoginPage() {
                 <div className="sessionSub">{sessionUser.email || "-"}</div>
                 <div className="sessionRole">{sessionUser.role || "-"}</div>
               </div>
-              <button className="btn ghostBtn" onClick={handleLogout} disabled={loading}>
+              <button className="btn ghost" onClick={logout} disabled={loading}>
                 Logout
               </button>
             </>
@@ -420,6 +495,7 @@ export default function LoginPage() {
         <h1>{title}</h1>
 
         {err && <div className="err">{err}</div>}
+        {info && <div className="info">{info}</div>}
 
         {screen === "login" && (
           <>
@@ -428,30 +504,39 @@ export default function LoginPage() {
               className="input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => handleKeySubmit(e, handleLogin)}
+              placeholder="Enter your email"
               autoComplete="email"
             />
 
             <div className="label">Password</div>
-            <input
-              className="input"
-              type="password"
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              onKeyDown={(e) => handleKeySubmit(e, handleLogin)}
-              autoComplete="current-password"
-            />
+            <div className="pwWrap">
+              <input
+                className="input withToggle"
+                type={showPassword ? "text" : "password"}
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                placeholder="Enter your password"
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                className="pwToggle"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
 
-            <button className="btn blueBtn" onClick={handleLogin} disabled={loading}>
+            <button className="btn blue" onClick={handleLogin} disabled={loading}>
               {loading ? "Loading..." : "Login"}
             </button>
 
             <div className="row">
-              <button className="linkBtn" onClick={() => goTo("signup")}>
+              <button className="linkBtn" onClick={() => onGo("signup")}>
                 Create Account
               </button>
-              <button className="linkBtn" onClick={() => goTo("forgot")}>
-                Forgot Password?
+              <button className="linkBtn" onClick={() => onGo("forgot")}>
+                Forget Password ?
               </button>
             </div>
 
@@ -459,10 +544,18 @@ export default function LoginPage() {
               <span>OR</span>
             </div>
 
-            <button className="btn googleBtn" onClick={handleGoogleSignIn} disabled={loading}>
-              <span className="gIcon">G</span>
+            <button
+              className="btn googleBtn"
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+            >
+              <span className="gIcon"><GoogleIcon /></span>
               <span>Sign in with Google</span>
             </button>
+
+            <div className="small">
+              Use your verified email address to continue.
+            </div>
           </>
         )}
 
@@ -474,7 +567,7 @@ export default function LoginPage() {
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
               placeholder="ชื่อ นามสกุล"
-              onKeyDown={(e) => handleKeySubmit(e, handleSignup)}
+              autoComplete="name"
             />
 
             <div className="label">Email</div>
@@ -482,29 +575,62 @@ export default function LoginPage() {
               className="input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => handleKeySubmit(e, handleSignup)}
+              placeholder="Enter your email"
               autoComplete="email"
             />
 
             <div className="label">Password</div>
-            <input
-              className="input"
-              type="password"
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              onKeyDown={(e) => handleKeySubmit(e, handleSignup)}
-              autoComplete="new-password"
-            />
+            <div className="pwWrap">
+              <input
+                className="input withToggle"
+                type={showPassword ? "text" : "password"}
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                placeholder="Create password"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="pwToggle"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
 
-            <div className="label">Password Confirm</div>
-            <input
-              className="input"
-              type="password"
-              value={pw2}
-              onChange={(e) => setPw2(e.target.value)}
-              onKeyDown={(e) => handleKeySubmit(e, handleSignup)}
-              autoComplete="new-password"
-            />
+            <div className="passwordHelp">
+              <div className={passwordChecks.length ? "ok" : ""}>
+                • อย่างน้อย 8 ตัวอักษร
+              </div>
+              <div className={passwordChecks.upper ? "ok" : ""}>
+                • มีตัวพิมพ์ใหญ่ (A-Z)
+              </div>
+              <div className={passwordChecks.lower ? "ok" : ""}>
+                • มีตัวพิมพ์เล็ก (a-z)
+              </div>
+              <div className={passwordChecks.number ? "ok" : ""}>
+                • มีตัวเลข (0-9)
+              </div>
+            </div>
+
+            <div className="label">Confirm Password</div>
+            <div className="pwWrap">
+              <input
+                className="input withToggle"
+                type={showPassword2 ? "text" : "password"}
+                value={pw2}
+                onChange={(e) => setPw2(e.target.value)}
+                placeholder="Confirm password"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="pwToggle"
+                onClick={() => setShowPassword2((v) => !v)}
+              >
+                {showPassword2 ? "Hide" : "Show"}
+              </button>
+            </div>
 
             <div className="checkboxRow">
               <label className="check">
@@ -517,7 +643,7 @@ export default function LoginPage() {
               </label>
             </div>
 
-            <button className="btn blueBtn" onClick={handleSignup} disabled={loading}>
+            <button className="btn blue" onClick={handleSignup} disabled={loading}>
               {loading ? "Loading..." : "Sign up"}
             </button>
 
@@ -525,14 +651,67 @@ export default function LoginPage() {
               <span>OR</span>
             </div>
 
-            <button className="btn googleBtn" onClick={handleGoogleSignIn} disabled={loading}>
-              <span className="gIcon">G</span>
+            <button
+              className="btn googleBtn"
+              onClick={handleGoogleSignIn}
+              disabled={loading}
+            >
+              <span className="gIcon"><GoogleIcon /></span>
               <span>Sign up with Google</span>
             </button>
 
-            <div className="row centerRow">
-              <button className="linkBtn" onClick={() => goTo("login")}>
+            <div className="small">
+              หลังสมัคร ระบบจะส่งอีเมลให้ยืนยันก่อนเข้าใช้งาน
+            </div>
+
+            <div className="row" style={{ justifyContent: "center" }}>
+              <button className="linkBtn" onClick={() => onGo("login")}>
                 Back to Login
+              </button>
+            </div>
+          </>
+        )}
+
+        {screen === "verifySignup" && (
+          <>
+            <div className="otpHint">
+              ใส่รหัสยืนยัน 6 หลักที่ส่งไปยังอีเมล
+              <br />
+              <strong>{pendingVerifyEmail || email}</strong>
+            </div>
+
+            <div className="otpRow">
+              {otp.map((d, i) => (
+                <input
+                  key={i}
+                  className="otpBox"
+                  value={d}
+                  onChange={(e) => setOtpAt(i, e.target.value)}
+                  ref={(el) => (otpRefs.current[i] = el)}
+                  inputMode="numeric"
+                  maxLength={1}
+                />
+              ))}
+            </div>
+
+            <button
+              className="btn blue"
+              onClick={handleVerifySignupEmail}
+              disabled={loading}
+            >
+              {loading ? "Verifying..." : "Verify Email"}
+            </button>
+
+            <div className="row" style={{ marginTop: 10 }}>
+              <button
+                className="linkBtn"
+                onClick={handleResendSignupVerification}
+                disabled={loading}
+              >
+                Resend code
+              </button>
+              <button className="linkBtn" onClick={() => onGo("login")}>
+                Back
               </button>
             </div>
           </>
@@ -545,50 +724,62 @@ export default function LoginPage() {
               className="input"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              onKeyDown={(e) => handleKeySubmit(e, handleSendOtp)}
+              placeholder="Enter your email"
               autoComplete="email"
             />
 
-            <button className="btn blueBtn" onClick={handleSendOtp} disabled={loading}>
+            <button
+              className="btn blue"
+              onClick={handleSendOtp}
+              disabled={loading}
+            >
               {loading ? "Sending..." : "Reset Password"}
             </button>
 
-            <div className="row centerRow">
-              <button className="linkBtn" onClick={() => goTo("login")}>
+            <div className="row">
+              <button className="linkBtn" onClick={() => onGo("login")}>
                 Back
               </button>
+              <span />
             </div>
           </>
         )}
 
         {screen === "otp" && (
           <>
-            <div className="otpHint">Enter your 6 digit OTP code</div>
+            <div className="otpHint">
+              Enter your 6 digit OTP code in order to reset password.
+            </div>
 
             <div className="otpRow">
-              {otp.map((digit, index) => (
+              {otp.map((d, i) => (
                 <input
-                  key={index}
+                  key={i}
                   className="otpBox"
-                  value={digit}
-                  onChange={(e) => setOtpAt(index, e.target.value)}
-                  onKeyDown={(e) => handleOtpKeyDown(index, e)}
-                  ref={(el) => (otpRefs.current[index] = el)}
+                  value={d}
+                  onChange={(e) => setOtpAt(i, e.target.value)}
+                  ref={(el) => (otpRefs.current[i] = el)}
                   inputMode="numeric"
                   maxLength={1}
                 />
               ))}
             </div>
 
-            <button className="btn blueBtn" onClick={handleVerifyOtp} disabled={loading}>
+            <button
+              className="btn blue"
+              onClick={handleVerifyOtp}
+              disabled={loading}
+            >
               {loading ? "Verifying..." : "Verify OTP"}
             </button>
 
-            <div className="row">
+            <div className="small">Didn't receive the code?</div>
+
+            <div className="row" style={{ marginTop: 10 }}>
               <button className="linkBtn" onClick={handleSendOtp} disabled={loading}>
                 Resend
               </button>
-              <button className="linkBtn" onClick={() => goTo("login")}>
+              <button className="linkBtn" onClick={() => onGo("login")}>
                 Back
               </button>
             </div>
@@ -598,33 +789,70 @@ export default function LoginPage() {
         {screen === "reset" && (
           <>
             <div className="label">Create Password</div>
-            <input
-              className="input"
-              type="password"
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              onKeyDown={(e) => handleKeySubmit(e, handleResetPassword)}
-              autoComplete="new-password"
-            />
+            <div className="pwWrap">
+              <input
+                className="input withToggle"
+                type={showPassword ? "text" : "password"}
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                placeholder="New password"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="pwToggle"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+
+            <div className="passwordHelp">
+              <div className={passwordChecks.length ? "ok" : ""}>
+                • อย่างน้อย 8 ตัวอักษร
+              </div>
+              <div className={passwordChecks.upper ? "ok" : ""}>
+                • มีตัวพิมพ์ใหญ่ (A-Z)
+              </div>
+              <div className={passwordChecks.lower ? "ok" : ""}>
+                • มีตัวพิมพ์เล็ก (a-z)
+              </div>
+              <div className={passwordChecks.number ? "ok" : ""}>
+                • มีตัวเลข (0-9)
+              </div>
+            </div>
 
             <div className="label">Confirm Password</div>
-            <input
-              className="input"
-              type="password"
-              value={pw2}
-              onChange={(e) => setPw2(e.target.value)}
-              onKeyDown={(e) => handleKeySubmit(e, handleResetPassword)}
-              autoComplete="new-password"
-            />
+            <div className="pwWrap">
+              <input
+                className="input withToggle"
+                type={showPassword2 ? "text" : "password"}
+                value={pw2}
+                onChange={(e) => setPw2(e.target.value)}
+                placeholder="Confirm new password"
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                className="pwToggle"
+                onClick={() => setShowPassword2((v) => !v)}
+              >
+                {showPassword2 ? "Hide" : "Show"}
+              </button>
+            </div>
 
-            <button className="btn blueBtn" onClick={handleResetPassword} disabled={loading}>
+            <button
+              className="btn blue"
+              onClick={handleResetPassword}
+              disabled={loading}
+            >
               {loading ? "Updating..." : "Update Password"}
             </button>
           </>
         )}
 
         {modal && (
-          <div className="modalOverlay">
+          <div className="modalOverlay" onMouseDown={() => {}}>
             <div className="modal">
               <div className="checkWrap">
                 <div className="checkInner">✓</div>
@@ -633,7 +861,11 @@ export default function LoginPage() {
               <div className="modalTitle">{modal.title}</div>
               <div className="modalDesc">{modal.desc}</div>
 
-              <button className="btn solidBtn" style={{ marginTop: 16 }} onClick={modal.onClose}>
+              <button
+                className="btn solid"
+                style={{ marginTop: 16 }}
+                onClick={modal.onClose}
+              >
                 {modal.buttonText}
               </button>
             </div>
@@ -646,289 +878,284 @@ export default function LoginPage() {
 
 const css = `
 :root{
-  --bg1:#8ad67b;
-  --bg2:#2fb356;
+  --bg1:#baff9f;
+  --bg2:#159a44;
   --blue:#0a66ff;
-  --text:#ffffff;
+  --green:#22c55e;
 }
-
 *{ box-sizing:border-box; }
-html,body{ margin:0; padding:0; min-height:100%; font-family: Arial, Helvetica, sans-serif; }
+html,body{ height:100%; margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; }
 
 .page{
   min-height:100vh;
   display:flex;
   align-items:center;
   justify-content:center;
-  padding:24px 16px;
-  background: linear-gradient(180deg, var(--bg1), var(--bg2));
+  padding:28px 16px;
+  background: linear-gradient(135deg, var(--bg1), var(--bg2));
 }
-
-.panel{
-  width:min(760px, 94vw);
-  text-align:center;
-}
+.panel{ width:min(720px, 94vw); text-align:center; }
 
 .sessionBar{
-  width:min(604px, 94vw);
-  margin:0 auto 22px;
-  min-height:38px;
-  border-radius:20px;
-  background:rgba(255,255,255,.15);
+  width:min(540px, 94vw);
+  margin:0 auto 14px;
+  padding:10px 12px;
+  border-radius:18px;
+  background:rgba(255,255,255,.14);
+  backdrop-filter: blur(6px);
   display:flex;
   align-items:center;
   justify-content:space-between;
   gap:12px;
-  padding:8px 14px;
 }
-
-.sessionLeft{
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-  gap:2px;
-}
-
-.sessionName{
+.sessionLeft{ display:flex; flex-direction:column; align-items:flex-start; gap:2px; }
+.sessionName{ color:#fff; font-weight:800; font-size:14px; line-height:1.1; }
+.sessionSub{ color:rgba(255,255,255,.88); font-size:12px; font-weight:700; }
+.sessionRole{ color:rgba(255,255,255,.7); font-size:12px; font-weight:700; text-transform:capitalize; }
+.muted{ color:rgba(255,255,255,.65); font-size:12px; font-weight:700; }
+.checkboxRow{ width:min(540px, 94vw); margin:8px auto 10px; text-align:left; }
+.check{ display:flex; align-items:center; gap:10px; color:rgba(255,255,255,.85); font-size:13px; font-weight:700; }
+.check input{ width:16px; height:16px; }
+.btn.ghost{
+  background:rgba(255,255,255,.18);
+  border:2px solid rgba(255,255,255,.25);
   color:#fff;
-  font-weight:800;
-  font-size:14px;
 }
-
-.sessionSub,.sessionRole,.muted{
-  color:rgba(255,255,255,.85);
-  font-size:12px;
-  font-weight:700;
-}
+.btn.ghost:hover{ filter:brightness(1.1); }
 
 h1{
-  margin:0 0 20px;
   color:#fff;
-  font-size:64px;
-  font-weight:900;
-  line-height:1;
+  font-size:56px;
+  margin:0 0 18px;
+  text-shadow:0 2px 12px rgba(0,0,0,.15);
 }
-
-.err{
-  width:min(604px, 94vw);
-  margin:0 auto 12px;
-  border-radius:14px;
-  background:rgba(255,255,255,.72);
-  color:#8b1111;
-  text-align:left;
-  padding:10px 12px;
-  font-weight:900;
-  font-size:16px;
-}
-
 .label{
-  width:min(604px, 94vw);
+  width:min(540px, 94vw);
   margin:0 auto 6px;
   text-align:left;
-  color:rgba(255,255,255,.78);
+  color:rgba(255,255,255,.8);
   font-size:12px;
   font-weight:700;
 }
-
 .input{
-  width:min(604px, 94vw);
+  width:min(540px, 94vw);
   height:46px;
-  margin:0 auto 18px;
-  display:block;
-  border-radius:23px;
-  border:2px solid rgba(94,94,120,.9);
-  background:#dfe7f3;
+  border-radius:16px;
+  border:1px solid rgba(0,0,0,.22);
   outline:none;
-  padding:0 16px;
-  font-size:16px;
-  font-weight:700;
-  color:#111;
-}
-
-.btn{
-  width:min(604px, 94vw);
-  height:46px;
+  padding:0 14px;
+  background:#fff;
+  display:block;
   margin:0 auto 14px;
+  font-weight:700;
+  font-size:14px;
+}
+.input:focus{
+  border-color:#0a66ff;
+  box-shadow:0 0 0 3px rgba(10,102,255,.14);
+}
+.pwWrap{
+  width:min(540px, 94vw);
+  margin:0 auto 10px;
+  position:relative;
+}
+.withToggle{
+  width:100%;
+  margin:0;
+  padding-right:76px;
+}
+.pwToggle{
+  position:absolute;
+  right:10px;
+  top:50%;
+  transform:translateY(-50%);
+  border:0;
+  background:transparent;
+  color:#0a66ff;
+  font-weight:800;
+  cursor:pointer;
+}
+.passwordHelp{
+  width:min(540px, 94vw);
+  margin:0 auto 14px;
+  padding:10px 12px;
+  border-radius:12px;
+  background:rgba(255,255,255,.14);
+  text-align:left;
+  font-size:12px;
+  font-weight:700;
+  color:rgba(255,255,255,.72);
+  display:grid;
+  gap:5px;
+}
+.passwordHelp .ok{
+  color:#ffffff;
+}
+.btn{
+  width:min(540px, 94vw);
+  height:46px;
+  border-radius:22px;
+  border:2px solid rgba(0,0,0,.25);
+  background:transparent;
+  cursor:pointer;
+  font-weight:900;
   display:flex;
   align-items:center;
   justify-content:center;
-  border-radius:23px;
-  font-size:16px;
-  font-weight:900;
-  cursor:pointer;
+  margin:0 auto 14px;
 }
-
-.blueBtn{
+.btn.blue{
+  background:#0a66ff;
   border:2px solid #0a66ff;
-  background:transparent;
   color:#fff;
 }
-
-.googleBtn{
-  border:2px solid rgba(94,94,120,.7);
-  background:#ffffff;
-  color:#1e1e1e;
-  gap:10px;
-}
-
-.ghostBtn{
-  width:auto;
-  min-width:90px;
-  height:34px;
-  margin:0;
-  border:1px solid rgba(255,255,255,.35);
-  background:rgba(255,255,255,.12);
-  color:#fff;
-  padding:0 14px;
-}
-
-.solidBtn{
-  border:0;
-  background:#22c55e;
+.btn.solid{
+  background:var(--green);
+  border-color:rgba(0,0,0,.18);
   color:#fff;
 }
-
 .row{
-  width:min(604px, 94vw);
-  margin:0 auto 18px;
+  width:min(540px, 94vw);
+  margin:4px auto 14px;
   display:flex;
   justify-content:space-between;
-  align-items:center;
+  gap:12px;
+  font-weight:800;
 }
-
-.centerRow{
-  justify-content:center;
-}
-
 .linkBtn{
-  border:0;
   background:transparent;
-  padding:0;
-  cursor:pointer;
-  color:#0a42ff;
-  font-size:16px;
+  border:0;
+  color:#0b4bd6;
   font-weight:900;
+  cursor:pointer;
+  padding:0;
 }
-
 .hr{
-  width:min(604px, 94vw);
-  margin:8px auto 16px;
+  width:min(540px, 94vw);
+  margin:10px auto 12px;
   display:flex;
   align-items:center;
   gap:12px;
-  color:rgba(255,255,255,.85);
-  font-size:12px;
+  color:rgba(255,255,255,.75);
   font-weight:900;
+  font-size:12px;
 }
-
-.hr::before,.hr::after{
+.hr:before,.hr:after{
   content:"";
-  flex:1;
   height:1px;
   background:rgba(255,255,255,.35);
+  flex:1;
 }
-
+.googleBtn{
+  background:#fff;
+  color:#1f1f1f;
+  border:1px solid #dadce0;
+  gap:10px;
+  box-shadow:0 1px 2px rgba(0,0,0,.08);
+}
 .gIcon{
-  width:18px;
+  width:20px;
+  height:20px;
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  font-weight:900;
+  flex:0 0 auto;
 }
-
-.checkboxRow{
-  width:min(604px, 94vw);
-  margin:0 auto 14px;
-  text-align:left;
+.small{
+  color:rgba(255,255,255,.82);
+  font-size:11px;
 }
-
-.check{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  color:#fff;
-  font-size:13px;
-  font-weight:700;
-}
-
 .otpHint{
-  width:min(604px, 94vw);
-  margin:0 auto 12px;
-  color:rgba(255,255,255,.88);
-  font-size:13px;
+  color:rgba(255,255,255,.92);
+  margin:0 auto 10px;
+  width:min(540px, 94vw);
   font-weight:700;
+  font-size:13px;
 }
-
 .otpRow{
   display:flex;
-  justify-content:center;
   gap:8px;
-  margin:8px 0 18px;
+  justify-content:center;
+  margin:10px 0 18px;
 }
-
 .otpBox{
   width:42px;
-  height:42px;
-  border:0;
-  border-radius:10px;
-  outline:none;
+  height:46px;
+  border-radius:12px;
+  border:1px solid rgba(0,0,0,.15);
   text-align:center;
-  font-size:18px;
   font-weight:900;
-  background:#fff;
+  font-size:18px;
+  outline:none;
 }
-
+.otpBox:focus{
+  border-color:#0a66ff;
+  box-shadow:0 0 0 3px rgba(10,102,255,.14);
+}
+.err{
+  width:min(540px, 94vw);
+  margin:0 auto 10px;
+  color:#7f1d1d;
+  font-weight:900;
+  background:rgba(255,255,255,.92);
+  border-radius:12px;
+  padding:8px 10px;
+  text-align:left;
+}
+.info{
+  width:min(540px, 94vw);
+  margin:0 auto 10px;
+  color:#065f46;
+  font-weight:900;
+  background:rgba(255,255,255,.92);
+  border-radius:12px;
+  padding:8px 10px;
+  text-align:left;
+}
 .modalOverlay{
   position:fixed;
   inset:0;
-  background:rgba(0,0,0,.18);
+  background:rgba(0,0,0,.12);
   display:flex;
   align-items:center;
   justify-content:center;
   padding:18px;
 }
-
 .modal{
-  width:min(440px, 92vw);
-  background:#fff;
+  width:min(520px, 92vw);
+  background:rgba(255,255,255,.96);
   border-radius:18px;
-  padding:24px;
+  box-shadow:0 12px 36px rgba(0,0,0,.18);
+  padding:22px;
   text-align:center;
-  box-shadow:0 20px 50px rgba(0,0,0,.2);
 }
-
 .checkWrap{
   width:78px;
   height:78px;
-  margin:0 auto 12px;
   border-radius:999px;
+  margin:0 auto 12px;
   background:rgba(34,197,94,.18);
   display:flex;
   align-items:center;
   justify-content:center;
 }
-
 .checkInner{
   width:54px;
   height:54px;
   border-radius:999px;
-  background:#22c55e;
+  background:rgba(34,197,94,.9);
   color:#fff;
   display:flex;
   align-items:center;
   justify-content:center;
-  font-size:22px;
   font-weight:900;
+  font-size:20px;
 }
+.modalTitle{ font-weight:900; font-size:16px; }
+.modalDesc{ margin-top:6px; opacity:.7; font-size:12px; }
 
-.modalTitle{
-  font-size:18px;
-  font-weight:900;
-}
-
-.modalDesc{
-  margin-top:8px;
-  font-size:13px;
-  color:#666;
+@media (max-width: 640px){
+  h1{ font-size:36px; }
+  .row{ flex-wrap:wrap; justify-content:center; }
 }
 `;
