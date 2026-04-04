@@ -5,7 +5,16 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDuwimsT } from "./language-context";
 
-const AUTH_KEY = "AUTH_TOKEN_V1";
+const AUTH_KEYS = ["AUTH_TOKEN_V1", "token", "authToken", "pmtool_token", "duwims_token"];
+
+function readToken() {
+  if (typeof window === "undefined") return "";
+  for (const k of AUTH_KEYS) {
+    const v = window.localStorage.getItem(k);
+    if (v) return v;
+  }
+  return "";
+}
 
 function parseJwt(token) {
   try {
@@ -37,10 +46,11 @@ export default function TopBar() {
   const menuRef = useRef(null);
 
   useEffect(() => {
-    setMounted(true);
+  setMounted(true);
 
+  const syncAuth = () => {
     try {
-      const token = window.localStorage.getItem(AUTH_KEY);
+      const token = readToken();
       setHasToken(!!token);
 
       if (token) {
@@ -53,7 +63,17 @@ export default function TopBar() {
       setHasToken(false);
       setRole("");
     }
-  }, []);
+  };
+
+  syncAuth();
+  window.addEventListener("storage", syncAuth);
+  window.addEventListener("focus", syncAuth);
+
+  return () => {
+    window.removeEventListener("storage", syncAuth);
+    window.removeEventListener("focus", syncAuth);
+  };
+}, []);
 
   useEffect(() => {
     if (!mounted) return;
@@ -71,7 +91,7 @@ export default function TopBar() {
         (blocked) => pathname === blocked || pathname.startsWith(`${blocked}/`)
       )
     ) {
-      router.replace("/");
+      router.replace("/dashboard");
     }
   }, [mounted, pathname, role, router]);
 
@@ -103,16 +123,18 @@ export default function TopBar() {
   }, []);
 
   const logout = () => {
-    try {
-      window.localStorage.removeItem(AUTH_KEY);
-      setHasToken(false);
-      setRole("");
-    } catch {}
-    router.push("/login");
-  };
+  try {
+    ["AUTH_TOKEN_V1", "token", "authToken", "pmtool_token", "duwims_token"].forEach((k) =>
+      window.localStorage.removeItem(k)
+    );
+    setHasToken(false);
+    setRole("");
+  } catch {}
+  router.push("/");
+};
 
   const allTabs = [
-    { key: "dashboard", href: "/", label: t.dashboard || "แดชบอร์ด" },
+    { key: "dashboard", href: "/dashboard", label: t.dashboard || "แดชบอร์ด" },
     { key: "history", href: "/history", label: t.history || "ประวัติ" },
     { key: "heatmap", href: "/heatmap", label: t.heatmap || "🌡 Heat Map" },
     {
@@ -131,14 +153,14 @@ export default function TopBar() {
   const tabs = useMemo(() => {
     if (role === "employee") {
       return allTabs.filter(
-        (tab) => tab.href === "/" || tab.href === "/history"
+        (tab) => tab.href === "/dashboard" || tab.href === "/history"
       );
     }
     return allTabs;
   }, [role, t]);
 
   const isActive = (href) => {
-    if (href === "/") return pathname === "/";
+    if (href === "/dashboard") return pathname === "/dashboard";
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
@@ -185,9 +207,9 @@ export default function TopBar() {
 
         <div className="topbar-auth">
           {!hasToken ? (
-            <Link href="/login" className="auth-btn auth-btn-ghost">
-              {t.login || "เข้าสู่ระบบ"}
-            </Link>
+            <Link href="/" className="auth-btn auth-btn-ghost">
+  {t.login || "เข้าสู่ระบบ"}
+</Link>
           ) : (
             <button
               type="button"

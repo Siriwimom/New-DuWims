@@ -70,6 +70,18 @@ function formatThaiDateLabel(dateStr, lang = "th") {
   });
 }
 
+function formatThaiDateTimeLabel(dateStr, lang = "th") {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleString(lang === "en" ? "en-US" : "th-TH", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
 function buildDateRange(startDate, endDate) {
   const out = [];
   const start = new Date(startDate);
@@ -853,7 +865,7 @@ export default function HistoryPage() {
 
             try {
               const qs = new URLSearchParams();
-              qs.set("limit", "2000");
+              qs.set("limit", "5000");
               if (target.plotId) qs.set("plotId", String(target.plotId));
               if (target.nodeId) qs.set("nodeId", String(target.nodeId));
               if (target.sensorId) qs.set("sensorId", String(target.sensorId));
@@ -887,8 +899,6 @@ export default function HistoryPage() {
   const dateKeys = useMemo(() => buildDateRange(startDate, endDate), [startDate, endDate]);
 
   const maxXAxisLabels = 7;
-  const totalDateKeys = Array.isArray(dateKeys) ? dateKeys.length : 0;
-  const xLabelStep = Math.max(1, Math.ceil(totalDateKeys / maxXAxisLabels));
 
   const filteredReadingRows = useMemo(() => {
     const rows = [];
@@ -917,7 +927,15 @@ export default function HistoryPage() {
         const value = safeDisplayValue(target.sensorKey, rawValue);
         if (value === null) continue;
 
-        const rowKey = `${target.plotId}|${target.nodeId || target.nodeUid}|${target.sensorKey}|${timestamp}|${value}`;
+        const rowKey = [
+          target.plotId,
+          target.nodeId || target.nodeUid,
+          target.sensorId || target.sensorUid || target.rawSensorType,
+          target.sensorKey,
+          timestamp,
+          value,
+        ].join("|");
+
         if (seenRowKeys.has(rowKey)) continue;
         seenRowKeys.add(rowKey);
 
@@ -940,25 +958,28 @@ export default function HistoryPage() {
         });
       }
 
-      const hasHistoryForTarget = rows.some(
-        (r) =>
-          sameText(r.plotId, target.plotId) &&
-          (sameText(r.nodeId, target.nodeId) || sameText(r.nodeUid, target.nodeUid)) &&
-          r.sensorKey === target.sensorKey
-      );
+      const latestTimestamp = target.latestTimestamp || null;
+      const latestDateKey = normalizeDateKey(latestTimestamp);
+      const latestRawValue = pickValueForSensorKey({ latestValue: target.latestValue }, target.sensorKey);
+      const latestValue = safeDisplayValue(target.sensorKey, latestRawValue);
 
-      if (!hasHistoryForTarget) {
-        const fallbackRawValue = pickValueForSensorKey({ latestValue: target.latestValue }, target.sensorKey);
-        const fallbackValue = safeDisplayValue(target.sensorKey, fallbackRawValue);
-        const fallbackTs = target.latestTimestamp || null;
-        const fallbackDateKey = normalizeDateKey(fallbackTs || endDate);
+      if (
+        latestValue !== null &&
+        latestDateKey &&
+        latestDateKey >= startDate &&
+        latestDateKey <= endDate
+      ) {
+        const latestRowKey = [
+          target.plotId,
+          target.nodeId || target.nodeUid,
+          target.sensorId || target.sensorUid || target.rawSensorType,
+          target.sensorKey,
+          latestTimestamp,
+          latestValue,
+        ].join("|");
 
-        if (
-          fallbackValue !== null &&
-          fallbackDateKey &&
-          fallbackDateKey >= startDate &&
-          fallbackDateKey <= endDate
-        ) {
+        if (!seenRowKeys.has(latestRowKey)) {
+          seenRowKeys.add(latestRowKey);
           rows.push({
             plotId: target.plotId,
             plotName: target.plotName,
@@ -970,15 +991,21 @@ export default function HistoryPage() {
             sensorKey: target.sensorKey,
             sensorLabel: target.sensorLabel,
             unit: target.unit,
-            value: fallbackValue,
-            timestamp: fallbackTs || `${fallbackDateKey}T00:00:00.000Z`,
+            value: latestValue,
+            timestamp: latestTimestamp,
             status: "",
-            dateKey: fallbackDateKey,
+            dateKey: latestDateKey,
             source: "latest",
           });
         }
       }
     }
+
+    rows.sort((a, b) => {
+      const ta = new Date(a.timestamp || 0).getTime();
+      const tb = new Date(b.timestamp || 0).getTime();
+      return ta - tb;
+    });
 
     return rows;
   }, [sensorTargets, readingMap, startDate, endDate]);
@@ -987,25 +1014,41 @@ export default function HistoryPage() {
     return sensorOptionsI18n.filter((s) => selectedSensors.includes(s.key));
   }, [selectedSensors, sensorOptionsI18n]);
 
+  const chartTimestamps = useMemo(() => {
+    const uniq = Array.from(
+      new Set(
+        filteredReadingRows
+          .map((row) => row.timestamp)
+          .filter((value) => {
+            const time = new Date(value || "").getTime();
+            return Number.isFinite(time) && time > 0;
+          })
+      )
+    );
+
+    uniq.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+    return uniq;
+  }, [filteredReadingRows]);
+
   const combinedChart = useMemo(() => {
-    if (!selectedSensorOptions.length) return null;
+    if (!selectedSensorOptions.length || !chartTimestamps.length) return null;
 
     const series = [];
 
     for (const sensor of selectedSensorOptions) {
       for (const plot of filteredPlots) {
-        const valuesByDate = new Map(dateKeys.map((d) => [d, []]));
+        const valuesByTimestamp = new Map(chartTimestamps.map((ts) => [ts, []]));
 
         filteredReadingRows
           .filter((row) => row.plotId === plot.id && row.sensorKey === sensor.key)
           .forEach((row) => {
-            const list = valuesByDate.get(row.dateKey) || [];
+            const list = valuesByTimestamp.get(row.timestamp) || [];
             list.push(row.value);
-            valuesByDate.set(row.dateKey, list);
+            valuesByTimestamp.set(row.timestamp, list);
           });
 
-        const avgValues = dateKeys.map((d) => average(valuesByDate.get(d) || []));
-        const normalizedValues = normalizeSeriesValues(avgValues);
+        const rawValues = chartTimestamps.map((ts) => average(valuesByTimestamp.get(ts) || []));
+        const normalizedValues = normalizeSeriesValues(rawValues);
 
         if (normalizedValues.some((v) => Number.isFinite(v))) {
           series.push({
@@ -1015,7 +1058,8 @@ export default function HistoryPage() {
             sensorKey: sensor.key,
             sensorLabel: sensor.label,
             unit: sensor.unit,
-            values: avgValues,
+            timestamps: chartTimestamps,
+            values: rawValues,
             normalizedValues,
           });
         }
@@ -1024,11 +1068,17 @@ export default function HistoryPage() {
 
     return {
       series,
+      timestamps: chartTimestamps,
       min: 0,
       max: 100,
       yLabels: ["100", "75", "50", "25", "0"],
     };
-  }, [selectedSensorOptions, filteredPlots, filteredReadingRows, dateKeys]);
+  }, [selectedSensorOptions, filteredPlots, filteredReadingRows, chartTimestamps]);
+
+  const xLabelStep = Math.max(
+    1,
+    Math.ceil(((Array.isArray(combinedChart?.timestamps) ? combinedChart.timestamps.length : 0) || 1) / maxXAxisLabels)
+  );
 
   const summaryRows = useMemo(() => {
     return visibleNodes.map((node) => {
@@ -1062,7 +1112,7 @@ export default function HistoryPage() {
     [summaryRows]
   );
 
-  const hoverDate = hoverInfo?.dateKey || null;
+  const hoverTime = hoverInfo?.timestamp || null;
 
   const csvRows = useMemo(() => {
     const header = ["plot", "node", "nodeType", "sensor", "unit", "value", "timestamp", "status", "source"];
@@ -1341,8 +1391,8 @@ export default function HistoryPage() {
                     );
                   })}
 
-                  {dateKeys.map((d, index) => {
-                    const stepX = dateKeys.length <= 1 ? 900 : 900 / Math.max(dateKeys.length - 1, 1);
+                  {combinedChart.timestamps.map((d, index) => {
+                    const stepX = combinedChart.timestamps.length <= 1 ? 900 : 900 / Math.max(combinedChart.timestamps.length - 1, 1);
                     const x = index * stepX;
                     return (
                       <line
@@ -1351,8 +1401,8 @@ export default function HistoryPage() {
                         y1="0"
                         x2={x}
                         y2="260"
-                        stroke={hoverDate === d ? "rgba(59,130,246,0.18)" : "rgba(148,163,184,0.10)"}
-                        strokeWidth={hoverDate === d ? "2" : "1"}
+                        stroke={hoverTime === d ? "rgba(59,130,246,0.18)" : "rgba(148,163,184,0.10)"}
+                        strokeWidth={hoverTime === d ? "2" : "1"}
                       />
                     );
                   })}
@@ -1394,20 +1444,20 @@ export default function HistoryPage() {
                     );
                   })}
 
-                  {dateKeys.map((d, index) => {
-                    const stepX = dateKeys.length <= 1 ? 900 : 900 / Math.max(dateKeys.length - 1, 1);
+                  {combinedChart.timestamps.map((d, index) => {
+                    const stepX = combinedChart.timestamps.length <= 1 ? 900 : 900 / Math.max(combinedChart.timestamps.length - 1, 1);
                     const x = index * stepX;
-                    const rowsAtDate = filteredReadingRows.filter((row) => row.dateKey === d);
+                    const rowsAtTime = filteredReadingRows.filter((row) => row.timestamp === d);
                     return (
                       <rect
                         key={`hover-${d}`}
                         x={Math.max(0, x - stepX / 2)}
                         y="0"
-                        width={dateKeys.length <= 1 ? 900 : Math.max(20, stepX)}
+                        width={combinedChart.timestamps.length <= 1 ? 900 : Math.max(20, stepX)}
                         height="260"
                         fill="transparent"
-                        onMouseEnter={() => setHoverInfo({ dateKey: d, x, rows: rowsAtDate })}
-                        onFocus={() => setHoverInfo({ dateKey: d, x, rows: rowsAtDate })}
+                        onMouseEnter={() => setHoverInfo({ timestamp: d, x, rows: rowsAtTime })}
+                        onFocus={() => setHoverInfo({ timestamp: d, x, rows: rowsAtTime })}
                       />
                     );
                   })}
@@ -1436,14 +1486,14 @@ export default function HistoryPage() {
                     className="chart-tooltip"
                     style={{ left: `clamp(64px, calc(${(hoverInfo.x / 900) * 100}% + 24px), calc(100% - 280px))` }}
                   >
-                    <div className="chart-tooltip-date">{formatThaiDateLabel(hoverInfo.dateKey, lang)}</div>
+                    <div className="chart-tooltip-date">{formatThaiDateTimeLabel(hoverInfo.timestamp, lang)}</div>
                     <div className="chart-tooltip-list">
                       {combinedChart.series.map((series, i) => {
-                        const dateIndex = dateKeys.indexOf(hoverInfo.dateKey);
+                        const dateIndex = combinedChart.timestamps.indexOf(hoverInfo.timestamp);
                         const rawValue = dateIndex >= 0 ? series.values[dateIndex] : null;
                         if (!Number.isFinite(rawValue)) return null;
                         return (
-                          <div key={`${series.key}-${hoverInfo.dateKey}`} className="chart-tooltip-row">
+                          <div key={`${series.key}-${hoverInfo.timestamp}`} className="chart-tooltip-row">
                             <span className="chart-tooltip-dot" style={{ background: colorOfIndex(i) }} />
                             <span className="chart-tooltip-name">
                               {series.sensorLabel} • {series.plotName}
@@ -1462,13 +1512,13 @@ export default function HistoryPage() {
               <div
                 className="chart-x"
                 style={{
-                  gridTemplateColumns: `repeat(${Math.max(dateKeys.length, 1)}, minmax(0, 1fr))`,
+                  gridTemplateColumns: `repeat(${Math.max(combinedChart.timestamps.length, 1)}, minmax(0, 1fr))`,
                 }}
               >
-                {dateKeys.map((d, index) => (
-                  <div key={d} className={hoverDate === d ? "active" : ""}>
-                    {index % xLabelStep === 0 || index === dateKeys.length - 1
-                      ? formatThaiDateLabel(d, lang)
+                {combinedChart.timestamps.map((d, index) => (
+                  <div key={d} className={hoverTime === d ? "active" : ""}>
+                    {index % xLabelStep === 0 || index === combinedChart.timestamps.length - 1
+                      ? formatThaiDateTimeLabel(d, lang)
                       : ""}
                   </div>
                 ))}
