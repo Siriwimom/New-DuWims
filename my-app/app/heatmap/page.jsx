@@ -252,16 +252,18 @@ const SENSOR_META = {
 };
 
 const SENSOR_KEYS = Object.keys(SENSOR_META);
+const AIR_NODE_SENSORS = ["temp", "humidity", "wind_speed", "light", "rain"];
+const SOIL_NODE_SENSORS = ["soil_moisture", "n", "p", "k", "water_level"];
 const GLOBAL_SENSORS = ["temp", "humidity", "wind_speed", "rain"];
 
 const HEAT_COLORS = [
-  "#6e40aa",
-  "#3b82f6",
-  "#22c55e",
+  "#1e3a8a",
+  "#2563eb",
+  "#16a34a",
   "#fde047",
-  "#fb923c",
-  "#ef4444",
-  "#b91c1c",
+  "#f97316",
+  "#dc2626",
+  "#7f1d1d",
 ];
 
 const THAILAND_BOUNDS = {
@@ -274,6 +276,28 @@ const THAILAND_BOUNDS = {
 const GLOBAL_GRID_STEP = 0.35;
 const GLOBAL_BATCH_SIZE = 120;
 const GLOBAL_MAX_PARALLEL_PRELOAD = 1;
+
+
+function getNodeTypeFromNode(node = {}) {
+  const sensorNames = (Array.isArray(node?.sensors) ? node.sensors : [])
+    .map((s) => normalizeSensorName(s?.name));
+
+  const hasSoil = sensorNames.some((name) => SOIL_NODE_SENSORS.includes(name));
+  const hasAir = sensorNames.some((name) => AIR_NODE_SENSORS.includes(name));
+
+  if (hasSoil && !hasAir) return "soil";
+  if (hasAir && !hasSoil) return "air";
+
+  const raw = `${node?.nodeName || ""} ${node?.uid || ""}`.toLowerCase();
+  if (raw.includes("soil")) return "soil";
+  if (raw.includes("air")) return "air";
+
+  return hasSoil ? "soil" : "air";
+}
+
+function getSensorOptionsByNodeType(nodeType) {
+  return nodeType === "air" ? AIR_NODE_SENSORS : SOIL_NODE_SENSORS;
+}
 
 function toNum(v) {
   const n = Number(v);
@@ -590,8 +614,8 @@ function getLegendStops(sensorKey) {
   });
 }
 
-const FRAME_STEP_HOURS = 1;
-const MAX_FRAMES = 24;
+const FRAME_STEP_MINUTES = 15;
+const MAX_FRAMES = 96 * 14;
 const BANGKOK_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 function parseBangkokDate(dateText, endOfDay = false) {
@@ -606,10 +630,12 @@ function alignBangkokFrameStart(dateOrTs) {
 
   const bangkokTs = d.getTime() + BANGKOK_UTC_OFFSET_MS;
   const bangkokDate = new Date(bangkokTs);
-  const hour = bangkokDate.getUTCHours();
-  const alignedHour = Math.floor(hour / FRAME_STEP_HOURS) * FRAME_STEP_HOURS;
 
-  bangkokDate.setUTCHours(alignedHour, 0, 0, 0);
+  const minutes = bangkokDate.getUTCMinutes();
+  const alignedMinutes = Math.floor(minutes / FRAME_STEP_MINUTES) * FRAME_STEP_MINUTES;
+
+  bangkokDate.setUTCSeconds(0, 0);
+  bangkokDate.setUTCMinutes(alignedMinutes);
   return bangkokDate.getTime() - BANGKOK_UTC_OFFSET_MS;
 }
 
@@ -621,24 +647,21 @@ function buildFrames(startDate, endDate) {
     return [alignBangkokFrameStart(Date.now())];
   }
 
-  const stepMs = FRAME_STEP_HOURS * 60 * 60 * 1000;
+  const stepMs = FRAME_STEP_MINUTES * 60 * 1000;
   const frames = [];
 
   let cursor = alignBangkokFrameStart(start);
   while (cursor <= end.getTime()) {
     frames.push(cursor);
     cursor += stepMs;
+    if (frames.length >= MAX_FRAMES) break;
   }
 
   if (!frames.length) {
     frames.push(alignBangkokFrameStart(start));
   }
 
-  while (frames.length < MAX_FRAMES) {
-    frames.push(frames[frames.length - 1] + stepMs);
-  }
-
-  return frames.slice(0, MAX_FRAMES);
+  return frames;
 }
 
 function getReadingTs(reading) {
@@ -912,6 +935,66 @@ function getRectPolygon(minLat, maxLat, minLng, maxLng) {
   ];
 }
 
+
+function getPlotFillStats(plot, points, sensorKey) {
+  const insidePoints = (Array.isArray(points) ? points : []).filter((p) => {
+    if (p?.value == null || Number.isNaN(p.value)) return false;
+    if (p?.lat == null || p?.lng == null) return false;
+    return pointInPolygon({ lat: p.lat, lng: p.lng }, plot.coords || []);
+  });
+
+  if (!insidePoints.length) {
+    return {
+      hasData: false,
+      value: null,
+      ratio: null,
+      color: "transparent",
+      opacity: 0,
+      count: 0,
+      min: null,
+      max: null,
+      avg: null,
+    };
+  }
+
+  const values = insidePoints
+    .map((p) => Number(p.value))
+    .filter((v) => !Number.isNaN(v));
+
+  if (!values.length) {
+    return {
+      hasData: false,
+      value: null,
+      ratio: null,
+      color: "transparent",
+      opacity: 0,
+      count: 0,
+      min: null,
+      max: null,
+      avg: null,
+    };
+  }
+
+  const avg = values.reduce((a, b) => a + b, 0) / values.length;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const ratio = getSensorRatio(sensorKey, avg);
+  const color = getHeatColorByRatio(ratio);
+  const opacity = clamp(0.45 + ratio * 0.45, 0.45, 0.9);
+
+  return {
+    hasData: true,
+    value: avg,
+    ratio,
+    color,
+    opacity,
+    count: insidePoints.length,
+    min,
+    max,
+    avg,
+  };
+}
+
 function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
   if (!plots.length || !points.length) return [];
 
@@ -967,7 +1050,7 @@ function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
 
       const value = weighted / totalWeight;
       const ratio = getSensorRatio(sensorKey, value);
-      const opacityBase = 0.18 + (1 - clamp(nearestDistance / 0.03, 0, 1)) * 0.58;
+      const opacityBase = 0.34 + (1 - clamp(nearestDistance / 0.028, 0, 1)) * 0.62;
 
       const clippedPolygon = clipPolygonWithConvexPolygon(
         getRectPolygon(minLat, maxLat, minLng, maxLng),
@@ -981,7 +1064,7 @@ function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
         value,
         ratio,
         color: getHeatColorByRatio(ratio),
-        opacity: clamp(opacityBase, 0.16, 0.82),
+        opacity: clamp(opacityBase, 0.30, 0.96),
       });
     }
   }
@@ -1321,6 +1404,7 @@ export default function Page() {
   const [globalError, setGlobalError] = useState("");
 
   const [selectedPlotId, setSelectedPlotId] = useState("all");
+  const [selectedNodeType, setSelectedNodeType] = useState("soil");
   const [selectedSensor, setSelectedSensor] = useState("soil_moisture");
 
   const [startDate, setStartDate] = useState(() => formatDateInput(new Date()));
@@ -1354,6 +1438,14 @@ export default function Page() {
     () => visiblePlots.map((plot) => `${plot.id}:${(plot.coords || []).length}:${(plot.nodes || []).length}`).join("|"),
     [visiblePlots]
   );
+
+  useEffect(() => {
+    const allowed = getSensorOptionsByNodeType(selectedNodeType);
+    if (!allowed.includes(selectedSensor)) {
+      setSelectedSensor(allowed[0]);
+    }
+  }, [selectedNodeType, selectedSensor]);
+
 
 
 
@@ -1531,119 +1623,112 @@ useEffect(() => {
 
   const allNodes = useMemo(() => {
     return visiblePlots.flatMap((plot) =>
-      plot.nodes.map((node) => ({
-        ...node,
-        plotId: plot.id,
-        plotName: plot.name,
-      }))
-    );
-  }, [visiblePlots]);
-
-  const activeSensorPoints = useMemo(() => {
-  return visiblePlots.flatMap((plot) =>
-    plot.nodes.flatMap((node) => {
-      const sensor = (node.sensors || []).find((s) => s.name === selectedSensor);
-      if (!sensor) return [];
-
-      const sensorHistoryAll = Array.isArray(historicalReadingsBySensorId[sensor._id])
-        ? historicalReadingsBySensorId[sensor._id].filter((r) => {
-            return (
-              toText(r?.plotId) === toText(plot.id) &&
-              toText(r?.nodeId) === toText(node._id) &&
-              toText(r?.sensorId) === toText(sensor._id)
-            );
-          })
-        : [];
-
-      const sensorHistoryInDateRange = Array.isArray(readingsBySensorId[sensor._id])
-        ? readingsBySensorId[sensor._id].filter((r) => {
-            return (
-              toText(r?.plotId) === toText(plot.id) &&
-              toText(r?.nodeId) === toText(node._id) &&
-              toText(r?.sensorId) === toText(sensor._id)
-            );
-          })
-        : [];
-
-      return [
-        {
-          id: `${plot.id}-${node._id}-${sensor._id}`,
+      plot.nodes
+        .filter((node) => getNodeTypeFromNode(node) === selectedNodeType)
+        .map((node) => ({
+          ...node,
           plotId: plot.id,
           plotName: plot.name,
-          nodeId: node._id,
-          nodeName: node.nodeName,
-          nodeUid: node.uid,
-          lat: node.lat,
-          lng: node.lng,
-          sensorId: sensor._id,
-          sensorKey: sensor.name,
-          sensorDisplayName: sensor.rawName || sensor.name,
-          readings: sensorHistoryInDateRange,
-          allSensorHistory: sensorHistoryAll,
-          latestSensorValue:
-            sensor.latestValue != null
-              ? {
-                  value: toNum(sensor.latestValue),
-                  timestamp: sensor.latestTimestamp || null,
-                  plotId: plot.id,
-                  nodeId: node._id,
-                  sensorId: sensor._id,
-                }
-              : null,
-        },
-      ];
-    })
-  );
-}, [visiblePlots, selectedSensor, readingsBySensorId, historicalReadingsBySensorId]);
+        }))
+    );
+  }, [visiblePlots, selectedNodeType]);
+
+  const activeSensorPoints = useMemo(() => {
+    return visiblePlots.flatMap((plot) =>
+      plot.nodes.flatMap((node) => {
+        const nodeType = getNodeTypeFromNode(node);
+        if (nodeType !== selectedNodeType) return [];
+
+        const sensor = (node.sensors || []).find((s) => s.name === selectedSensor);
+        if (!sensor) return [];
+
+        const sensorHistoryAll = Array.isArray(historicalReadingsBySensorId[sensor._id])
+          ? historicalReadingsBySensorId[sensor._id].filter((r) => {
+              return (
+                toText(r?.plotId) === toText(plot.id) &&
+                toText(r?.nodeId) === toText(node._id) &&
+                toText(r?.sensorId) === toText(sensor._id)
+              );
+            })
+          : [];
+
+        const sensorHistoryInDateRange = Array.isArray(readingsBySensorId[sensor._id])
+          ? readingsBySensorId[sensor._id].filter((r) => {
+              return (
+                toText(r?.plotId) === toText(plot.id) &&
+                toText(r?.nodeId) === toText(node._id) &&
+                toText(r?.sensorId) === toText(sensor._id)
+              );
+            })
+          : [];
+
+        return [
+          {
+            id: `${plot.id}-${node._id}-${sensor._id}`,
+            plotId: plot.id,
+            plotName: plot.name,
+            nodeId: node._id,
+            nodeName: node.nodeName,
+            nodeUid: node.uid,
+            nodeType,
+            lat: node.lat,
+            lng: node.lng,
+            sensorId: sensor._id,
+            sensorKey: sensor.name,
+            sensorDisplayName: sensor.rawName || sensor.name,
+            readings: sensorHistoryInDateRange,
+            allSensorHistory: sensorHistoryAll,
+            latestSensorValue:
+              sensor.latestValue != null
+                ? {
+                    value: toNum(sensor.latestValue),
+                    timestamp: sensor.latestTimestamp || null,
+                    plotId: plot.id,
+                    nodeId: node._id,
+                    sensorId: sensor._id,
+                  }
+                : null,
+          },
+        ];
+      })
+    );
+  }, [visiblePlots, selectedNodeType, selectedSensor, readingsBySensorId, historicalReadingsBySensorId]);
 
   const renderedPoints = useMemo(() => {
-  const currentTs = frameTimestamps[frameIndex] || alignBangkokFrameStart(Date.now());
-  const nextFrameTs =
-    frameIndex < frameTimestamps.length - 1
-      ? frameTimestamps[frameIndex + 1]
-      : currentTs +
-        (frameTimestamps.length > 1
-          ? Math.max(1, frameTimestamps[1] - frameTimestamps[0])
-          : FRAME_STEP_HOURS * 60 * 60 * 1000);
+    const currentTs = frameTimestamps[frameIndex] || alignBangkokFrameStart(Date.now());
+    const nextFrameTs =
+      frameIndex < frameTimestamps.length - 1
+        ? frameTimestamps[frameIndex + 1]
+        : currentTs +
+          (frameTimestamps.length > 1
+            ? Math.max(1, frameTimestamps[1] - frameTimestamps[0])
+            : FRAME_STEP_MINUTES * 60 * 1000);
 
-  return activeSensorPoints
-    .map((point) => {
-      const smoothed = getSmoothedReadingForFrame(
-        point,
-        currentTs,
-        nextFrameTs
-      );
+    return activeSensorPoints
+      .map((point) => {
+        const smoothed = getSmoothedReadingForFrame(point, currentTs, nextFrameTs);
 
-      const value = smoothed?.value ?? null;
-      const ts = smoothed?.ts ?? null;
+        let value = smoothed?.value ?? null;
+        let ts = smoothed?.ts ?? null;
+        let smoothMode = smoothed?.mode || "none";
 
-      console.log("📍 POINT PICKED:", {
-        plotId: point.plotId,
-        nodeId: point.nodeId,
-        sensorId: point.sensorId,
-        frameStart: new Date(currentTs).toISOString(),
-        frameEnd: new Date(nextFrameTs).toISOString(),
-        mode: smoothed?.mode,
-        readingInFrame: smoothed?.readingInFrame || null,
-        beforeReading: smoothed?.beforeReading || null,
-        afterReading: smoothed?.afterReading || null,
-        latestHistory: smoothed?.latestHistory || null,
-        chosen: smoothed?.chosen || null,
-        value,
-        ts,
-      });
+        if (value == null && point?.latestSensorValue?.value != null) {
+          value = toNum(point.latestSensorValue.value);
+          ts = point.latestSensorValue.timestamp || null;
+          smoothMode = "latest";
+        }
 
-      return {
-        ...point,
-        value,
-        ts,
-        smoothMode: smoothed?.mode || "none",
-        status: getSensorStatus(selectedSensor, value),
-        color: getHeatColor(selectedSensor, value),
-      };
-    })
-    .filter((point) => point.value != null && !Number.isNaN(point.value));
-}, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
+        return {
+          ...point,
+          value,
+          ts,
+          smoothMode,
+          status: getSensorStatus(selectedSensor, value),
+          color: getHeatColor(selectedSensor, value),
+        };
+      })
+      .filter((point) => point.value != null && !Number.isNaN(point.value));
+  }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
 
   
 const globalDisplayPoints = useMemo(() => {
@@ -1652,10 +1737,16 @@ const globalDisplayPoints = useMemo(() => {
 
 
   
-const heatCells = useMemo(() => {
-  const density = selectedPlotId === "all" ? 48 : 60;
-  return buildLocalHeatCells(visiblePlots, renderedPoints, selectedSensor, density);
-}, [selectedSensor, selectedPlotId, visiblePlots, renderedPoints]);
+const plotHeatFills = useMemo(() => {
+  const map = {};
+
+  for (const plot of visiblePlots) {
+    if (!plot?.id || !Array.isArray(plot?.coords) || plot.coords.length < 3) continue;
+    map[plot.id] = getPlotFillStats(plot, renderedPoints, selectedSensor);
+  }
+
+  return map;
+}, [visiblePlots, renderedPoints, selectedSensor]);
 
 
   
@@ -1741,108 +1832,125 @@ const stats = useMemo(() => {
     const nextFrameTs =
       frameIndex < frameTimestamps.length - 1
         ? frameTimestamps[frameIndex + 1]
-        : currentTs + FRAME_STEP_HOURS * 60 * 60 * 1000;
+        : currentTs + FRAME_STEP_MINUTES * 60 * 1000;
 
-    return (SENSOR_KEYS || []).map((sensorKey) => {
-      const meta = SENSOR_META[sensorKey] || {};
+    const allowedKeys = getSensorOptionsByNodeType(selectedNodeType);
 
-      const pointsForSensor = visiblePlots.flatMap((plot) =>
-        plot.nodes.flatMap((node) => {
-          const sensor = (node.sensors || []).find((s) => s.name === sensorKey);
-          if (!sensor) return [];
+    return allowedKeys
+      .map((sensorKey) => {
+        const meta = SENSOR_META[sensorKey] || {};
 
-          const sensorHistoryAll = Array.isArray(historicalReadingsBySensorId[sensor._id])
-            ? historicalReadingsBySensorId[sensor._id].filter((r) => {
-                return (
-                  toText(r?.plotId) === toText(plot.id) &&
-                  toText(r?.nodeId) === toText(node._id) &&
-                  toText(r?.sensorId) === toText(sensor._id)
-                );
-              })
-            : [];
+        const pointsForSensor = visiblePlots.flatMap((plot) =>
+          plot.nodes.flatMap((node) => {
+            const nodeType = getNodeTypeFromNode(node);
+            if (nodeType !== selectedNodeType) return [];
 
-          const sensorHistoryInDateRange = Array.isArray(readingsBySensorId[sensor._id])
-            ? readingsBySensorId[sensor._id].filter((r) => {
-                return (
-                  toText(r?.plotId) === toText(plot.id) &&
-                  toText(r?.nodeId) === toText(node._id) &&
-                  toText(r?.sensorId) === toText(sensor._id)
-                );
-              })
-            : [];
+            const sensor = (node.sensors || []).find((s) => s.name === sensorKey);
+            if (!sensor) return [];
 
-          return [
-            {
-              id: `${plot.id}-${node._id}-${sensor._id}`,
-              plotId: plot.id,
-              plotName: plot.name,
-              nodeId: node._id,
-              nodeName: node.nodeName,
-              nodeUid: node.uid,
-              lat: node.lat,
-              lng: node.lng,
-              sensorId: sensor._id,
-              sensorKey: sensor.name,
-              sensorDisplayName: sensor.rawName || sensor.name,
-              readings: sensorHistoryInDateRange,
-              allSensorHistory: sensorHistoryAll,
-              latestSensorValue:
-                sensor.latestValue != null
-                  ? {
-                      value: toNum(sensor.latestValue),
-                      timestamp: sensor.latestTimestamp || null,
-                      plotId: plot.id,
-                      nodeId: node._id,
-                      sensorId: sensor._id,
-                    }
-                  : null,
-            },
-          ];
-        })
-      );
+            const sensorHistoryInDateRange = Array.isArray(readingsBySensorId[sensor._id])
+              ? readingsBySensorId[sensor._id].filter((r) => {
+                  return (
+                    toText(r?.plotId) === toText(plot.id) &&
+                    toText(r?.nodeId) === toText(node._id) &&
+                    toText(r?.sensorId) === toText(sensor._id)
+                  );
+                })
+              : [];
 
-      const candidates = pointsForSensor
-        .map((point) => {
-          const smoothed = getSmoothedReadingForFrame(point, currentTs, nextFrameTs);
-          const value = smoothed?.value ?? null;
-          const ts = smoothed?.ts ?? null;
-          const sortTs = new Date(ts || 0).getTime();
+            return [
+              {
+                id: `${plot.id}-${node._id}-${sensor._id}`,
+                plotId: plot.id,
+                plotName: plot.name,
+                nodeId: node._id,
+                nodeName: node.nodeName,
+                nodeUid: node.uid,
+                nodeType,
+                lat: node.lat,
+                lng: node.lng,
+                sensorId: sensor._id,
+                sensorKey: sensor.name,
+                sensorDisplayName: sensor.rawName || sensor.name,
+                readings: sensorHistoryInDateRange,
+                latestSensorValue:
+                  sensor.latestValue != null
+                    ? {
+                        value: toNum(sensor.latestValue),
+                        timestamp: sensor.latestTimestamp || null,
+                      }
+                    : null,
+              },
+            ];
+          })
+        );
 
-          return {
-            ...point,
-            value,
-            ts,
-            sortTs: Number.isFinite(sortTs) ? sortTs : 0,
-          };
-        })
-        .filter((item) => item.value != null && !Number.isNaN(item.value))
-        .sort((a, b) => b.sortTs - a.sortTs);
+        const candidates = pointsForSensor
+          .map((point) => {
+            const smoothed = getSmoothedReadingForFrame(point, currentTs, nextFrameTs);
+            const value = smoothed?.value ?? point?.latestSensorValue?.value ?? null;
+            const ts = smoothed?.ts ?? point?.latestSensorValue?.timestamp ?? null;
+            const sortTs = new Date(ts || 0).getTime();
 
-      const bestPoint = candidates[0] || null;
-      const bestValue = bestPoint?.value ?? null;
-      const ratio = bestValue != null ? Math.round(getSensorRatio(sensorKey, bestValue) * 100) : null;
+            return value != null && !Number.isNaN(value)
+              ? {
+                  ...point,
+                  value,
+                  ts,
+                  sortTs: Number.isFinite(sortTs) ? sortTs : 0,
+                }
+              : null;
+          })
+          .filter(Boolean)
+          .sort((a, b) => b.sortTs - a.sortTs);
 
-      return {
-        key: sensorKey,
-        label: getLocalizedSensorLabel(sensorKey, uiLang),
-        scoreText: ratio != null ? `${ratio}/100` : tt("noData"),
-        rawText:
-          bestValue != null
-            ? `${Number(bestValue).toLocaleString()} ${meta.unit || ""}`.trim()
-            : "-",
-        color: bestValue != null ? getHeatColor(sensorKey, bestValue) : "#d1d5db",
-        active: selectedSensor === sensorKey,
-      };
-    });
+        if (!candidates.length) return null;
+
+        const values = candidates.map((item) => Number(item.value)).filter((v) => Number.isFinite(v));
+        if (!values.length) return null;
+
+        const avgValue = values.reduce((sum, v) => sum + v, 0) / values.length;
+        const minValue = Math.min(...values);
+        const maxValue = Math.max(...values);
+        const ratio = Math.round(getSensorRatio(sensorKey, avgValue) * 100);
+        const nodeCount = new Set(candidates.map((item) => item.nodeId)).size;
+        const isAllPlots = selectedPlotId === "all";
+
+        return {
+          key: sensorKey,
+          label: getLocalizedSensorLabel(sensorKey, uiLang),
+          scoreText: `${ratio}/100`,
+          rawText:
+            minValue === maxValue
+              ? `${formatLegendValue(avgValue)} ${meta.unit || ""}`.trim()
+              : `${formatLegendValue(minValue)}–${formatLegendValue(maxValue)} ${meta.unit || ""}`.trim(),
+          avgText: `${formatLegendValue(avgValue)} ${meta.unit || ""}`.trim(),
+          color: getHeatColor(sensorKey, avgValue),
+          active: selectedSensor === sensorKey,
+          nodeCount,
+          hideValues: isAllPlots,
+        };
+      })
+      .filter(Boolean);
   }, [
     frameIndex,
     frameTimestamps,
-    historicalReadingsBySensorId,
     readingsBySensorId,
+    selectedNodeType,
+    selectedPlotId,
     selectedSensor,
     uiLang,
     visiblePlots,
   ]);
+
+
+  useEffect(() => {
+    if (!legendSensorItems.length) return;
+    const exists = legendSensorItems.some((item) => item.key === selectedSensor);
+    if (!exists) {
+      setSelectedSensor(legendSensorItems[0].key);
+    }
+  }, [legendSensorItems, selectedSensor]);
 
   return (
     <DuwimsStaticPage current="heatmap">
@@ -1926,31 +2034,44 @@ const stats = useMemo(() => {
                     lockToWorld={false}
                   />
 
-                  {visiblePlots.filter((plot) => plot.coords.length >= 3).map((plot) => (
-                    <Polygon
-                      key={`plot-${plot.id}`}
-                      positions={plot.coords.map((c) => [c.lat, c.lng])}
-                      pathOptions={{
-                        color: plot.id === selectedPlotId ? "#166534" : "#14532d",
-                        weight: plot.id === selectedPlotId ? 4 : 3,
-                        fill: false,
-                      }}
-                    >
-                      <Tooltip sticky>{plot.name}</Tooltip>
-                    </Polygon>
-                  ))}
+                  {visiblePlots.filter((plot) => plot.coords.length >= 3).map((plot) => {
+                    const fillStat = plotHeatFills[plot.id] || null;
+                    const hasFill = !!fillStat?.hasData;
 
-                  {heatCells.map((cell) => (
-                    <Polygon
-                      key={`heat-${cell.id}-${frameIndex}`}
-                      positions={cell.positions}
-                      pathOptions={{
-                        stroke: false,
-                        fillColor: cell.color,
-                        fillOpacity: cell.opacity,
-                      }}
-                    />
-                  ))}
+                    return (
+                      <Polygon
+                        key={`plot-${plot.id}-${frameIndex}`}
+                        positions={plot.coords.map((c) => [c.lat, c.lng])}
+                        pathOptions={{
+                          color: plot.id === selectedPlotId ? "#14532d" : "#166534",
+                          weight: plot.id === selectedPlotId ? 4 : 3,
+                          fill: true,
+                          fillColor: hasFill ? fillStat.color : "#d1d5db",
+                          fillOpacity: hasFill ? fillStat.opacity : 0.08,
+                        }}
+                      >
+                        <Tooltip sticky>
+                          <div style={{ minWidth: 180 }}>
+                            <div style={{ fontWeight: 800 }}>{plot.name}</div>
+                            {hasFill ? (
+                              <>
+                                <div>
+                                  {getLocalizedSensorLabel(selectedSensor, uiLang)} เฉลี่ย:{" "}
+                                  <b>{formatLegendValue(fillStat.avg)}</b> {sensorMeta.unit || ""}
+                                </div>
+                                <div>จำนวน node: {fillStat.count}</div>
+                                <div>
+                                  ช่วงค่า: {formatLegendValue(fillStat.min)} - {formatLegendValue(fillStat.max)} {sensorMeta.unit || ""}
+                                </div>
+                              </>
+                            ) : (
+                              <div>ไม่มีข้อมูลในช่วงเวลาที่เลือก</div>
+                            )}
+                          </div>
+                        </Tooltip>
+                      </Polygon>
+                    );
+                  })}
 
                   {allNodes.map((node) => {
                     const active = renderedPoints.find((point) => point.nodeId === node._id);
@@ -1983,6 +2104,7 @@ const stats = useMemo(() => {
                                     <b>{active.value}</b> {sensorMeta.unit}
                                   </div>
                                   <div>{tt("time")}: {formatDateTimeThai(active.ts)}</div>
+                                  <div>ประเภท Node: {active.nodeType === "air" ? "Air Node" : "Soil Node"}</div>
                                   <div>{tt("status")}: {getLocalizedStatusLabel(active.status.type, uiLang)}</div>
                                 </>
                               ) : (
@@ -2086,22 +2208,42 @@ const stats = useMemo(() => {
           
 <div className="side-panel">
   <div className="info-card legend-sensor-card">
-    <div className="legend-main-title">
-      Legend ({getLocalizedSensorLabel(selectedSensor, uiLang)})
+    <div className="legend-header-block">
+      <div className="legend-main-title">
+        Legend ({getLocalizedSensorLabel(selectedSensor, uiLang)})
+      </div>
+
+      <div className="legend-node-type-wrap">
+        <div className="top-label legend-top-label">ประเภท Node</div>
+        <select
+          className="plot-select legend-node-type-select"
+          value={selectedNodeType}
+          onChange={(e) => {
+            setPlaying(false);
+            setFrameIndex(frameTimestamps.length ? frameTimestamps.length - 1 : 0);
+            setSelectedNodeType(e.target.value);
+          }}
+        >
+          <option value="soil">Soil Node</option>
+          <option value="air">Air Node</option>
+        </select>
+      </div>
     </div>
 
     <div className="legend-gradient-wrap">
       <div className="legend-gradient-bar" />
-      <div className="legend-labels legend-labels-strong">
+      <div className="legend-labels legend-labels-strong legend-labels-wide">
         <span>น้อย</span>
         <span>มาก</span>
       </div>
     </div>
 
-    <div className="legend-sample-title">จุดข้อมูลตัวอย่าง</div>
+    <div className="legend-sample-title">
+      {selectedPlotId === "all" ? "รายการเซนเซอร์ที่มีในแปลง" : "จุดข้อมูลตัวอย่าง"}
+    </div>
 
     <div className="legend-sensor-list">
-      {legendSensorItems.map((item) => (
+      {legendSensorItems.length ? legendSensorItems.map((item) => (
         <button
           key={item.key}
           type="button"
@@ -2117,12 +2259,26 @@ const stats = useMemo(() => {
             style={{ background: item.color }}
           />
           <div className="legend-sensor-text">
-            <div className="legend-sensor-name">{item.label}</div>
-            <div className="legend-sensor-value">ความเข้ม: {item.scoreText}</div>
-            <div className="legend-sensor-raw">{item.rawText}</div>
+            <div className="legend-sensor-row">
+              <div className="legend-sensor-name">{item.label}</div>
+              {item.nodeCount > 1 ? (
+                <div className="legend-node-badge">{item.nodeCount} nodes</div>
+              ) : (
+                <div className="legend-node-badge">1 node</div>
+              )}
+            </div>
+            {!item.hideValues && (
+              <>
+                <div className="legend-sensor-value">ความเข้ม: {item.scoreText}</div>
+                <div className="legend-sensor-raw">{item.rawText}</div>
+                <div className="legend-sensor-avg">เฉลี่ย {item.avgText}</div>
+              </>
+            )}
           </div>
         </button>
-      ))}
+      )) : (
+        <div className="empty-text">ไม่มีเซนเซอร์ตามประเภท node และแปลงที่เลือก</div>
+      )}
     </div>
   </div>
 </div>
@@ -2212,7 +2368,7 @@ const stats = useMemo(() => {
             background: rgba(255, 255, 255, 0.96);
             border: 1px solid #d1d5db;
             border-radius: 12px;
-            padding: 10px 12px;
+            padding: 12px 14px;
             font-size: 14px;
             font-weight: 700;
             color: #0f172a;
@@ -2323,11 +2479,11 @@ const stats = useMemo(() => {
   font-size: 18px;
   font-weight: 800;
   color: #111827;
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 
 .legend-gradient-wrap {
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 
 .legend-gradient-bar {
@@ -2361,21 +2517,69 @@ const stats = useMemo(() => {
 
 .legend-sensor-list {
   display: grid;
-  gap: 8px;
+  gap: 12px;
 }
 
 .legend-sensor-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   text-align: left;
   background: #ffffff;
   border: 1px solid #d9ebe5;
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   cursor: pointer;
   transition: 0.18s ease;
+}
+
+
+.legend-header-block {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.legend-node-type-wrap {
+  display: grid;
+  gap: 10px;
+}
+
+.legend-top-label {
+  margin-bottom: 0;
+}
+
+.legend-node-type-select {
+  height: 46px;
+}
+
+.legend-labels-wide {
+  margin-top: 12px;
+}
+
+.legend-sensor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.legend-node-badge {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 800;
+  color: #166534;
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+
+.legend-sensor-avg {
+  font-size: 11px;
+  color: #065f46;
+  margin-top: 3px;
 }
 
 .legend-sensor-item:hover {
@@ -2524,7 +2728,7 @@ const stats = useMemo(() => {
 
           .status-chip {
             border-radius: 12px;
-            padding: 10px 12px;
+            padding: 12px 14px;
             font-size: 14px;
             font-weight: 800;
           }

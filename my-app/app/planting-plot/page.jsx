@@ -297,18 +297,21 @@ export default function Page() {
     return normalizeCoords(selectedPlot?.polygon || []);
   }, [isCreateMode, isEditMode, draftPolygon, selectedPlot]);
 
+  const plotNameTrimmed = draftPlotName.trim();
+  const showPlotNameError = isEditable && !plotNameTrimmed;
+
   useEffect(() => {
     if (!mounted) return;
     loadAll();
   }, [mounted]);
 
   useEffect(() => {
-    if (!selectedPlot || isCreateMode || isEditMode) return;
+    if (!selectedPlot || !selectedPlotId || isCreateMode || isEditMode) return;
 
     setDraftPlotName(safeText(selectedPlot.plotName || "", ""));
     setDraftCaretaker(safeText(selectedPlot.caretaker || "", ""));
     setDraftPolygon(normalizeCoords(selectedPlot.polygon || []));
-  }, [selectedPlot, isCreateMode, isEditMode]);
+  }, [selectedPlot, selectedPlotId, isCreateMode, isEditMode]);
 
   async function loadEmployees() {
     try {
@@ -324,10 +327,8 @@ export default function Page() {
     const res = await apiFetch("/api/plots");
     const items = (res?.items || []).map(normalizePlot);
     setPlots(items);
-
-    const firstId = items?.[0]?.id || "";
-    setSelectedPlotId((prev) => prev || firstId);
-    return firstId || "";
+    setSelectedPlotId("");
+    return "";
   }
 
   async function loadAll() {
@@ -396,16 +397,10 @@ export default function Page() {
 
   function validateBeforeSave() {
     const plotName = draftPlotName.trim();
-    const caretaker = draftCaretaker.trim();
     const coords = normalizeCoords(draftPolygon);
 
     if (!plotName) {
-      setError(t.plotNameRequired);
-      return false;
-    }
-
-    if (!caretaker) {
-      setError(t.caretakerRequired);
+      setError("กรุณาตั้งชื่อแปลง");
       return false;
     }
 
@@ -569,7 +564,8 @@ export default function Page() {
         (p) => String(p.id) !== String(selectedPlotId)
       );
       setPlots(nextPlots);
-      setSelectedPlotId(nextPlots[0]?.id || "");
+      setSelectedPlotId("");
+      resetDraft();
       setMode("view");
       setSuccess(t.deleteSuccess);
     } catch (e) {
@@ -635,12 +631,19 @@ export default function Page() {
   }
 
   const formTitle = isCreateMode
-    ? t.newCaretakerInfo
+    ? "เพิ่มแปลงปลูก"
     : isEditMode
-    ? t.editPlotAndPolygon
+    ? "แก้ไขแปลงปลูก"
     : t.plotInfo;
 
-  const infoPlotLabel = draftPlotName || `${t.plotWord} A`;
+  const pageTitleText = isCreateMode
+    ? "เพิ่มแปลงปลูก"
+    : isEditMode
+    ? "แก้ไขแปลงปลูก"
+    : "🗺 แปลงปลูก";
+
+  const infoPlotLabel = plotNameTrimmed || "กรุณาตั้งชื่อแปลง";
+  const shouldShowDetails = isCreateMode || isEditMode || !!selectedPlotId;
 
   if (!mounted) return null;
 
@@ -662,51 +665,64 @@ export default function Page() {
         ) : null}
 
         <div className="top-head">
-          <div className="page-title">{t.plantingPolygonTitle}</div>
+          <div className="page-title">{pageTitleText}</div>
 
-<div className="head-actions">
-  <button
-    type="button"
-    className="add-btn"
-    onClick={enterCreateMode}
-    disabled={busy}
-  >
-    {t.addPlot}
-  </button>
+          <div className="head-actions">
+            {!isEditable ? (
+              <>
+                <button
+                  type="button"
+                  className="add-btn"
+                  onClick={enterCreateMode}
+                  disabled={busy}
+                >
+                  + เพิ่มแปลง
+                </button>
 
-  <button
-    type="button"
-    className={`edit-btn top-edit-btn ${isEditMode ? "active" : ""}`}
-    onClick={enterEditMode}
-    disabled={busy || isCreateMode || !selectedPlotId}
-  >
-    {t.editDelete}
-  </button>
+                <button
+                  type="button"
+                  className={`edit-btn top-edit-btn ${isEditMode ? "active" : ""}`}
+                  onClick={enterEditMode}
+                  disabled={busy || !selectedPlotId}
+                >
+                  แก้ไข
+                </button>
 
-  {(isCreateMode || isEditMode) && (
-    <button
-      type="button"
-      className="cancel-btn"
-      onClick={cancelEditOrCreate}
-      disabled={busy}
-    >
-      {t.cancel}
-    </button>
-  )}
+                <button
+                  type="button"
+                  className="delete-btn"
+                  onClick={handleDeleteClick}
+                  disabled={busy || !selectedPlotId}
+                >
+                  ลบ
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="cancel-btn"
+                  onClick={cancelEditOrCreate}
+                  disabled={busy}
+                >
+                  ยกเลิก
+                </button>
 
-  <button
-    type="button"
-    className="delete-btn"
-    onClick={handleDeleteClick}
-    disabled={busy || !selectedPlotId || isCreateMode}
-  >
-    {t.deletePlot}
-  </button>
-</div>
+                <button
+                  type="button"
+                  className="save-btn top-save-btn"
+                  onClick={handleSaveClick}
+                  disabled={busy}
+                >
+                  บันทึก
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="top-select-wrap">
-          <div className="top-label">{t.plotLabel}</div>
+          <div className="top-label">เลือกแปลง</div>
           <select
             className="top-select"
             value={isCreateMode ? "__creating__" : selectedPlotId}
@@ -717,179 +733,179 @@ export default function Page() {
               setSuccess("");
               setSelectedPlotId(String(e.target.value));
             }}
-            disabled={busy || loading || (!plots.length && !isCreateMode)}
+            disabled={busy || loading || isEditable}
           >
             {isCreateMode ? (
-              <option value="__creating__">{t.creatingNewPlot}</option>
-            ) : null}
-
-            {!plots.length && !isCreateMode ? (
-              <option value="">{t.noPlots}</option>
+              <option value="__creating__">กำลังเพิ่มแปลงใหม่</option>
             ) : (
-              plots.map((plot) => (
-                <option key={plot.id} value={plot.id}>
-                  {getPlotDisplayName(plot)}
-                </option>
-              ))
+              <option value="">กรุณาเลือกแปลง</option>
             )}
+
+            {plots.map((plot) => (
+              <option key={plot.id} value={plot.id}>
+                {getPlotDisplayName(plot)}
+              </option>
+            ))}
           </select>
         </div>
 
-        <div className="info-card">
-          <div className="info-title">{formTitle}</div>
+        {shouldShowDetails ? (
+          <>
+            <div className="info-card">
+              <div className="info-title">{formTitle}</div>
 
-          <div className="form-grid">
-            <div className="field">
-              <div className="field-label">
-                {t.plotInfoLabel} <span className="field-sub">{infoPlotLabel}</span>
+              <div className="form-grid">
+                <div className="field">
+                  <div
+                    className={`field-label ${showPlotNameError ? "error-text" : ""}`}
+                  >
+                    {t.plotInfoLabel}{" "}
+                    <span
+                      className={`field-sub ${showPlotNameError ? "error-text" : ""}`}
+                    >
+                      {infoPlotLabel}
+                    </span>
+                  </div>
+
+                  <input
+                    className={`field-input ${showPlotNameError ? "input-error" : ""}`}
+                    value={draftPlotName}
+                    onChange={(e) => {
+                      setDraftPlotName(e.target.value);
+                      if (error === "กรุณาตั้งชื่อแปลง") setError("");
+                    }}
+                    placeholder="กรุณาตั้งชื่อแปลง"
+                    disabled={busy || !isEditable}
+                  />
+                </div>
+
+                <div className="field field-full">
+                  <div className="field-label">{t.caretakerInfoLabel}</div>
+                  <select
+                    className="field-select"
+                    value={draftCaretaker}
+                    onChange={(e) => setDraftCaretaker(e.target.value)}
+                    disabled={busy || !isEditable}
+                  >
+                    <option value="">{t.selectCaretaker}</option>
+                    {caretakerOptions.map((item) => (
+                      <option key={item.value} value={item.value}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  {!isEditable && selectedCaretakerLabel ? (
+                    <div className="caretaker-hint">
+                      {t.currentCaretaker}: {selectedCaretakerLabel}
+                    </div>
+                  ) : null}
+                </div>
               </div>
-       <input
-  className="field-input"
-  value={draftPlotName}
-  onChange={(e) => setDraftPlotName(e.target.value)}
-  placeholder={`${t.plotWord} A`}
-  disabled={busy || !isEditable}
-/>
             </div>
 
-            <div className="field field-full">
-              <div className="field-label">{t.caretakerInfoLabel}</div>
-              <select
-                className="field-select"
-                value={draftCaretaker}
-                onChange={(e) => setDraftCaretaker(e.target.value)}
-                disabled={busy || !isEditable}
-              >
-                <option value="">{t.selectCaretaker}</option>
-                {caretakerOptions.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
+            <div className="map-card">
+              <div className="map-head">
+                <div className="map-title">{t.drawPolygonOnMap}</div>
 
-              {!isEditable && selectedCaretakerLabel ? (
-                <div className="caretaker-hint">
-                  {t.currentCaretaker}: {selectedCaretakerLabel}
+                <div className={`lock-hint ${isEditable ? "unlock" : "lock"}`}>
+                  {isEditable ? t.editModeOn : t.pressEditOrAddFirst}
                 </div>
+              </div>
+
+              <div className="map-shell">
+                <div className="map-box">
+                  {!leaflet?.RL ? (
+                    <div className="map-loading">{t.loadingMap}</div>
+                  ) : (
+                    <leaflet.RL.MapContainer
+                      key={
+                        isCreateMode
+                          ? "create-map"
+                          : isEditMode
+                          ? `edit-${selectedPlotId || "none"}`
+                          : `plot-map-${selectedPlotId || "none"}`
+                      }
+                      center={[13.7563, 100.5018]}
+                      zoom={13}
+                      style={{ height: "100%", width: "100%" }}
+                      ref={mapRef}
+                    >
+                      <leaflet.RL.TileLayer
+                        attribution="&copy; OpenStreetMap contributors"
+                        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                      />
+
+                      <CurrentLocationLayer
+                        leaflet={leaflet}
+                        locateTick={locateTick}
+                        onStatus={setLocateStatus}
+                        t={t}
+                      />
+
+                      <DrawGuide leaflet={leaflet} />
+
+                      {displayedPolygon.length >= 3 ? (
+                        <FitBounds leaflet={leaflet} coords={displayedPolygon} />
+                      ) : null}
+
+                      <leaflet.RL.FeatureGroup
+                        ref={featureGroupRef}
+                        key={`${selectedPlotId}-${mode}-${JSON.stringify(
+                          displayedPolygon
+                        )}`}
+                      >
+                        {displayedPolygon.length >= 3 ? (
+                          <leaflet.RL.Polygon
+                            key={JSON.stringify(displayedPolygon)}
+                            positions={displayedPolygon}
+                            pathOptions={{
+                              color: isEditable ? "#0f766e" : "#d92d2a",
+                              fillColor: isEditable ? "#0f766e" : "#d92d2a",
+                              fillOpacity: isEditable ? 0.28 : 0.22,
+                              weight: isEditable ? 4 : 3,
+                            }}
+                          />
+                        ) : null}
+
+                        <leaflet.Draw.EditControl
+                          position="topright"
+                          onCreated={onCreated}
+                          onEdited={onEdited}
+                          onDeleted={onDeleted}
+                          draw={{
+                            rectangle: false,
+                            circle: false,
+                            circlemarker: false,
+                            marker: false,
+                            polyline: false,
+                            polygon: isEditable && displayedPolygon.length === 0,
+                          }}
+                          edit={{
+                            edit: isEditable && displayedPolygon.length > 0,
+                            remove: isEditable && displayedPolygon.length > 0,
+                          }}
+                        />
+                      </leaflet.RL.FeatureGroup>
+                    </leaflet.RL.MapContainer>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  className="locate-btn"
+                  onClick={() => setLocateTick((v) => v + 1)}
+                >
+                  {t.myLocation}
+                </button>
+              </div>
+
+              {locateStatus ? (
+                <div className="locate-status">{locateStatus}</div>
               ) : null}
             </div>
-          </div>
-        </div>
-
-        <div className="map-card">
-          <div className="map-head">
-            <div className="map-title">{t.drawPolygonOnMap}</div>
-
-            <div className={`lock-hint ${isEditable ? "unlock" : "lock"}`}>
-              {isEditable ? t.editModeOn : t.pressEditOrAddFirst}
-            </div>
-          </div>
-
-          <div className="map-shell">
-            <div className="map-box">
-              {!leaflet?.RL ? (
-                <div className="map-loading">{t.loadingMap}</div>
-              ) : (
-                <leaflet.RL.MapContainer
-                  key={
-                    isCreateMode
-                      ? "create-map"
-                      : isEditMode
-                      ? `edit-${selectedPlotId || "none"}`
-                      : `plot-map-${selectedPlotId || "none"}`
-                  }
-                  center={[13.7563, 100.5018]}
-                  zoom={13}
-                  style={{ height: "100%", width: "100%" }}
-                  ref={mapRef}
-                >
-                  <leaflet.RL.TileLayer
-                    attribution="&copy; OpenStreetMap contributors"
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                  />
-
-                  <CurrentLocationLayer
-                    leaflet={leaflet}
-                    locateTick={locateTick}
-                    onStatus={setLocateStatus}
-                    t={t}
-                  />
-
-                  <DrawGuide leaflet={leaflet} />
-
-                  {displayedPolygon.length >= 3 ? (
-                    <FitBounds leaflet={leaflet} coords={displayedPolygon} />
-                  ) : null}
-
-                  <leaflet.RL.FeatureGroup
-                    ref={featureGroupRef}
-                    key={`${selectedPlotId}-${mode}-${JSON.stringify(
-                      displayedPolygon
-                    )}`}
-                  >
-                    {displayedPolygon.length >= 3 ? (
-                      <leaflet.RL.Polygon
-                        key={JSON.stringify(displayedPolygon)}
-                        positions={displayedPolygon}
-                        pathOptions={{
-                          color: isEditable ? "#0f766e" : "#d92d2a",
-                          fillColor: isEditable ? "#0f766e" : "#d92d2a",
-                          fillOpacity: isEditable ? 0.28 : 0.22,
-                          weight: isEditable ? 4 : 3,
-                        }}
-                      />
-                    ) : null}
-
-                    <leaflet.Draw.EditControl
-                      position="topright"
-                      onCreated={onCreated}
-                      onEdited={onEdited}
-                      onDeleted={onDeleted}
-                      draw={{
-                        rectangle: false,
-                        circle: false,
-                        circlemarker: false,
-                        marker: false,
-                        polyline: false,
-                        polygon: isEditable && displayedPolygon.length === 0,
-                      }}
-                      edit={{
-                        edit: isEditable && displayedPolygon.length > 0,
-                        remove: isEditable && displayedPolygon.length > 0,
-                      }}
-                    />
-                  </leaflet.RL.FeatureGroup>
-                </leaflet.RL.MapContainer>
-              )}
-            </div>
-
-            <button
-              type="button"
-              className="locate-btn"
-              onClick={() => setLocateTick((v) => v + 1)}
-            >
-              {t.myLocation}
-            </button>
-          </div>
-
-          {locateStatus ? (
-            <div className="locate-status">{locateStatus}</div>
-          ) : null}
-        </div>
-
-        {(isCreateMode || isEditMode) && (
-          <div className="save-row">
-            <button
-              type="button"
-              className="save-btn"
-              onClick={handleSaveClick}
-              disabled={busy}
-            >
-              {t.save}
-            </button>
-          </div>
-        )}
+          </>
+        ) : null}
 
         {showDeletePopup ? (
           <div
@@ -1034,7 +1050,8 @@ export default function Page() {
             box-shadow: 0 6px 16px rgba(88, 110, 68, 0.12);
           }
 
-          .save-btn {
+          .save-btn,
+          .top-save-btn {
             background: linear-gradient(180deg, #2f7d1d 0%, #1b5d10 100%);
             color: #fff;
             min-width: 150px;
@@ -1143,6 +1160,10 @@ export default function Page() {
             font-size: 12px;
           }
 
+          .error-text {
+            color: #d92d20 !important;
+          }
+
           .field-input,
           .field-select {
             width: 100%;
@@ -1154,6 +1175,13 @@ export default function Page() {
             padding: 11px 14px;
             font-size: 14px;
             outline: none;
+          }
+
+          .input-error {
+            border-color: #d92d20 !important;
+            background: #fff4f2 !important;
+            color: #8a1c14;
+            box-shadow: 0 0 0 3px rgba(217, 45, 32, 0.1);
           }
 
           .field-input[readonly] {
@@ -1259,12 +1287,6 @@ export default function Page() {
             margin-top: 10px;
             font-size: 12px;
             color: #4f5c47;
-          }
-
-          .save-row {
-            display: flex;
-            justify-content: flex-end;
-            margin-top: 18px;
           }
 
           .alert-box {
