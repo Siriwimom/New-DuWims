@@ -615,7 +615,7 @@ function getLegendStops(sensorKey) {
 }
 
 const FRAME_STEP_MINUTES = 15;
-const MAX_FRAMES = 96 * 14;
+const MAX_FRAMES = 96 * 62;
 const BANGKOK_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 function parseBangkokDate(dateText, endOfDay = false) {
@@ -746,7 +746,11 @@ function interpolateValueBetweenReadings(beforeReading, afterReading, targetTs) 
 }
 
 function getSmoothedReadingForFrame(point, currentTs, nextFrameTs) {
-  const readingInFrame = findLatestReadingInWindow(point.readings, currentTs, nextFrameTs);
+  const inRangeReadings = Array.isArray(point?.readings) ? point.readings : [];
+  const allHistoryReadings = Array.isArray(point?.allSensorHistory) ? point.allSensorHistory : [];
+  const sourceReadings = inRangeReadings.length ? inRangeReadings : allHistoryReadings;
+
+  const readingInFrame = findLatestReadingInWindow(sourceReadings, currentTs, nextFrameTs);
   if (readingInFrame) {
     return {
       chosen: readingInFrame,
@@ -754,9 +758,40 @@ function getSmoothedReadingForFrame(point, currentTs, nextFrameTs) {
       ts: readingInFrame?.timestamp || readingInFrame?.ts || readingInFrame?.createdAt || null,
       mode: "frame",
       readingInFrame,
-      beforeReading: null,
+      beforeReading: readingInFrame,
       afterReading: null,
-      latestHistory: null,
+      latestHistory: readingInFrame,
+    };
+  }
+
+  const latestHistory = findReadingAtOrBefore(sourceReadings, currentTs);
+  if (latestHistory) {
+    return {
+      chosen: latestHistory,
+      value: toNum(latestHistory?.value),
+      ts: latestHistory?.timestamp || latestHistory?.ts || latestHistory?.createdAt || null,
+      mode: "carry",
+      readingInFrame: null,
+      beforeReading: latestHistory,
+      afterReading: null,
+      latestHistory,
+    };
+  }
+
+  const latestSensorTs = new Date(
+    point?.latestSensorValue?.timestamp || point?.latestSensorValue?.ts || point?.latestSensorValue?.createdAt || 0
+  ).getTime();
+
+  if (point?.latestSensorValue?.value != null && Number.isFinite(latestSensorTs) && latestSensorTs <= currentTs) {
+    return {
+      chosen: point.latestSensorValue,
+      value: toNum(point.latestSensorValue.value),
+      ts: point.latestSensorValue.timestamp || point.latestSensorValue.ts || point.latestSensorValue.createdAt || null,
+      mode: "latest",
+      readingInFrame: null,
+      beforeReading: point.latestSensorValue,
+      afterReading: null,
+      latestHistory: point.latestSensorValue,
     };
   }
 
@@ -1429,6 +1464,10 @@ export default function Page() {
   const frameCount = frameTimestamps.length;
   const isGlobalSensor = false;
   const currentFrameTs = frameTimestamps[frameIndex] || Date.now();
+  const nextFrameTs =
+    frameIndex < frameTimestamps.length - 1
+      ? frameTimestamps[frameIndex + 1]
+      : currentFrameTs + FRAME_STEP_MINUTES * 60 * 1000;
 
   const visiblePlots = useMemo(() => {
     if (selectedPlotId === "all") return plots;
@@ -1508,7 +1547,7 @@ export default function Page() {
         const readingsResults = await Promise.allSettled(
           normalizedPlots.map(async (plot) => {
             const readingsJson = await apiFetch(
-              `/api/sensor-readings?plotId=${encodeURIComponent(plot.id)}&limit=500`
+              `/api/sensor-readings?plotId=${encodeURIComponent(plot.id)}&limit=5000`
             );
             return extractSensorReadingItems(readingsJson)
               .map(normalizeReadingItem)
@@ -1730,6 +1769,81 @@ useEffect(() => {
       .filter((point) => point.value != null && !Number.isNaN(point.value));
   }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
 
+  const frameDebugRows = useMemo(() => {
+    const currentTs = frameTimestamps[frameIndex] || alignBangkokFrameStart(Date.now());
+    const nextTs =
+      frameIndex < frameTimestamps.length - 1
+        ? frameTimestamps[frameIndex + 1]
+        : currentTs + FRAME_STEP_MINUTES * 60 * 1000;
+
+    return activeSensorPoints
+      .map((point) => {
+        const inFrame = findLatestReadingInWindow(point.readings, currentTs, nextTs);
+        const beforeAny = findReadingAtOrBefore(
+          Array.isArray(point.allSensorHistory) && point.allSensorHistory.length
+            ? point.allSensorHistory
+            : point.readings,
+          currentTs
+        );
+        const afterAny = findReadingAtOrAfter(
+          Array.isArray(point.allSensorHistory) && point.allSensorHistory.length
+            ? point.allSensorHistory
+            : point.readings,
+          nextTs
+        );
+        const smoothed = getSmoothedReadingForFrame(point, currentTs, nextTs);
+        const chosenValue = smoothed?.value ?? point?.latestSensorValue?.value ?? null;
+        const chosenTs = smoothed?.ts ?? point?.latestSensorValue?.timestamp ?? null;
+
+        return {
+          id: point.id,
+          plotName: point.plotName,
+          nodeName: point.nodeName,
+          sensorKey: point.sensorKey,
+          sensorDisplayName: point.sensorDisplayName,
+          frameMode: smoothed?.mode || (point?.latestSensorValue?.value != null ? "latest" : "none"),
+          hasValueNow: chosenValue != null && !Number.isNaN(Number(chosenValue)),
+          currentValue: chosenValue,
+          currentValueTime: chosenTs,
+          inFrameValue: inFrame?.value ?? null,
+          inFrameTime: inFrame?.timestamp || inFrame?.ts || inFrame?.createdAt || null,
+          beforeValue: beforeAny?.value ?? null,
+          beforeTime: beforeAny?.timestamp || beforeAny?.ts || beforeAny?.createdAt || null,
+          afterValue: afterAny?.value ?? null,
+          afterTime: afterAny?.timestamp || afterAny?.ts || afterAny?.createdAt || null,
+          historyCountInRange: Array.isArray(point.readings) ? point.readings.length : 0,
+          historyCountAll: Array.isArray(point.allSensorHistory) ? point.allSensorHistory.length : 0,
+          latestValue: point?.latestSensorValue?.value ?? null,
+          latestTime: point?.latestSensorValue?.timestamp || null,
+          statusType: getSensorStatus(selectedSensor, chosenValue)?.type || "none",
+        };
+      })
+      .sort((a, b) => {
+        if (a.hasValueNow !== b.hasValueNow) return a.hasValueNow ? -1 : 1;
+        const ta = new Date(a.currentValueTime || a.beforeTime || 0).getTime();
+        const tb = new Date(b.currentValueTime || b.beforeTime || 0).getTime();
+        return tb - ta;
+      });
+  }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
+
+  const clipDebugSummary = useMemo(() => {
+    const rows = frameDebugRows;
+    const withValue = rows.filter((row) => row.hasValueNow).length;
+    const inFrame = rows.filter((row) => row.frameMode === "frame").length;
+    const carried = rows.filter((row) => row.frameMode === "carry").length;
+    const latest = rows.filter((row) => row.frameMode === "latest").length;
+    const none = rows.filter((row) => row.frameMode === "none").length;
+
+    return {
+      total: rows.length,
+      withValue,
+      inFrame,
+      carried,
+      latest,
+      none,
+    };
+  }, [frameDebugRows]);
+
   
 const globalDisplayPoints = useMemo(() => {
   return [];
@@ -1858,6 +1972,16 @@ const stats = useMemo(() => {
                 })
               : [];
 
+            const sensorHistoryAll = Array.isArray(historicalReadingsBySensorId[sensor._id])
+              ? historicalReadingsBySensorId[sensor._id].filter((r) => {
+                  return (
+                    toText(r?.plotId) === toText(plot.id) &&
+                    toText(r?.nodeId) === toText(node._id) &&
+                    toText(r?.sensorId) === toText(sensor._id)
+                  );
+                })
+              : [];
+
             return [
               {
                 id: `${plot.id}-${node._id}-${sensor._id}`,
@@ -1873,11 +1997,15 @@ const stats = useMemo(() => {
                 sensorKey: sensor.name,
                 sensorDisplayName: sensor.rawName || sensor.name,
                 readings: sensorHistoryInDateRange,
+                allSensorHistory: sensorHistoryAll,
                 latestSensorValue:
                   sensor.latestValue != null
                     ? {
                         value: toNum(sensor.latestValue),
                         timestamp: sensor.latestTimestamp || null,
+                        plotId: plot.id,
+                        nodeId: node._id,
+                        sensorId: sensor._id,
                       }
                     : null,
               },
@@ -1941,6 +2069,7 @@ const stats = useMemo(() => {
     selectedSensor,
     uiLang,
     visiblePlots,
+    historicalReadingsBySensorId,
   ]);
 
 
@@ -2202,6 +2331,8 @@ const stats = useMemo(() => {
                 <span>{formatDateThai(startDate)}</span>
                 <span>{formatDateThai(endDate)}</span>
               </div>
+
+              
             </div>
           </div>
 
@@ -2281,6 +2412,7 @@ const stats = useMemo(() => {
       )}
     </div>
   </div>
+  
 </div>
         </div>
 
@@ -2432,6 +2564,98 @@ const stats = useMemo(() => {
 
           .timeline-slider {
             width: 100%;
+          }
+
+          .timeline-debug-summary {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #e5e7eb;
+            display: grid;
+            gap: 4px;
+            font-size: 13px;
+            color: #334155;
+          }
+
+          .debug-card {
+            margin-top: 12px;
+          }
+
+          .debug-frame-head {
+            display: grid;
+            gap: 4px;
+            font-size: 13px;
+            color: #334155;
+            margin-bottom: 10px;
+          }
+
+          .debug-table-wrap {
+            overflow: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            background: #fff;
+          }
+
+          .debug-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 980px;
+            font-size: 13px;
+          }
+
+          .debug-table th,
+          .debug-table td {
+            border-bottom: 1px solid #eef2f7;
+            padding: 8px 10px;
+            text-align: left;
+            vertical-align: top;
+          }
+
+          .debug-table th {
+            position: sticky;
+            top: 0;
+            background: #f8fafc;
+            z-index: 1;
+            font-weight: 800;
+          }
+
+          .debug-node-main {
+            font-weight: 700;
+          }
+
+          .debug-node-sub,
+          .debug-time {
+            font-size: 12px;
+            color: #64748b;
+          }
+
+          .debug-status {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+          }
+
+          .debug-status-low {
+            background: #dbeafe;
+            color: #1d4ed8;
+          }
+
+          .debug-status-normal {
+            background: #dcfce7;
+            color: #166534;
+          }
+
+          .debug-status-high {
+            background: #fee2e2;
+            color: #b91c1c;
+          }
+
+          .debug-status-none {
+            background: #e5e7eb;
+            color: #374151;
           }
 
           .timeline-bottom {
