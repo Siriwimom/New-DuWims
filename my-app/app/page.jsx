@@ -37,7 +37,6 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
-  const [nickname, setNickname] = useState("");
 
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const otpRefs = useRef([]);
@@ -134,7 +133,6 @@ export default function App() {
     setOtp(["", "", "", "", "", ""]);
     setErr("");
     setInfo("");
-    setNickname("");
     setShowPassword(false);
     setShowPassword2(false);
   }
@@ -243,21 +241,15 @@ export default function App() {
 
       if (pw !== pw2) throw new Error("Password not match");
 
-      const nick = String(nickname || "").trim();
-      if (!nick) throw new Error("กรุณากรอกชื่อนามสกุล");
-
       await api("/auth/register", {
         method: "POST",
         body: {
           email: emailN,
           password: pw,
-          nickname: nick,
           role: signupIsOwner ? "owner" : "employee",
         },
       });
 
-      // backend ควรส่งเมลยืนยันจริงใน step นี้
-      // เช่น create user แบบ isVerified=false แล้วส่ง code / link ไปที่อีเมล
       await api("/auth/send-email-verification", {
         method: "POST",
         body: { email: emailN },
@@ -320,7 +312,6 @@ export default function App() {
     setEmail("");
     setPw("");
     setPw2("");
-    setNickname("");
     setScreen("login");
 
     if (typeof window !== "undefined") {
@@ -473,7 +464,7 @@ export default function App() {
           }
         }
 
-        const t = getToken();
+        const savedToken = getToken();
         if (!savedToken) {
           if (!mounted) return;
           setSessionUser(null);
@@ -512,27 +503,6 @@ export default function App() {
       <style>{css}</style>
 
       <div className="panel">
-        <div className="sessionBar">
-          {sessionChecking ? (
-            <span className="muted">Checking session…</span>
-          ) : sessionUser ? (
-            <>
-              <div className="sessionLeft">
-                <div className="sessionName">
-                  {sessionUser.nickname || sessionUser.name || "No username"}
-                </div>
-                <div className="sessionSub">{sessionUser.email || "-"}</div>
-                <div className="sessionRole">{sessionUser.role || "-"}</div>
-              </div>
-              <button className="btn ghost" onClick={logout} disabled={loading}>
-                Logout
-              </button>
-            </>
-          ) : (
-            <span className="muted">Not logged in</span>
-          )}
-        </div>
-
         <h1>{title}</h1>
 
         {err && <div className="err">{err}</div>}
@@ -602,15 +572,6 @@ export default function App() {
 
         {screen === "signup" && (
           <>
-            <div className="label">ชื่อนามสกุล</div>
-            <input
-              className="input"
-              value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
-              placeholder="ชื่อ นามสกุล"
-              autoComplete="name"
-            />
-
             <div className="label">Email</div>
             <input
               className="input"
@@ -937,32 +898,9 @@ html,body{ height:100%; margin:0; font-family: system-ui, -apple-system, Segoe U
 }
 .panel{ width:min(720px, 94vw); text-align:center; }
 
-.sessionBar{
-  width:min(540px, 94vw);
-  margin:0 auto 14px;
-  padding:10px 12px;
-  border-radius:18px;
-  background:rgba(255,255,255,.14);
-  backdrop-filter: blur(6px);
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-}
-.sessionLeft{ display:flex; flex-direction:column; align-items:flex-start; gap:2px; }
-.sessionName{ color:#fff; font-weight:800; font-size:14px; line-height:1.1; }
-.sessionSub{ color:rgba(255,255,255,.88); font-size:12px; font-weight:700; }
-.sessionRole{ color:rgba(255,255,255,.7); font-size:12px; font-weight:700; text-transform:capitalize; }
-.muted{ color:rgba(255,255,255,.65); font-size:12px; font-weight:700; }
 .checkboxRow{ width:min(540px, 94vw); margin:8px auto 10px; text-align:left; }
 .check{ display:flex; align-items:center; gap:10px; color:rgba(255,255,255,.85); font-size:13px; font-weight:700; }
 .check input{ width:16px; height:16px; }
-.btn.ghost{
-  background:rgba(255,255,255,.18);
-  border:2px solid rgba(255,255,255,.25);
-  color:#fff;
-}
-.btn.ghost:hover{ filter:brightness(1.1); }
 
 h1{
   color:#fff;
