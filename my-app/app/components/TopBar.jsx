@@ -16,6 +16,15 @@ function readToken() {
   return "";
 }
 
+function writeTokenToAllKeys(token) {
+  if (typeof window === "undefined" || !token) return;
+  for (const k of AUTH_KEYS) {
+    try {
+      window.localStorage.setItem(k, token);
+    } catch {}
+  }
+}
+
 function parseJwt(token) {
   try {
     const base64Url = token.split(".")[1];
@@ -48,12 +57,13 @@ function getApiBase() {
   return (
     process.env.NEXT_PUBLIC_API_BASE_URL ||
     window.localStorage.getItem("NEXT_PUBLIC_API_BASE_URL") ||
-    ""
+    "http://localhost:3001"
   ).replace(/\/$/, "");
 }
 
 async function requestJson(url, options = {}) {
   const res = await fetch(url, options);
+
   let data = null;
   try {
     data = await res.json();
@@ -62,29 +72,15 @@ async function requestJson(url, options = {}) {
   }
 
   if (!res.ok) {
-    const msg =
+    const message =
       data?.message ||
       data?.error ||
       data?.detail ||
       `Request failed (${res.status})`;
-    throw new Error(msg);
+    throw new Error(message);
   }
 
   return data;
-}
-
-async function tryApiCandidates(candidates, makeRequest) {
-  let lastError = null;
-
-  for (const candidate of candidates) {
-    try {
-      return await makeRequest(candidate);
-    } catch (err) {
-      lastError = err;
-    }
-  }
-
-  throw lastError || new Error("ไม่สามารถเชื่อมต่อ API ได้");
 }
 
 export default function TopBar() {
@@ -101,6 +97,7 @@ export default function TopBar() {
 
   const [displayName, setDisplayName] = useState("ผู้ใช้งาน");
   const [email, setEmail] = useState("user@example.com");
+  const [provider, setProvider] = useState("local");
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [isPasswordOpen, setIsPasswordOpen] = useState(false);
@@ -127,31 +124,6 @@ export default function TopBar() {
 
   const apiBase = getApiBase();
 
-  const PROFILE_UPDATE_CANDIDATES = [
-    `${apiBase}/auth/update-profile`,
-    `${apiBase}/auth/profile`,
-    `${apiBase}/api/auth/update-profile`,
-    `${apiBase}/api/auth/profile`,
-    `${apiBase}/api/users/me`,
-    `${apiBase}/users/me`,
-  ].filter(Boolean);
-
-  const PASSWORD_CHANGE_CANDIDATES = [
-    `${apiBase}/auth/change-password`,
-    `${apiBase}/auth/update-password`,
-    `${apiBase}/api/auth/change-password`,
-    `${apiBase}/api/auth/update-password`,
-    `${apiBase}/users/change-password`,
-    `${apiBase}/api/users/change-password`,
-  ].filter(Boolean);
-
-  const openPopup = (type, title, message) => {
-    setPopupType(type);
-    setPopupTitle(title);
-    setPopupMessage(message);
-    setPopupOpen(true);
-  };
-
   const syncAuth = () => {
     try {
       const token = readToken();
@@ -168,16 +140,19 @@ export default function TopBar() {
           payload?.username ||
           "ผู้ใช้งาน";
         const nextEmail = payload?.email || "user@example.com";
+        const nextProvider = payload?.provider || "local";
 
         setRole(nextRole);
         setDisplayName(nextName);
         setDraftDisplayName(nextName);
         setEmail(nextEmail);
+        setProvider(nextProvider);
       } else {
         setRole("");
         setDisplayName("ผู้ใช้งาน");
         setDraftDisplayName("ผู้ใช้งาน");
         setEmail("user@example.com");
+        setProvider("local");
       }
     } catch {
       setHasToken(false);
@@ -185,7 +160,15 @@ export default function TopBar() {
       setDisplayName("ผู้ใช้งาน");
       setDraftDisplayName("ผู้ใช้งาน");
       setEmail("user@example.com");
+      setProvider("local");
     }
+  };
+
+  const openPopup = (type, title, message) => {
+    setPopupType(type);
+    setPopupTitle(title);
+    setPopupMessage(message);
+    setPopupOpen(true);
   };
 
   useEffect(() => {
@@ -263,35 +246,44 @@ export default function TopBar() {
   const handleUpdateProfile = async (e) => {
     e.preventDefault();
 
-    const nextName = String(draftDisplayName || "").trim() || "ผู้ใช้งาน";
     const token = readToken();
+    const nextName = String(draftDisplayName || "").trim();
 
     if (!token) {
       openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบ token การเข้าสู่ระบบ");
       return;
     }
 
+    if (!nextName) {
+      openPopup("error", "บันทึกไม่สำเร็จ", "กรุณากรอกชื่อที่แสดง");
+      return;
+    }
+
     setSavingProfile(true);
 
     try {
-      await tryApiCandidates(PROFILE_UPDATE_CANDIDATES, async (url) => {
-        return await requestJson(url, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            nickname: nextName,
-            displayName: nextName,
-            name: nextName,
-          }),
-        });
+      const result = await requestJson(`${apiBase}/auth/update-profile`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          nickname: nextName,
+        }),
       });
 
-      setDisplayName(nextName);
-      setDraftDisplayName(nextName);
+      if (result?.token) {
+        writeTokenToAllKeys(result.token);
+      }
+
+      const updatedName = result?.user?.nickname || nextName;
+
+      setDisplayName(updatedName);
+      setDraftDisplayName(updatedName);
       setIsEditingName(false);
+      syncAuth();
+
       openPopup("success", "บันทึกสำเร็จ", "อัปเดตข้อมูลส่วนตัวเรียบร้อยแล้ว");
     } catch (err) {
       openPopup("error", "บันทึกไม่สำเร็จ", err?.message || "ไม่สามารถอัปเดตข้อมูลได้");
@@ -310,18 +302,37 @@ export default function TopBar() {
       return;
     }
 
+    if (provider === "google") {
+      openPopup(
+        "error",
+        "เปลี่ยนรหัสผ่านไม่ได้",
+        "บัญชี Google ไม่สามารถเปลี่ยนรหัสผ่านด้วยวิธีนี้ได้"
+      );
+      return;
+    }
+
     if (!currentPassword.trim()) {
       openPopup("error", "ข้อมูลไม่ครบ", "กรุณากรอกรหัสผ่านปัจจุบัน");
       return;
     }
 
+    if (!newPassword.trim()) {
+      openPopup("error", "ข้อมูลไม่ครบ", "กรุณากรอกรหัสผ่านใหม่");
+      return;
+    }
+
+    if (!confirmPassword.trim()) {
+      openPopup("error", "ข้อมูลไม่ครบ", "กรุณากรอกยืนยันรหัสผ่านใหม่");
+      return;
+    }
+
     if (newPassword !== confirmPassword) {
-      openPopup("error", "เปลี่ยนรหัสผ่านไม่สำเร็จ", "รหัสผ่านใหม่ไม่ตรงกัน");
+      openPopup("error", "เปลี่ยนรหัสผ่านไม่สำเร็จ", "รหัสผ่านใหม่และการยืนยันรหัสผ่านไม่ตรงกัน");
       return;
     }
 
     if (newPassword.length < 8) {
-      openPopup("error", "เปลี่ยนรหัสผ่านไม่สำเร็จ", "รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร");
+      openPopup("error", "เปลี่ยนรหัสผ่านไม่สำเร็จ", "รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร");
       return;
     }
 
@@ -333,21 +344,17 @@ export default function TopBar() {
     setSavingPassword(true);
 
     try {
-      await tryApiCandidates(PASSWORD_CHANGE_CANDIDATES, async (url) => {
-        return await requestJson(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            currentPassword,
-            oldPassword: currentPassword,
-            password: newPassword,
-            newPassword,
-            confirmPassword,
-          }),
-        });
+      await requestJson(`${apiBase}/auth/change-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          currentPassword,
+          newPassword,
+          confirmPassword,
+        }),
       });
 
       setCurrentPassword("");
@@ -467,7 +474,10 @@ export default function TopBar() {
                     <button
                       type="button"
                       className="profile-row-btn"
-                      onClick={() => setIsEditingName((v) => !v)}
+                      onClick={() => {
+                        setIsEditingName((v) => !v);
+                        setIsPasswordOpen(false);
+                      }}
                     >
                       <div className="profile-icon">◌</div>
                       <div className="profile-row-text">
@@ -514,7 +524,10 @@ export default function TopBar() {
                     <button
                       type="button"
                       className="profile-row-btn"
-                      onClick={() => setIsPasswordOpen((v) => !v)}
+                      onClick={() => {
+                        setIsPasswordOpen((v) => !v);
+                        setIsEditingName(false);
+                      }}
                     >
                       <div className="profile-icon">⟲</div>
                       <div className="profile-row-text">
@@ -1122,7 +1135,8 @@ export default function TopBar() {
             color: #fff;
           }
 
-          .save-btn:disabled {
+          .save-btn:disabled,
+          .cancel-btn:disabled {
             opacity: 0.7;
             cursor: not-allowed;
           }
@@ -1286,6 +1300,7 @@ export default function TopBar() {
             line-height: 1.55;
             color: #555;
             margin-bottom: 16px;
+            white-space: pre-line;
           }
 
           .popup-btn {
