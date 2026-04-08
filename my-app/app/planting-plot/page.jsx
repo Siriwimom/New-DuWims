@@ -431,9 +431,9 @@ export default function Page() {
 
       const payload = {
         plotName: safePlotName,
-        caretaker: safeCaretaker,
         polygon: safePolygon,
         nodes: [],
+        ...(safeCaretaker ? { caretaker: safeCaretaker } : {}),
       };
 
       const createdRes = await apiFetch("/api/plots", {
@@ -477,13 +477,15 @@ export default function Page() {
       const safeCaretaker = draftCaretaker.trim();
       const safePolygon = coordsToPolygonPayload(draftPolygon);
 
+      const payload = {
+        plotName: safePlotName,
+        polygon: safePolygon,
+        ...(safeCaretaker ? { caretaker: safeCaretaker } : {}),
+      };
+
       const res = await apiFetch(`/api/plots/${selectedPlotId}`, {
         method: "PATCH",
-        body: {
-          plotName: safePlotName,
-          caretaker: safeCaretaker,
-          polygon: safePolygon,
-        },
+        body: payload,
       });
 
       const updated = normalizePlot(res?.item || {});
@@ -787,7 +789,7 @@ export default function Page() {
                     onChange={(e) => setDraftCaretaker(e.target.value)}
                     disabled={busy || !isEditable}
                   >
-                    <option value="">{t.selectCaretaker}</option>
+                    <option value="">ไม่เลือก</option>
                     {caretakerOptions.map((item) => (
                       <option key={item.value} value={item.value}>
                         {item.label}

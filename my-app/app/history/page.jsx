@@ -495,6 +495,38 @@ function sameText(a, b) {
   return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 }
 
+function makeTargetMapKey(target) {
+  return [
+    target?.plotId || "",
+    target?.nodeId || target?.nodeUid || "",
+    target?.sensorId || target?.sensorUid || target?.rawSensorType || target?.sensorKey || "",
+    target?.sensorKey || "",
+  ].join("|");
+}
+
+function makeSeriesLabel(target) {
+  return `${target?.sensorLabel || "Sensor"} • ${target?.plotName || "Plot"} • ${target?.nodeName || "Node"}`;
+}
+
+function rowMatchesTarget(row, target) {
+  if (!sameText(row?.plotId, target?.plotId)) return false;
+
+  const nodeMatched =
+    sameText(row?.nodeId, target?.nodeId) ||
+    sameText(row?.nodeUid, target?.nodeUid) ||
+    (!row?.nodeId && !row?.nodeUid && !target?.nodeId && !target?.nodeUid);
+
+  if (!nodeMatched) return false;
+
+  const sensorMatched =
+    sameText(row?.sensorId, target?.sensorId) ||
+    sameText(row?.sensorUid, target?.sensorUid) ||
+    sameText(row?.sensorKey, target?.sensorKey) ||
+    (!row?.sensorId && !row?.sensorUid && !target?.sensorId && !target?.sensorUid);
+
+  return sensorMatched;
+}
+
 function readingMatchesTarget(raw, target) {
   const itemPlotId = raw?.plotId || raw?.plot_id || raw?.plot?.id || raw?.plot?._id || "";
   const itemNodeId = raw?.nodeId || raw?.node_id || raw?.node?.id || raw?.node?._id || "";
@@ -856,12 +888,7 @@ export default function HistoryPage() {
       try {
         const results = await Promise.all(
           sensorTargets.map(async (target) => {
-            const mapKey = [
-              target.plotId,
-              target.nodeId || target.nodeUid,
-              target.sensorId || target.sensorUid || target.rawSensorType,
-              target.sensorKey,
-            ].join("|");
+            const mapKey = makeTargetMapKey(target);
 
             try {
               const qs = new URLSearchParams();
@@ -904,12 +931,7 @@ export default function HistoryPage() {
     const rows = [];
 
     for (const target of sensorTargets) {
-      const mapKey = [
-        target.plotId,
-        target.nodeId || target.nodeUid,
-        target.sensorId || target.sensorUid || target.rawSensorType,
-        target.sensorKey,
-      ].join("|");
+      const mapKey = makeTargetMapKey(target);
 
       const items = Array.isArray(readingMap[mapKey]) ? readingMap[mapKey] : [];
       const seenRowKeys = new Set();
@@ -1014,7 +1036,9 @@ export default function HistoryPage() {
     return sensorOptionsI18n.filter((s) => selectedSensors.includes(s.key));
   }, [selectedSensors, sensorOptionsI18n]);
 
-  const chartTimestamps = useMemo(() => {
+  const chartBucket = useMemo(() => {
+    const BUCKET_THRESHOLD_MS = 10 * 1000;
+
     const uniq = Array.from(
       new Set(
         filteredReadingRows
@@ -1027,44 +1051,88 @@ export default function HistoryPage() {
     );
 
     uniq.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-    return uniq;
-  }, [filteredReadingRows]);
 
-  const combinedChart = useMemo(() => {
-    if (!selectedSensorOptions.length || !chartTimestamps.length) return null;
+    const buckets = [];
+    const bucketMap = new Map();
 
-    const series = [];
+    for (const ts of uniq) {
+      const currentMs = new Date(ts).getTime();
+      const lastBucket = buckets[buckets.length - 1];
 
-    for (const sensor of selectedSensorOptions) {
-      for (const plot of filteredPlots) {
-        const valuesByTimestamp = new Map(chartTimestamps.map((ts) => [ts, []]));
+      if (!lastBucket) {
+        buckets.push({
+          anchor: ts,
+          anchorMs: currentMs,
+          items: [ts],
+        });
+        bucketMap.set(ts, ts);
+        continue;
+      }
 
-        filteredReadingRows
-          .filter((row) => row.plotId === plot.id && row.sensorKey === sensor.key)
-          .forEach((row) => {
-            const list = valuesByTimestamp.get(row.timestamp) || [];
-            list.push(row.value);
-            valuesByTimestamp.set(row.timestamp, list);
-          });
-
-        const rawValues = chartTimestamps.map((ts) => average(valuesByTimestamp.get(ts) || []));
-        const normalizedValues = normalizeSeriesValues(rawValues);
-
-        if (normalizedValues.some((v) => Number.isFinite(v))) {
-          series.push({
-            key: `${sensor.key}-${plot.id}`,
-            plotId: plot.id,
-            plotName: plot.plotName,
-            sensorKey: sensor.key,
-            sensorLabel: sensor.label,
-            unit: sensor.unit,
-            timestamps: chartTimestamps,
-            values: rawValues,
-            normalizedValues,
-          });
-        }
+      if (Math.abs(currentMs - lastBucket.anchorMs) <= BUCKET_THRESHOLD_MS) {
+        lastBucket.items.push(ts);
+        bucketMap.set(ts, lastBucket.anchor);
+      } else {
+        buckets.push({
+          anchor: ts,
+          anchorMs: currentMs,
+          items: [ts],
+        });
+        bucketMap.set(ts, ts);
       }
     }
+
+    return {
+      timestamps: buckets.map((bucket) => bucket.anchor),
+      bucketMap,
+      thresholdMs: BUCKET_THRESHOLD_MS,
+    };
+  }, [filteredReadingRows]);
+
+  const chartTimestamps = chartBucket.timestamps;
+
+  const combinedChart = useMemo(() => {
+    if (!sensorTargets.length || !chartTimestamps.length) return null;
+
+    const series = sensorTargets
+      .map((target) => {
+        const valuesByTimestamp = new Map();
+
+        filteredReadingRows
+          .filter((row) => rowMatchesTarget(row, target))
+          .forEach((row) => {
+            const bucketTimestamp = chartBucket.bucketMap.get(row.timestamp) || row.timestamp;
+            valuesByTimestamp.set(bucketTimestamp, row.value);
+          });
+
+        const rawValues = chartTimestamps.map((ts) => {
+          const value = valuesByTimestamp.get(ts);
+          return Number.isFinite(value) ? value : null;
+        });
+
+        const normalizedValues = normalizeSeriesValues(rawValues);
+        if (!normalizedValues.some((v) => Number.isFinite(v))) return null;
+
+        return {
+          key: makeTargetMapKey(target),
+          plotId: target.plotId,
+          plotName: target.plotName,
+          nodeId: target.nodeId,
+          nodeUid: target.nodeUid,
+          nodeName: target.nodeName,
+          nodeType: target.nodeType,
+          sensorId: target.sensorId,
+          sensorUid: target.sensorUid,
+          sensorKey: target.sensorKey,
+          sensorLabel: target.sensorLabel,
+          unit: target.unit,
+          label: makeSeriesLabel(target),
+          timestamps: chartTimestamps,
+          values: rawValues,
+          normalizedValues,
+        };
+      })
+      .filter(Boolean);
 
     return {
       series,
@@ -1072,8 +1140,9 @@ export default function HistoryPage() {
       min: 0,
       max: 100,
       yLabels: ["100", "75", "50", "25", "0"],
+      bucketThresholdMs: chartBucket.thresholdMs,
     };
-  }, [selectedSensorOptions, filteredPlots, filteredReadingRows, chartTimestamps]);
+  }, [sensorTargets, filteredReadingRows, chartTimestamps, chartBucket]);
 
   const xLabelStep = Math.max(
     1,
@@ -1362,7 +1431,7 @@ export default function HistoryPage() {
                 <div key={item.key} className="legend-item">
                   <div className="legend-dot" style={{ background: colorOfIndex(i) }} />
                   <span>
-                    {item.sensorLabel} • {item.plotName} ({item.unit})
+                    {item.label} ({item.unit})
                   </span>
                 </div>
               ))}
@@ -1447,7 +1516,7 @@ export default function HistoryPage() {
                   {combinedChart.timestamps.map((d, index) => {
                     const stepX = combinedChart.timestamps.length <= 1 ? 900 : 900 / Math.max(combinedChart.timestamps.length - 1, 1);
                     const x = index * stepX;
-                    const rowsAtTime = filteredReadingRows.filter((row) => row.timestamp === d);
+                    const rowsAtTime = filteredReadingRows.filter((row) => (chartBucket.bucketMap.get(row.timestamp) || row.timestamp) === d);
                     return (
                       <rect
                         key={`hover-${d}`}
@@ -1496,7 +1565,7 @@ export default function HistoryPage() {
                           <div key={`${series.key}-${hoverInfo.timestamp}`} className="chart-tooltip-row">
                             <span className="chart-tooltip-dot" style={{ background: colorOfIndex(i) }} />
                             <span className="chart-tooltip-name">
-                              {series.sensorLabel} • {series.plotName}
+                              {series.label}
                             </span>
                             <span className="chart-tooltip-value">
                               {Number(rawValue).toFixed(2)} {series.unit}
