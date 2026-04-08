@@ -492,6 +492,101 @@ function getSensorStatusInfo(sensor = {}, sensorName = "", t, lang = "th") {
   };
 }
 
+
+
+function getDayShortLabel(dateStr, lang = "th") {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return "-";
+  const day = d.getDay();
+  const th = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
+  const en = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return lang === "en" ? en[day] : th[day];
+}
+
+function weatherCodeToEmoji(code) {
+  const c = Number(code);
+  if (c === 0) return "☀️";
+  if ([1].includes(c)) return "🌤️";
+  if ([2].includes(c)) return "⛅";
+  if ([3].includes(c)) return "☁️";
+  if ([45, 48].includes(c)) return "🌫️";
+  if ([51, 53, 55, 56, 57].includes(c)) return "🌦️";
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(c)) return "🌧️";
+  if ([71, 73, 75, 77, 85, 86].includes(c)) return "❄️";
+  if ([95, 96, 99].includes(c)) return "⛈️";
+  return "🌤️";
+}
+
+function sumNumbers(values = []) {
+  return values.reduce((sum, v) => {
+    const n = Number(v);
+    return sum + (Number.isFinite(n) ? n : 0);
+  }, 0);
+}
+
+function getPlotCenterLatLng(plot) {
+  const polygon = normalizeCoords(plot?.polygon || []);
+  if (polygon.length) {
+    const lat = polygon.reduce((s, p) => s + p[0], 0) / polygon.length;
+    const lng = polygon.reduce((s, p) => s + p[1], 0) / polygon.length;
+    return { lat, lng };
+  }
+
+  const nodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
+  const validNodes = nodes.filter((n) => toNum(n?.lat) != null && toNum(n?.lng) != null);
+  if (validNodes.length) {
+    const lat = validNodes.reduce((s, n) => s + Number(n.lat), 0) / validNodes.length;
+    const lng = validNodes.reduce((s, n) => s + Number(n.lng), 0) / validNodes.length;
+    return { lat, lng };
+  }
+
+  return null;
+}
+
+function buildWeatherRecommendation(weather, lang = "th") {
+  const probs = weather?.daily?.precipitation_probability_max || [];
+  const rains = weather?.daily?.precipitation_sum || [];
+  const next3 = probs.slice(0, 3);
+  const next3Rain = rains.slice(0, 3);
+
+  const heavyChanceDays = next3.filter((v) => Number(v) >= 70).length;
+  const totalNext3Rain = sumNumbers(next3Rain);
+  const total7Rain = sumNumbers(rains);
+
+  if (heavyChanceDays >= 2 || totalNext3Rain >= 20) {
+    return lang === "en"
+      ? "High rain chance in the next 2–3 days. Prepare drainage and inspect field channels."
+      : "มีโอกาสฝนสูงใน 2–3 วันข้างหน้า ควรเตรียมระบบระบายน้ำ/ตรวจร่องน้ำในแปลง";
+  }
+
+  if (total7Rain <= 5) {
+    return lang === "en"
+      ? "Low rain expected this week. Consider checking irrigation readiness."
+      : "สัปดาห์นี้ฝนค่อนข้างน้อย ควรตรวจความพร้อมระบบน้ำในแปลง";
+  }
+
+  return lang === "en"
+    ? "Weather is within a moderate range this week. Continue monitoring field conditions."
+    : "สภาพอากาศสัปดาห์นี้อยู่ในระดับปานกลาง ควรติดตามสภาพแปลงต่อเนื่อง";
+}
+
+async function fetchWeather7Days(lat, lng) {
+  const url =
+    `https://api.open-meteo.com/v1/forecast` +
+    `?latitude=${encodeURIComponent(lat)}` +
+    `&longitude=${encodeURIComponent(lng)}` +
+    `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum` +
+    `&current=temperature_2m` +
+    `&forecast_days=7` +
+    `&timezone=Asia/Bangkok`;
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`โหลดพยากรณ์อากาศไม่สำเร็จ (${res.status})`);
+  }
+  return res.json();
+}
+
 function buildMapData(plotsRaw, t, lang) {
   const polygons = [];
   const pins = [];
@@ -538,7 +633,37 @@ function buildMapData(plotsRaw, t, lang) {
   return { polygons, pins };
 }
 
-function buildHtmlContent(t) {
+function buildHtmlContent(t, weatherView, weatherLoading, weatherError) {
+  const weatherDaysHtml = weatherView?.days?.length
+    ? weatherView.days
+        .map(
+          (d) => `
+        <div class="weather-day"><div class="wd-name">${escapeHtml(d.label)}</div><div class="wd-icon">${escapeHtml(d.icon)}</div><div class="wd-temp">${escapeHtml(`${Math.round(Number(d.maxTemp ?? 0))}°`)}</div><div class="wd-rain">${t.rain} ${escapeHtml(`${Math.round(Number(d.rainChance ?? 0))}%`)}</div></div>
+      `
+        )
+        .join("")
+    : `<div style="padding:12px;font-size:13px;color:#64748b">${escapeHtml(
+        weatherLoading ? "กำลังโหลดข้อมูลอากาศ..." : weatherError || "ยังไม่มีข้อมูลอากาศ"
+      )}</div>`;
+
+  const tempRangeText = weatherView?.today
+    ? `${Math.round(Number(weatherView.today.minTemp ?? 0))}–${Math.round(
+        Number(weatherView.today.maxTemp ?? 0)
+      )}°C`
+    : "-";
+
+  const rainChanceText =
+    weatherView?.today?.rainChance != null
+      ? `${Math.round(Number(weatherView.today.rainChance))}%`
+      : "-";
+
+  const recommendationText = weatherView?.recommendation || "-";
+
+  const rain7DaysText =
+    weatherView?.rain7Days != null
+      ? `${Math.round(Number(weatherView.rain7Days) * 10) / 10} mm`
+      : "-";
+
   return `<div id="p1" class="page active">
 
   <div class="grid-top">
@@ -547,25 +672,19 @@ function buildHtmlContent(t) {
       <div class="card-title">${t.weather7Days}</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${t.weatherHint}</div>
       <div class="weather-strip">
-        <div class="weather-day"><div class="wd-name">${t.today}</div><div class="wd-icon">🌧️</div><div class="wd-temp">29°</div><div class="wd-rain">${t.rain} 83%</div></div>
-        <div class="weather-day"><div class="wd-name">${t.mon}</div><div class="wd-icon">🌦️</div><div class="wd-temp">28°</div><div class="wd-rain">${t.rain} 65%</div></div>
-        <div class="weather-day"><div class="wd-name">${t.tue}</div><div class="wd-icon">🌧️</div><div class="wd-temp">27°</div><div class="wd-rain">${t.rain} 72%</div></div>
-        <div class="weather-day"><div class="wd-name">${t.wed}</div><div class="wd-icon">🌤️</div><div class="wd-temp">30°</div><div class="wd-rain">${t.rain} 30%</div></div>
-        <div class="weather-day"><div class="wd-name">${t.thu}</div><div class="wd-icon">🌤️</div><div class="wd-temp">31°</div><div class="wd-rain">${t.rain} 20%</div></div>
-        <div class="weather-day"><div class="wd-name">${t.fri}</div><div class="wd-icon">🌦️</div><div class="wd-temp">29°</div><div class="wd-rain">${t.rain} 45%</div></div>
-        <div class="weather-day"><div class="wd-name">${t.sat}</div><div class="wd-icon">🌤️</div><div class="wd-temp">30°</div><div class="wd-rain">${t.rain} 25%</div></div>
+        ${weatherDaysHtml}
       </div>
     </div>
 
     <div class="col-stack">
       <div class="metric-card mc-blue">
         <div class="metric-card-label">${t.currentTemperatureToday}</div>
-        <div class="metric-card-value">22–29°C</div>
+        <div class="metric-card-value">${escapeHtml(tempRangeText)}</div>
         <div class="metric-card-sub">${t.forecastDailyHint}</div>
       </div>
       <div class="metric-card mc-yellow">
         <div class="metric-card-label">${t.rainChanceToday}</div>
-        <div class="metric-card-value">83%</div>
+        <div class="metric-card-value">${escapeHtml(rainChanceText)}</div>
         <div class="metric-card-sub">${t.precipitationHint}</div>
       </div>
     </div>
@@ -573,11 +692,11 @@ function buildHtmlContent(t) {
     <div class="col-stack">
       <div class="metric-card mc-red">
         <div class="metric-card-label">${t.recommendation}</div>
-        <div class="metric-card-value" style="font-size:15px;line-height:1.5;font-family:'Sarabun',sans-serif;font-weight:600">${t.recommendationText}</div>
+        <div class="metric-card-value" style="font-size:15px;line-height:1.5;font-family:'Sarabun',sans-serif;font-weight:600">${escapeHtml(recommendationText)}</div>
       </div>
       <div class="metric-card mc-green">
         <div class="metric-card-label">${t.rainAmount7Days}</div>
-        <div class="metric-card-value">15 mm</div>
+        <div class="metric-card-value">${escapeHtml(rain7DaysText)}</div>
         <div class="metric-card-sub">${t.rainAmountHint}</div>
       </div>
     </div>
@@ -801,9 +920,38 @@ export default function Page() {
   const [plots, setPlots] = useState([]);
   const [loadingMap, setLoadingMap] = useState(true);
   const [mapError, setMapError] = useState("");
+  const [weatherData, setWeatherData] = useState(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState("");
 
   const mapData = useMemo(() => buildMapData(plots, t, lang), [plots, t, lang]);
-  const htmlContent = useMemo(() => buildHtmlContent(t), [t]);
+  const weatherView = useMemo(() => {
+    const daily = weatherData?.daily;
+    if (!daily?.time?.length) return null;
+
+    const days = daily.time.map((dateStr, i) => ({
+      date: dateStr,
+      label: i === 0 ? (lang === "en" ? "Today" : "วันนี้") : getDayShortLabel(dateStr, lang),
+      icon: weatherCodeToEmoji(daily.weather_code?.[i]),
+      maxTemp: daily.temperature_2m_max?.[i],
+      minTemp: daily.temperature_2m_min?.[i],
+      rainChance: daily.precipitation_probability_max?.[i],
+      rainSum: daily.precipitation_sum?.[i],
+    }));
+
+    return {
+      days,
+      today: days[0],
+      rain7Days: sumNumbers(days.map((d) => d.rainSum)),
+      recommendation: buildWeatherRecommendation(weatherData, lang),
+      currentTemp: weatherData?.current?.temperature_2m,
+    };
+  }, [weatherData, lang]);
+
+  const htmlContent = useMemo(
+    () => buildHtmlContent(t, weatherView, weatherLoading, weatherError),
+    [t, weatherView, weatherLoading, weatherError]
+  );
 
   useEffect(() => {
   let alive = true;
@@ -870,6 +1018,49 @@ export default function Page() {
 }, [t]);
 
   useEffect(() => {
+    let alive = true;
+
+    async function loadWeather() {
+      try {
+        setWeatherLoading(true);
+        setWeatherError("");
+
+        if (!Array.isArray(plots) || !plots.length) {
+          if (alive) setWeatherData(null);
+          return;
+        }
+
+        const firstPlot = plots[0];
+        const center = getPlotCenterLatLng(firstPlot);
+
+        if (!center) {
+          if (alive) {
+            setWeatherData(null);
+            setWeatherError("ไม่พบพิกัดแปลงสำหรับพยากรณ์อากาศ");
+          }
+          return;
+        }
+
+        const data = await fetchWeather7Days(center.lat, center.lng);
+        if (!alive) return;
+        setWeatherData(data);
+      } catch (err) {
+        if (!alive) return;
+        setWeatherData(null);
+        setWeatherError(err?.message || "โหลดพยากรณ์อากาศไม่สำเร็จ");
+      } finally {
+        if (alive) setWeatherLoading(false);
+      }
+    }
+
+    loadWeather();
+
+    return () => {
+      alive = false;
+    };
+  }, [plots]);
+
+  useEffect(() => {
     const cardsEl = document.getElementById("dashboardSensorCards");
     const onCountEl = document.getElementById("dashboardNodeOnCount");
     const offCountEl = document.getElementById("dashboardNodeOffCount");
@@ -919,7 +1110,7 @@ export default function Page() {
             .join("")
         : `<div class="alert-pill">${t.noIssues}</div>`;
     }
-  }, [plots, t, lang]);
+  }, [plots, t, lang, htmlContent]);
 
   useEffect(() => {
     let mounted = true;
@@ -1154,7 +1345,7 @@ export default function Page() {
         mapEl._leaflet_id = null;
       }
     };
-  }, [loadingMap, mapError, mapData, t, lang]);
+  }, [loadingMap, mapError, mapData, t, lang, htmlContent]);
 
   return <DuwimsStaticPage current="dashboard" htmlContent={htmlContent} />;
 }
