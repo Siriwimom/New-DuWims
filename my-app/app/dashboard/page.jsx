@@ -1113,239 +1113,255 @@ export default function Page() {
   }, [plots, t, lang, htmlContent]);
 
   useEffect(() => {
-    let mounted = true;
-    let mapInstance = null;
+  let mounted = true;
+  let mapInstance = null;
+  let resizeTimer = null;
 
-    async function initLeaflet() {
-      if (loadingMap) return;
+  async function initLeaflet() {
+    if (loadingMap) return;
 
-      const hostEl = document.getElementById("dashboardMapHost");
-      const plotCountEl = document.getElementById("mapPlotCount");
-      const pinCountEl = document.getElementById("mapPinCount");
+    const hostEl = document.getElementById("dashboardMapHost");
+    const plotCountEl = document.getElementById("mapPlotCount");
+    const pinCountEl = document.getElementById("mapPinCount");
 
-      if (plotCountEl) {
-        plotCountEl.textContent = `${t.plotCount}: ${mapData.polygons.length}`;
-      }
-
-      if (pinCountEl) {
-        pinCountEl.textContent = `${t.pinCount}: ${mapData.pins.length}`;
-      }
-
-      if (!hostEl) return;
-
-      if (mapError) {
-        if (mapRef.current) {
-          mapRef.current.remove();
-          mapRef.current = null;
-        }
-
-        hostEl.innerHTML = `
-          <div style="
-            height:320px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            text-align:center;
-            padding:24px;
-            color:#9a3412;
-            background:#fff7ed;
-            font-weight:700;
-          ">
-            ${escapeHtml(mapError)}
-          </div>
-        `;
-        return;
-      }
-
-      let mapEl = document.getElementById("dashboardMap");
-
-      if (!mapEl) {
-        hostEl.innerHTML = `<div id="dashboardMap" style="width:100%;height:320px;min-height:320px;display:block;border-radius:18px;overflow:hidden;background:#dfeecf"></div>`;
-        mapEl = document.getElementById("dashboardMap");
-      }
-
-      if (!mapEl) return;
-
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-
-      if (mapEl._leaflet_id) {
-        mapEl._leaflet_id = null;
-      }
-
-      try {
-        const leafletModule = await import("leaflet");
-        const L = leafletModule.default || leafletModule;
-
-        if (!mounted || !L) return;
-
-        delete L.Icon.Default.prototype._getIconUrl;
-        L.Icon.Default.mergeOptions({
-          iconRetinaUrl:
-            "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-          iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-          shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-        });
-
-        function makeDotIcon(color) {
-          return L.divIcon({
-            className: "dashboard-node-marker",
-            html: `
-              <div style="
-                width:18px;
-                height:18px;
-                border-radius:999px;
-                background:${color};
-                border:3px solid #ffffff;
-                box-shadow:0 4px 10px rgba(0,0,0,.25);
-              "></div>
-            `,
-            iconSize: [18, 18],
-            iconAnchor: [9, 9],
-            popupAnchor: [0, -10],
-          });
-        }
-
-        const airIcon = makeDotIcon("#2563eb");
-        const soilIcon = makeDotIcon("#16a34a");
-
-        const defaultCenter = [13.112, 100.926];
-        const center =
-          mapData.polygons?.[0]?.coords?.[0] ||
-          (mapData.pins?.[0] ? [mapData.pins[0].lat, mapData.pins[0].lng] : defaultCenter);
-
-        mapInstance = L.map(mapEl, {
-          center,
-          zoom: 17,
-          zoomControl: true,
-        });
-
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 20,
-          attribution: "&copy; OpenStreetMap contributors",
-        }).addTo(mapInstance);
-
-        const bounds = [];
-
-        mapData.polygons.forEach((poly) => {
-          const layer = L.polygon(poly.coords, {
-            color: poly.color || "#6c8f5d",
-            weight: 2,
-            fillColor: poly.color || "#6c8f5d",
-            fillOpacity: 0.12,
-          }).addTo(mapInstance);
-
-          layer.bindTooltip(poly.name, { sticky: true });
-
-          layer.bindPopup(`
-            <div style="min-width:180px">
-              <div style="font-weight:800;margin-bottom:6px">${escapeHtml(poly.name)}</div>
-              <div>${t.polygonPointCount}: ${poly.coords.length}</div>
-            </div>
-          `);
-
-          poly.coords.forEach((pt) => bounds.push(pt));
-        });
-
-        mapData.pins.forEach((pin) => {
-          const node = pin.nodes?.[0] || {};
-          const nodeType = String(node?.nodeType || "air").toLowerCase();
-          const marker = L.marker([pin.lat, pin.lng], {
-            icon: nodeType === "soil" ? soilIcon : airIcon,
-          }).addTo(mapInstance);
-
-          const sensorList = Array.isArray(node?.sensors) ? node.sensors : [];
-
-          const sensorListHtml = sensorList.length
-            ? `<ul style="padding-left:18px;margin:6px 0 0 0">
-                ${sensorList
-                  .map((sensor, i) => {
-                    const sensorName = translateSensorName(
-                      sensor?.name || sensor?.uid || `${t.sensor} ${i + 1}`,
-                      lang
-                    );
-                    const latestValue = displayLatest(sensor);
-                    return `<li>${escapeHtml(sensorName)} • ${escapeHtml(
-                      latestValue
-                    )}</li>`;
-                  })
-                  .join("")}
-               </ul>`
-            : `<div>${t.noSensorLower}</div>`;
-
-          marker.bindTooltip(pin.pinName, {
-            direction: "top",
-            offset: [0, -8],
-            opacity: 1,
-          });
-
-          marker.bindPopup(`
-            <div style="min-width:240px">
-              <div style="font-weight:800;margin-bottom:6px">${escapeHtml(pin.pinName)}</div>
-              <div style="margin-bottom:4px">${t.plot}: ${escapeHtml(pin.plotName)}</div>
-              <div style="margin-bottom:4px">${t.type}: ${escapeHtml(
-                nodeType === "soil" ? t.soilNode : t.airNode
-              )}</div>
-              <div style="margin-bottom:4px">${t.status}: ${escapeHtml(node?.status || "-")}</div>
-              <div style="margin-bottom:4px">lat ${escapeHtml(pin.lat)}, lng ${escapeHtml(pin.lng)}</div>
-              <div style="font-weight:700;margin-top:8px;margin-bottom:4px">${t.currentSensors}</div>
-              ${sensorListHtml}
-            </div>
-          `);
-
-          bounds.push([pin.lat, pin.lng]);
-        });
-
-        if (bounds.length) {
-          mapInstance.fitBounds(bounds, { padding: [20, 20] });
-        } else {
-          mapInstance.setView(defaultCenter, 17);
-        }
-
-        setTimeout(() => {
-          if (mapInstance) mapInstance.invalidateSize(true);
-        }, 250);
-
-        mapRef.current = mapInstance;
-      } catch {
-        if (!mounted) return;
-        hostEl.innerHTML = `
-          <div style="
-            height:320px;
-            display:flex;
-            align-items:center;
-            justify-content:center;
-            text-align:center;
-            padding:24px;
-            color:#9a3412;
-            background:#fff7ed;
-            font-weight:700;
-          ">
-            ${t.leafletLoadFailed}
-          </div>
-        `;
-      }
+    if (plotCountEl) {
+      plotCountEl.textContent = `${t.plotCount}: ${mapData.polygons.length}`;
     }
 
-    const tm = setTimeout(initLeaflet, 100);
+    if (pinCountEl) {
+      pinCountEl.textContent = `${t.pinCount}: ${mapData.pins.length}`;
+    }
 
-    return () => {
-      mounted = false;
-      clearTimeout(tm);
+    if (!hostEl) return;
 
+    if (mapError) {
       if (mapRef.current) {
-        mapRef.current.remove();
+        try {
+          mapRef.current.remove();
+        } catch {}
         mapRef.current = null;
       }
 
-      const mapEl = document.getElementById("dashboardMap");
-      if (mapEl && mapEl._leaflet_id) {
+      hostEl.innerHTML = `
+        <div style="
+          height:320px;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          text-align:center;
+          padding:24px;
+          color:#9a3412;
+          background:#fff7ed;
+          font-weight:700;
+        ">
+          ${escapeHtml(mapError)}
+        </div>
+      `;
+      return;
+    }
+
+    let mapEl = document.getElementById("dashboardMap");
+
+    if (!mapEl) {
+      hostEl.innerHTML = `<div id="dashboardMap" style="width:100%;height:320px;min-height:320px;display:block;border-radius:18px;overflow:hidden;background:#dfeecf"></div>`;
+      mapEl = document.getElementById("dashboardMap");
+    }
+
+    if (!mapEl || !mapEl.isConnected) return;
+
+    if (mapRef.current) {
+      try {
+        mapRef.current.remove();
+      } catch {}
+      mapRef.current = null;
+    }
+
+    if (mapEl._leaflet_id) {
+      try {
         mapEl._leaflet_id = null;
+      } catch {}
+    }
+
+    try {
+      const leafletModule = await import("leaflet");
+      const L = leafletModule.default || leafletModule;
+
+      if (!mounted || !L || !mapEl || !mapEl.isConnected) return;
+
+      delete L.Icon.Default.prototype._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl:
+          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+      });
+
+      function makeDotIcon(color) {
+        return L.divIcon({
+          className: "dashboard-node-marker",
+          html: `
+            <div style="
+              width:18px;
+              height:18px;
+              border-radius:999px;
+              background:${color};
+              border:3px solid #ffffff;
+              box-shadow:0 4px 10px rgba(0,0,0,.25);
+            "></div>
+          `,
+          iconSize: [18, 18],
+          iconAnchor: [9, 9],
+          popupAnchor: [0, -10],
+        });
       }
-    };
-  }, [loadingMap, mapError, mapData, t, lang, htmlContent]);
+
+      const airIcon = makeDotIcon("#2563eb");
+      const soilIcon = makeDotIcon("#16a34a");
+
+      const defaultCenter = [13.112, 100.926];
+      const center =
+        mapData.polygons?.[0]?.coords?.[0] ||
+        (mapData.pins?.[0] ? [mapData.pins[0].lat, mapData.pins[0].lng] : defaultCenter);
+
+      mapInstance = L.map(mapEl, {
+        center,
+        zoom: 17,
+        zoomControl: true,
+      });
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 20,
+        attribution: "&copy; OpenStreetMap contributors",
+      }).addTo(mapInstance);
+
+      const bounds = [];
+
+      mapData.polygons.forEach((poly) => {
+        const layer = L.polygon(poly.coords, {
+          color: poly.color || "#6c8f5d",
+          weight: 2,
+          fillColor: poly.color || "#6c8f5d",
+          fillOpacity: 0.12,
+        }).addTo(mapInstance);
+
+        layer.bindTooltip(poly.name, { sticky: true });
+
+        layer.bindPopup(`
+          <div style="min-width:180px">
+            <div style="font-weight:800;margin-bottom:6px">${escapeHtml(poly.name)}</div>
+            <div>${t.polygonPointCount}: ${poly.coords.length}</div>
+          </div>
+        `);
+
+        poly.coords.forEach((pt) => bounds.push(pt));
+      });
+
+      mapData.pins.forEach((pin) => {
+        const node = pin.nodes?.[0] || {};
+        const nodeType = String(node?.nodeType || "air").toLowerCase();
+        const marker = L.marker([pin.lat, pin.lng], {
+          icon: nodeType === "soil" ? soilIcon : airIcon,
+        }).addTo(mapInstance);
+
+        const sensorList = Array.isArray(node?.sensors) ? node.sensors : [];
+
+        const sensorListHtml = sensorList.length
+          ? `<ul style="padding-left:18px;margin:6px 0 0 0">
+              ${sensorList
+                .map((sensor, i) => {
+                  const sensorName = translateSensorName(
+                    sensor?.name || sensor?.uid || `${t.sensor} ${i + 1}`,
+                    lang
+                  );
+                  const latestValue = displayLatest(sensor);
+                  return `<li>${escapeHtml(sensorName)} • ${escapeHtml(latestValue)}</li>`;
+                })
+                .join("")}
+             </ul>`
+          : `<div>${t.noSensorLower}</div>`;
+
+        marker.bindTooltip(pin.pinName, {
+          direction: "top",
+          offset: [0, -8],
+          opacity: 1,
+        });
+
+        marker.bindPopup(`
+          <div style="min-width:240px">
+            <div style="font-weight:800;margin-bottom:6px">${escapeHtml(pin.pinName)}</div>
+            <div style="margin-bottom:4px">${t.plot}: ${escapeHtml(pin.plotName)}</div>
+            <div style="margin-bottom:4px">${t.type}: ${escapeHtml(
+              nodeType === "soil" ? t.soilNode : t.airNode
+            )}</div>
+            <div style="margin-bottom:4px">${t.status}: ${escapeHtml(node?.status || "-")}</div>
+            <div style="margin-bottom:4px">lat ${escapeHtml(pin.lat)}, lng ${escapeHtml(pin.lng)}</div>
+            <div style="font-weight:700;margin-top:8px;margin-bottom:4px">${t.currentSensors}</div>
+            ${sensorListHtml}
+          </div>
+        `);
+
+        bounds.push([pin.lat, pin.lng]);
+      });
+
+      if (bounds.length) {
+        mapInstance.fitBounds(bounds, { padding: [20, 20] });
+      } else {
+        mapInstance.setView(defaultCenter, 17);
+      }
+
+      mapRef.current = mapInstance;
+
+      resizeTimer = setTimeout(() => {
+        try {
+          if (!mounted) return;
+          if (!mapInstance) return;
+          if (mapRef.current !== mapInstance) return;
+          if (!mapEl || !mapEl.isConnected) return;
+          mapInstance.invalidateSize();
+        } catch {}
+      }, 250);
+    } catch {
+      if (!mounted) return;
+      hostEl.innerHTML = `
+        <div style="
+          height:320px;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          text-align:center;
+          padding:24px;
+          color:#9a3412;
+          background:#fff7ed;
+          font-weight:700;
+        ">
+          ${t.leafletLoadFailed}
+        </div>
+      `;
+    }
+  }
+
+  const tm = setTimeout(initLeaflet, 100);
+
+  return () => {
+    mounted = false;
+    clearTimeout(tm);
+    if (resizeTimer) clearTimeout(resizeTimer);
+
+    if (mapRef.current) {
+      try {
+        mapRef.current.remove();
+      } catch {}
+      mapRef.current = null;
+    }
+
+    const mapEl = document.getElementById("dashboardMap");
+    if (mapEl && mapEl._leaflet_id) {
+      try {
+        mapEl._leaflet_id = null;
+      } catch {}
+    }
+  };
+}, [loadingMap, mapError, mapData, t, lang, htmlContent]);
 
   return <DuwimsStaticPage current="dashboard" htmlContent={htmlContent} />;
 }
