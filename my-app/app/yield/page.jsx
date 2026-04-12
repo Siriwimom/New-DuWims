@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
 import { useDuwimsT } from "../components/language-context";
 
@@ -160,6 +160,23 @@ export default function YieldPage() {
       loadFailed: lang === "en" ? "Failed to load data" : "โหลดข้อมูลไม่สำเร็จ",
       saveFailed: lang === "en" ? "Failed to save data" : "บันทึกข้อมูลไม่สำเร็จ",
       deleteFailed: lang === "en" ? "Failed to delete data" : "ลบข้อมูลไม่สำเร็จ",
+
+      leaveTitle:
+        lang === "en" ? "Unsaved changes" : "มีการแก้ไขที่ยังไม่บันทึก",
+      leaveSub1:
+        lang === "en"
+          ? "You are currently creating or editing yield data."
+          : "คุณกำลังอยู่ระหว่างเพิ่มหรือแก้ไขข้อมูลผลผลิต",
+      leaveSub2:
+        lang === "en"
+          ? "Do you want to leave this page?"
+          : "ต้องการออกจากหน้านี้และเปลี่ยนหน้าใช่หรือไม่?",
+      stayHere: lang === "en" ? "Stay" : "อยู่หน้าเดิม",
+      leavePage: lang === "en" ? "Leave page" : "เปลี่ยนหน้า",
+      loginRequired:
+        lang === "en"
+          ? "Please log in before accessing this page."
+          : "กรุณาเข้าสู่ระบบก่อนเข้าใช้งานหน้านี้",
     }),
     [lang, t]
   );
@@ -181,12 +198,18 @@ export default function YieldPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
 
   const [createForm, setCreateForm] = useState(createEmptyForm());
   const [editForm, setEditForm] = useState(createEmptyForm());
 
   const [saveMode, setSaveMode] = useState("create");
   const [pendingDelete, setPendingDelete] = useState(null);
+
+  const pendingNavigationRef = useRef(null);
+  const allowNavigationRef = useRef(false);
+
+  const isEditing = createOpen || editOpen;
 
   const plotMap = useMemo(() => {
     const map = {};
@@ -262,12 +285,27 @@ export default function YieldPage() {
     }
   }
 
+  function redirectToLogin() {
+    if (typeof window === "undefined") return;
+    try {
+      window.location.replace("/login");
+    } catch {
+      window.location.replace("/");
+    }
+  }
+
   async function loadAll() {
     setLoading(true);
     setError("");
 
     try {
       await bootstrapAuthFromUrl();
+
+      const token = getToken();
+      if (!token) {
+        redirectToLogin();
+        return;
+      }
 
       const [plotsRes, managementRes] = await Promise.all([
         apiFetch("/api/plots"),
@@ -277,7 +315,16 @@ export default function YieldPage() {
       setPlots(Array.isArray(plotsRes?.items) ? plotsRes.items : []);
       setItems(Array.isArray(managementRes?.items) ? managementRes.items : []);
     } catch (err) {
-      setError(err?.message || tx.loadFailed);
+      const message = err?.message || tx.loadFailed;
+
+      if (
+        /401|403|unauthorized|forbidden|jwt|token/i.test(String(message || ""))
+      ) {
+        redirectToLogin();
+        return;
+      }
+
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -292,6 +339,78 @@ export default function YieldPage() {
       setCreateForm((prev) => ({ ...prev, plot: plotOptions[0].id }));
     }
   }, [plotOptions, createForm.plot]);
+
+  useEffect(() => {
+    if (!isEditing) {
+      pendingNavigationRef.current = null;
+      allowNavigationRef.current = false;
+      setConfirmLeaveOpen(false);
+    }
+  }, [isEditing]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleBeforeUnload = (e) => {
+      if (!isEditing || allowNavigationRef.current) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isEditing]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !isEditing) return;
+
+    window.history.pushState({ yieldGuard: true }, "", window.location.href);
+
+    const handlePopState = () => {
+      if (allowNavigationRef.current) return;
+      pendingNavigationRef.current = { type: "back" };
+      setConfirmLeaveOpen(true);
+      window.history.pushState({ yieldGuard: true }, "", window.location.href);
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isEditing]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+
+    const handleDocumentClick = (e) => {
+      if (!isEditing || allowNavigationRef.current) return;
+      if (e.defaultPrevented) return;
+      if (e.button !== 0) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+
+      const anchor = e.target?.closest?.("a[href]");
+      if (!anchor) return;
+
+      const rawHref = anchor.getAttribute("href") || "";
+      if (!rawHref) return;
+      if (rawHref.startsWith("#")) return;
+      if (rawHref.startsWith("javascript:")) return;
+      if (rawHref.startsWith("mailto:")) return;
+      if (rawHref.startsWith("tel:")) return;
+      if (anchor.getAttribute("target") === "_blank") return;
+      if (anchor.hasAttribute("download")) return;
+
+      const targetUrl = new URL(rawHref, window.location.href);
+      const currentUrl = new URL(window.location.href);
+
+      if (targetUrl.href === currentUrl.href) return;
+
+      e.preventDefault();
+      pendingNavigationRef.current = { type: "href", href: targetUrl.href };
+      setConfirmLeaveOpen(true);
+    };
+
+    document.addEventListener("click", handleDocumentClick, true);
+    return () => document.removeEventListener("click", handleDocumentClick, true);
+  }, [isEditing]);
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -375,6 +494,39 @@ export default function YieldPage() {
     setFilterSpecies("");
     setFilterStartDate("");
     setFilterEndDate("");
+  }
+
+  function closeCreatePopup() {
+    setCreateOpen(false);
+  }
+
+  function closeEditPopup() {
+    setEditOpen(false);
+  }
+
+  function handleStayOnPage() {
+    pendingNavigationRef.current = null;
+    setConfirmLeaveOpen(false);
+  }
+
+  function handleLeavePage() {
+    const pending = pendingNavigationRef.current;
+    pendingNavigationRef.current = null;
+    setConfirmLeaveOpen(false);
+    allowNavigationRef.current = true;
+    setCreateOpen(false);
+    setEditOpen(false);
+
+    if (typeof window === "undefined") return;
+
+    if (pending?.type === "back") {
+      window.history.back();
+      return;
+    }
+
+    if (pending?.type === "href" && pending.href) {
+      window.location.href = pending.href;
+    }
   }
 
   async function handleConfirmSave() {
@@ -600,7 +752,7 @@ export default function YieldPage() {
             id="createYieldPopup"
             className="popup-overlay open"
             onClick={(e) => {
-              if (e.target === e.currentTarget) setCreateOpen(false);
+              if (e.target === e.currentTarget) closeCreatePopup();
             }}
           >
             <div className="popup-box">
@@ -608,7 +760,7 @@ export default function YieldPage() {
               <button
                 className="popup-close"
                 type="button"
-                onClick={() => setCreateOpen(false)}
+                onClick={closeCreatePopup}
               >
                 ✕
               </button>
@@ -684,7 +836,7 @@ export default function YieldPage() {
                 <button
                   className="btn-cancel"
                   type="button"
-                  onClick={() => setCreateOpen(false)}
+                  onClick={closeCreatePopup}
                 >
                   {tx.cancel}
                 </button>
@@ -711,7 +863,7 @@ export default function YieldPage() {
             id="editYieldPopup"
             className="popup-overlay open"
             onClick={(e) => {
-              if (e.target === e.currentTarget) setEditOpen(false);
+              if (e.target === e.currentTarget) closeEditPopup();
             }}
           >
             <div className="popup-box">
@@ -719,7 +871,7 @@ export default function YieldPage() {
               <button
                 className="popup-close"
                 type="button"
-                onClick={() => setEditOpen(false)}
+                onClick={closeEditPopup}
               >
                 ✕
               </button>
@@ -794,7 +946,7 @@ export default function YieldPage() {
                 <button
                   className="btn-cancel"
                   type="button"
-                  onClick={() => setEditOpen(false)}
+                  onClick={closeEditPopup}
                 >
                   {tx.cancel}
                 </button>
@@ -884,244 +1036,281 @@ export default function YieldPage() {
             </div>
           </div>
         )}
-<style jsx>{`
-  .yield-error-banner {
-    margin-bottom: 10px;
-    border-radius: 12px;
-    padding: 10px 12px;
-    background: #fff3f3;
-    border: 1px solid #ffd1d1;
-    color: #b42318;
-    font-size: 12px;
-    line-height: 1.45;
-    word-break: break-word;
-    overflow-wrap: break-word;
-  }
 
-  .yield-table-card {
-    min-height: 200px;
-    background: #163d0b !important;
-    border: 2px solid #163d0b !important;
-    border-radius: 22px !important;
-    box-shadow: none !important;
-    padding: 0 !important;
-    overflow: hidden !important;
-    width: 100%;
-    min-width: 0;
-  }
+        {confirmLeaveOpen && (
+          <div
+            id="confirmLeaveYield"
+            className="popup-overlay open"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) handleStayOnPage();
+            }}
+          >
+            <div className="confirm-box">
+              <div className="confirm-icon">⚠️</div>
+              <div className="confirm-title">{tx.leaveTitle}</div>
+              <div className="confirm-sub">
+                {tx.leaveSub1}
+                <br />
+                {tx.leaveSub2}
+              </div>
+              <div className="confirm-actions">
+                <button
+                  className="btn-cancel"
+                  type="button"
+                  onClick={handleStayOnPage}
+                >
+                  {tx.stayHere}
+                </button>
+                <button
+                  className="btn-confirm"
+                  type="button"
+                  onClick={handleLeavePage}
+                >
+                  {tx.leavePage}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
-  .yield-table-card > div {
-    width: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
-    border-radius: 20px;
-  }
+        <style jsx>{`
+          .yield-error-banner {
+            margin-bottom: 10px;
+            border-radius: 12px;
+            padding: 10px 12px;
+            background: #fff3f3;
+            border: 1px solid #ffd1d1;
+            color: #b42318;
+            font-size: 12px;
+            line-height: 1.45;
+            word-break: break-word;
+            overflow-wrap: break-word;
+          }
 
-  .yield-table {
-    width: 100%;
-    min-width: 900px;
-    border-collapse: separate;
-    border-spacing: 0;
-    table-layout: fixed;
-    background: #ffffff;
-  }
+          .yield-table-card {
+            min-height: 200px;
+            background: #163d0b !important;
+            border: 2px solid #163d0b !important;
+            border-radius: 22px !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            width: 100%;
+            min-width: 0;
+          }
 
-  .yield-table thead th {
-    white-space: nowrap;
-    text-align: center;
-    vertical-align: middle;
-    padding: 16px 18px;
-    background: #163d0b;
-    color: #ffffff;
-    font-weight: 800;
-  }
+          .yield-table-card > div {
+            width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+            border-radius: 20px;
+          }
 
-  .yield-table thead th:first-child {
-    border-top-left-radius: 18px;
-  }
+          .yield-table {
+            width: 100%;
+            min-width: 900px;
+            border-collapse: separate;
+            border-spacing: 0;
+            table-layout: fixed;
+            background: #ffffff;
+          }
 
-  .yield-table thead th:last-child {
-    border-top-right-radius: 18px;
-  }
+          .yield-table thead th {
+            white-space: nowrap;
+            text-align: center;
+            vertical-align: middle;
+            padding: 16px 18px;
+            background: #163d0b;
+            color: #ffffff;
+            font-weight: 800;
+          }
 
-  .yield-table tbody td {
-    text-align: center;
-    vertical-align: middle;
-    padding: 14px 18px;
-    background: #ffffff !important;
-    word-break: break-word;
-    overflow-wrap: break-word;
-  }
+          .yield-table thead th:first-child {
+            border-top-left-radius: 18px;
+          }
 
-  .yield-table tbody tr {
-    height: 76px;
-  }
+          .yield-table thead th:last-child {
+            border-top-right-radius: 18px;
+          }
 
-  .yield-table tbody tr:last-child td:first-child {
-    border-bottom-left-radius: 18px;
-  }
+          .yield-table tbody td {
+            text-align: center;
+            vertical-align: middle;
+            padding: 14px 18px;
+            background: #ffffff !important;
+            word-break: break-word;
+            overflow-wrap: break-word;
+          }
 
-  .yield-table tbody tr:last-child td:last-child {
-    border-bottom-right-radius: 18px;
-  }
+          .yield-table tbody tr {
+            height: 76px;
+          }
 
-  .yield-table tbody tr:last-child td {
-    border-bottom: none;
-  }
+          .yield-table tbody tr:last-child td:first-child {
+            border-bottom-left-radius: 18px;
+          }
 
-  .yield-table th:nth-child(1),
-  .yield-table td:nth-child(1) {
-    width: 16%;
-    text-align: center;
-  }
+          .yield-table tbody tr:last-child td:last-child {
+            border-bottom-right-radius: 18px;
+          }
 
-  .yield-table th:nth-child(2),
-  .yield-table td:nth-child(2) {
-    width: 20%;
-    text-align: center;
-  }
+          .yield-table tbody tr:last-child td {
+            border-bottom: none;
+          }
 
-  .yield-table th:nth-child(3),
-  .yield-table td:nth-child(3) {
-    width: 15%;
-  }
+          .yield-table th:nth-child(1),
+          .yield-table td:nth-child(1) {
+            width: 16%;
+            text-align: center;
+          }
 
-  .yield-table th:nth-child(4),
-  .yield-table td:nth-child(4) {
-    width: 15%;
-  }
+          .yield-table th:nth-child(2),
+          .yield-table td:nth-child(2) {
+            width: 20%;
+            text-align: center;
+          }
 
-  .yield-table th:nth-child(5),
-  .yield-table td:nth-child(5) {
-    width: 14%;
-  }
+          .yield-table th:nth-child(3),
+          .yield-table td:nth-child(3) {
+            width: 15%;
+          }
 
- .yield-table th:nth-child(6),
-.yield-table td:nth-child(6) {
-  width: auto;
-  min-width: 140px;
-}
+          .yield-table th:nth-child(4),
+          .yield-table td:nth-child(4) {
+            width: 15%;
+          }
 
-  .yield-empty-cell {
-    text-align: center !important;
-    vertical-align: middle;
-    padding: 54px 18px !important;
-    color: #7b8794;
-    font-weight: 600;
-    background: #ffffff !important;
-  }
+          .yield-table th:nth-child(5),
+          .yield-table td:nth-child(5) {
+            width: 14%;
+          }
 
-  .yield-actions-cell {
-    display: flex;
-    gap: 8px;
-    flex-wrap: nowrap;
-    align-items: center;
-    justify-content: center;
-  }
+          .yield-table th:nth-child(6),
+          .yield-table td:nth-child(6) {
+            width: auto;
+            min-width: 140px;
+          }
 
-  @media (max-width: 1200px) {
-    .yield-filters {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
+          .yield-empty-cell {
+            text-align: center !important;
+            vertical-align: middle;
+            padding: 54px 18px !important;
+            color: #7b8794;
+            font-weight: 600;
+            background: #ffffff !important;
+          }
 
-    .yield-filter-col {
-      min-width: 0;
-    }
+          .yield-actions-cell {
+            display: flex;
+            gap: 8px;
+            flex-wrap: nowrap;
+            align-items: center;
+            justify-content: center;
+          }
 
-    .yield-filter-col .form-select,
-    .yield-filter-col .form-input {
-      width: 100% !important;
-      min-width: 0;
-    }
+          @media (max-width: 1200px) {
+            .yield-filters {
+              display: grid;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 10px;
+            }
 
-    .yield-table {
-      min-width: 860px;
-    }
-  }
+            .yield-filter-col {
+              min-width: 0;
+            }
 
-  @media (max-width: 900px) {
-    .yield-filters {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
+            .yield-filter-col .form-select,
+            .yield-filter-col .form-input {
+              width: 100% !important;
+              min-width: 0;
+            }
 
-    .yield-filter-col {
-      min-width: 0;
-    }
+            .yield-table {
+              min-width: 860px;
+            }
+          }
 
-    .yield-filter-col .form-select,
-    .yield-filter-col .form-input {
-      width: 100% !important;
-      min-width: 0;
-    }
+          @media (max-width: 900px) {
+            .yield-filters {
+              display: grid;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 10px;
+            }
 
-    .yield-table {
-      min-width: 820px;
-    }
+            .yield-filter-col {
+              min-width: 0;
+            }
 
-    .yield-table thead th,
-    .yield-table tbody td {
-      padding: 13px 14px;
-    }
-  }
+            .yield-filter-col .form-select,
+            .yield-filter-col .form-input {
+              width: 100% !important;
+              min-width: 0;
+            }
 
-  @media (max-width: 640px) {
-    .yield-filters {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 10px;
-    }
+            .yield-table {
+              min-width: 820px;
+            }
 
-    .yield-filter-col {
-      min-width: 0;
-    }
+            .yield-table thead th,
+            .yield-table tbody td {
+              padding: 13px 14px;
+            }
+          }
 
-    .yield-filter-col .form-select,
-    .yield-filter-col .form-input {
-      width: 100% !important;
-      min-width: 0;
-    }
+          @media (max-width: 640px) {
+            .yield-filters {
+              display: grid;
+              grid-template-columns: 1fr;
+              gap: 10px;
+            }
 
-    .yield-table {
-      min-width: 760px;
-    }
+            .yield-filter-col {
+              min-width: 0;
+            }
 
-    .yield-table thead th,
-    .yield-table tbody td {
-      padding: 12px 12px;
-      font-size: 12px;
-    }
+            .yield-filter-col .form-select,
+            .yield-filter-col .form-input {
+              width: 100% !important;
+              min-width: 0;
+            }
 
-    .yield-actions-cell {
-      flex-direction: column;
-      gap: 6px;
-    }
+            .yield-table {
+              min-width: 760px;
+            }
 
-    .yield-actions-cell > * {
-      width: 100%;
-    }
-  }
+            .yield-table thead th,
+            .yield-table tbody td {
+              padding: 12px 12px;
+              font-size: 12px;
+            }
 
-  @media (max-width: 480px) {
-    .yield-table {
-      min-width: 700px;
-    }
+            .yield-actions-cell {
+              flex-direction: column;
+              gap: 6px;
+            }
 
-    .yield-table thead th,
-    .yield-table tbody td {
-      padding: 10px 10px;
-      font-size: 11px;
-    }
+            .yield-actions-cell > * {
+              width: 100%;
+            }
+          }
 
-    .yield-empty-cell {
-      padding: 40px 12px !important;
-      font-size: 12px;
-    }
-  }
-`}</style>
+          @media (max-width: 480px) {
+            .yield-table {
+              min-width: 700px;
+            }
+
+            .yield-table thead th,
+            .yield-table tbody td {
+              padding: 10px 10px;
+              font-size: 11px;
+            }
+
+            .yield-empty-cell {
+              padding: 40px 12px !important;
+              font-size: 12px;
+            }
+          }
+        `}</style>
       </div>
     </DuwimsStaticPage>
   );
