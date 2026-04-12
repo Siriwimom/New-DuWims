@@ -322,10 +322,15 @@ export default function App() {
     }
   }
 
-  function handleGoogleSignIn() {
+  function handleGoogleSignIn(roleOverride = null) {
     setErr("");
     setInfo("");
-    window.location.href = `${API_BASE}/auth/google/start`;
+
+    const finalRole = roleOverride || (signupIsOwner ? "owner" : "employee");
+    const params = new URLSearchParams();
+    params.set("role", finalRole);
+
+    window.location.href = `${API_BASE}/auth/google/start?${params.toString()}`;
   }
 
   async function handleSendOtp() {
@@ -557,7 +562,7 @@ export default function App() {
 
             <button
               className="btn googleBtn"
-              onClick={handleGoogleSignIn}
+              onClick={() => handleGoogleSignIn()}
               disabled={loading}
             >
               <span className="gIcon"><GoogleIcon /></span>
@@ -639,7 +644,9 @@ export default function App() {
                 <input
                   type="checkbox"
                   checked={signupIsOwner}
-                  onChange={(e) => setSignupIsOwner(e.target.checked)}
+                  onChange={(e) => {
+                    setSignupIsOwner(e.target.checked);
+                  }}
                 />
                 <span>สมัครเป็น Owner (ถ้าไม่ติ๊กจะเป็นพนักงาน)</span>
               </label>
@@ -655,7 +662,7 @@ export default function App() {
 
             <button
               className="btn googleBtn"
-              onClick={handleGoogleSignIn}
+              onClick={() => handleGoogleSignIn()}
               disabled={loading}
             >
               <span className="gIcon"><GoogleIcon /></span>

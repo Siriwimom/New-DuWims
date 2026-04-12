@@ -98,6 +98,10 @@ export default function TopBar() {
   const [displayName, setDisplayName] = useState("ผู้ใช้งาน");
   const [email, setEmail] = useState("user@example.com");
   const [provider, setProvider] = useState("local");
+  const [ownerUid, setOwnerUid] = useState("");
+  const [authReady, setAuthReady] = useState(false);
+  const [linkOwnerUid, setLinkOwnerUid] = useState("");
+  const [linkingOwner, setLinkingOwner] = useState(false);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [isPasswordOpen, setIsPasswordOpen] = useState(false);
@@ -124,7 +128,7 @@ export default function TopBar() {
 
   const apiBase = getApiBase();
 
-  const syncAuth = () => {
+  const syncAuth = async () => {
     try {
       const token = readToken();
       setHasToken(!!token);
@@ -132,27 +136,56 @@ export default function TopBar() {
       if (token) {
         const payload = parseJwt(token);
         const nextRole = String(payload?.role || "").toLowerCase();
-        const nextName =
-          payload?.nickname ||
-          payload?.displayName ||
-          payload?.name ||
-          payload?.fullName ||
-          payload?.username ||
-          "ผู้ใช้งาน";
-        const nextEmail = payload?.email || "user@example.com";
-        const nextProvider = payload?.provider || "local";
 
         setRole(nextRole);
-        setDisplayName(nextName);
-        setDraftDisplayName(nextName);
-        setEmail(nextEmail);
-        setProvider(nextProvider);
+
+        try {
+          const me = await requestJson(`${apiBase}/auth/me`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+
+          const user = me?.user || {};
+          const nextName =
+            user?.nickname ||
+            payload?.nickname ||
+            payload?.displayName ||
+            payload?.name ||
+            payload?.fullName ||
+            payload?.username ||
+            "ผู้ใช้งาน";
+
+          setDisplayName(nextName);
+          setDraftDisplayName(nextName);
+          setEmail(user?.email || payload?.email || "user@example.com");
+          setProvider(user?.provider || payload?.provider || "local");
+          setRole(String(user?.role || nextRole || "").toLowerCase());
+          setOwnerUid(user?.ownerUid || payload?.ownerUid || "");
+        } catch {
+          const nextName =
+            payload?.nickname ||
+            payload?.displayName ||
+            payload?.name ||
+            payload?.fullName ||
+            payload?.username ||
+            "ผู้ใช้งาน";
+          const nextEmail = payload?.email || "user@example.com";
+          const nextProvider = payload?.provider || "local";
+
+          setDisplayName(nextName);
+          setDraftDisplayName(nextName);
+          setEmail(nextEmail);
+          setProvider(nextProvider);
+          setOwnerUid(payload?.ownerUid || "");
+        }
       } else {
         setRole("");
         setDisplayName("ผู้ใช้งาน");
         setDraftDisplayName("ผู้ใช้งาน");
         setEmail("user@example.com");
         setProvider("local");
+        setOwnerUid("");
       }
     } catch {
       setHasToken(false);
@@ -161,6 +194,9 @@ export default function TopBar() {
       setDraftDisplayName("ผู้ใช้งาน");
       setEmail("user@example.com");
       setProvider("local");
+      setOwnerUid("");
+    } finally {
+      setAuthReady(true);
     }
   };
 
@@ -236,6 +272,7 @@ export default function TopBar() {
       AUTH_KEYS.forEach((k) => window.localStorage.removeItem(k));
       setHasToken(false);
       setRole("");
+      setOwnerUid("");
       setProfileOpen(false);
       setIsEditingName(false);
       setIsPasswordOpen(false);
@@ -377,6 +414,51 @@ export default function TopBar() {
     }
   };
 
+  const handleLinkOwner = async (e) => {
+    e.preventDefault();
+
+    const token = readToken();
+    const nextOwnerUid = String(linkOwnerUid || "").trim();
+
+    if (!token) {
+      openPopup("error", "เชื่อม Owner ไม่สำเร็จ", "ไม่พบ token การเข้าสู่ระบบ");
+      return;
+    }
+
+    if (!nextOwnerUid) {
+      openPopup("error", "ข้อมูลไม่ครบ", "กรุณากรอก Owner UID");
+      return;
+    }
+
+    setLinkingOwner(true);
+
+    try {
+      const result = await requestJson(`${apiBase}/auth/link-owner`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ownerUid: nextOwnerUid,
+        }),
+      });
+
+      if (result?.token) {
+        writeTokenToAllKeys(result.token);
+      }
+
+      setLinkOwnerUid("");
+      await syncAuth();
+
+      openPopup("success", "เชื่อมสำเร็จ", "เชื่อมบัญชีพนักงานเข้ากับ Owner UID เรียบร้อยแล้ว");
+    } catch (err) {
+      openPopup("error", "เชื่อม Owner ไม่สำเร็จ", err?.message || "ไม่สามารถเชื่อม Owner UID ได้");
+    } finally {
+      setLinkingOwner(false);
+    }
+  };
+
   const allTabs = [
     { key: "dashboard", href: "/dashboard", label: t.dashboard || "แดชบอร์ด" },
     { key: "history", href: "/history", label: t.history || "ประวัติ" },
@@ -440,7 +522,7 @@ export default function TopBar() {
             </button>
           </div>
 
-          {!hasToken ? (
+          {!authReady ? null : !hasToken ? (
             <div className="topbar-auth">
               <Link href="/" className="auth-btn auth-btn-ghost">
                 {t.login || "เข้าสู่ระบบ"}
@@ -469,6 +551,84 @@ export default function TopBar() {
                     <div className="profile-name">{displayName}</div>
                     <div className="profile-email">{email}</div>
                   </div>
+
+                  {role === "owner" && ownerUid && (
+                    <div className="profile-card">
+                      <div
+                        className="profile-row-btn"
+                        style={{ cursor: "default", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                          <div className="profile-icon">#</div>
+                          <div className="profile-row-text">
+                            <div className="profile-row-title">UID ของ Owner</div>
+                            <div className="profile-row-sub" style={{ wordBreak: "break-all" }}>
+                              {ownerUid}
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="save-btn"
+                          style={{ minWidth: 84, padding: "8px 12px" }}
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(ownerUid);
+                              openPopup("success", "คัดลอกสำเร็จ", "คัดลอก UID เรียบร้อยแล้ว");
+                            } catch {
+                              openPopup("error", "คัดลอกไม่สำเร็จ", "ไม่สามารถคัดลอก UID ได้");
+                            }
+                          }}
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {role === "employee" && (
+                    <div className="profile-card">
+                      <button
+                        type="button"
+                        className="profile-row-btn"
+                        onClick={() => {
+                          setIsEditingName(false);
+                          setIsPasswordOpen(false);
+                        }}
+                        style={{ cursor: "default" }}
+                      >
+                        <div className="profile-icon">#</div>
+                        <div className="profile-row-text">
+                          <div className="profile-row-title">เชื่อม Owner UID</div>
+                          <div className="profile-row-sub">
+                            {ownerUid ? `UID ปัจจุบัน: ${ownerUid}` : "ยังไม่ได้เชื่อมกับ Owner"}
+                          </div>
+                        </div>
+                      </button>
+
+                      <div className="profile-expand" style={{ display: "block" }}>
+                        <form onSubmit={handleLinkOwner} className="form-stack">
+                          <div>
+                            <label className="form-label">Owner UID</label>
+                            <input
+                              type="text"
+                              value={linkOwnerUid}
+                              onChange={(e) => setLinkOwnerUid(e.target.value)}
+                              className="form-input"
+                              placeholder="กรอก UID ของ Owner"
+                            />
+                          </div>
+
+                          <div className="form-actions">
+                            <button type="submit" className="save-btn" disabled={linkingOwner}>
+                              {linkingOwner ? "กำลังเชื่อม..." : "เชื่อม Owner"}
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="profile-card">
                     <button
