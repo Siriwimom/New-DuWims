@@ -1,7 +1,8 @@
 "use client";
 
 import "leaflet/dist/leaflet.css";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
 import { useDuwimsT } from "../components/language-context";
 
@@ -332,6 +333,29 @@ function formatSensorValue(value, name, uid = "") {
   if (value === null || value === undefined || Number.isNaN(Number(value)))
     return "—";
   return `${value} ${sensorUnit(name, uid)}`.trim();
+}
+
+function buildComparableSensors(sensors = []) {
+  return (Array.isArray(sensors) ? sensors : []).map((sensor) => ({
+    _id: safeText(sensor._id || ""),
+    uid: safeText(sensor.uid || ""),
+    name: safeText(sensor.sensorKey || sensor.name || ""),
+    minValue: toNum(sensor.minValue),
+    maxValue: toNum(sensor.maxValue),
+  }));
+}
+
+function buildFormSnapshot({ plotId = "", uid = "", nodeName = "", marker = null, sensors = [] } = {}) {
+  return JSON.stringify({
+    plotId: safeText(plotId),
+    uid: safeText(uid).trim(),
+    nodeName: safeText(nodeName).trim(),
+    marker:
+      Array.isArray(marker) && marker.length >= 2
+        ? [toNum(marker[0]), toNum(marker[1])]
+        : null,
+    sensors: buildComparableSensors(sensors),
+  });
 }
 
 function pointInPolygon(point, vs) {
@@ -740,12 +764,12 @@ function SensorTable({ sensors, t, lang }) {
 
           return (
             <tr key={sensor._id || sensor.uid || sensor.name}>
-              <td>{getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}</td>
-              <td className={bad ? "val-red" : "val-green"}>
+              <td className="sensor-name-cell">{getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}</td>
+              <td className={`${bad ? "val-red" : "val-green"} sensor-value-cell`}>
                 {formatSensorValue(latest, sensor.sensorKey || sensor.name, sensor.uid)}
               </td>
-              <td>{formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)}</td>
-              <td>{formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}</td>
+              <td className="sensor-value-cell">{formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)}</td>
+              <td className="sensor-value-cell">{formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}</td>
             </tr>
           );
         })}
@@ -784,8 +808,8 @@ function EditableSensorTable({
 
           return (
             <tr key={sensor._id || sensor.uid || index}>
-              <td>{getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}</td>
-              <td className={bad ? "val-red" : "val-green"}>
+              <td className="sensor-name-cell">{getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}</td>
+              <td className={`${bad ? "val-red" : "val-green"} sensor-value-cell`}>
                 {formatSensorValue(latest, sensor.sensorKey || sensor.name, sensor.uid)}
               </td>
               <td>
@@ -798,7 +822,7 @@ function EditableSensorTable({
                       value={sensor.maxValue ?? ""}
                       onChange={(e) => onChangeMax(index, e.target.value)}
                     />
-                    <span>{sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}</span>
+                    <span className="sensor-unit-text">{sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}</span>
                   </div>
                 ) : (
                   formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)
@@ -814,7 +838,7 @@ function EditableSensorTable({
                       value={sensor.minValue ?? ""}
                       onChange={(e) => onChangeMin(index, e.target.value)}
                     />
-                    <span>{sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}</span>
+                    <span className="sensor-unit-text">{sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}</span>
                   </div>
                 ) : (
                   formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)
@@ -831,7 +855,9 @@ function EditableSensorTable({
 export default function NodeSensorPage() {
   const { t, lang } = useDuwimsT();
   const leaflet = useLeafletBundle();
+  const router = useRouter();
 
+  const [authChecked, setAuthChecked] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -853,7 +879,6 @@ export default function NodeSensorPage() {
   const [formPlotId, setFormPlotId] = useState("");
   const [formUid, setFormUid] = useState("");
   const [formNodeName, setFormNodeName] = useState("");
-  const [formStatus, setFormStatus] = useState("ACTIVE");
   const [formMarker, setFormMarker] = useState(null);
   const [formSensors, setFormSensors] = useState(sensorPresetsByType("air"));
   const [canEditSensorLimit, setCanEditSensorLimit] = useState(false);
@@ -871,12 +896,32 @@ export default function NodeSensorPage() {
     title: "",
     sub: "",
     icon: "🗑",
+    confirmText: "",
+    cancelText: "",
+    secondaryText: "",
+    confirmClassName: "",
     onConfirm: null,
+    onSecondary: null,
   });
+  const [initialFormSnapshot, setInitialFormSnapshot] = useState(null);
+  const pendingLeaveUrlRef = useRef("");
+  const popStateGuardRef = useRef(false);
 
   useEffect(() => {
+    const token = getToken();
+
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
+
+    setAuthChecked(true);
+  }, [router]);
+
+  useEffect(() => {
+    if (!authChecked) return;
     loadAll();
-  }, []);
+  }, [authChecked]);
 
   const allNodes = useMemo(() => {
     return plots.flatMap((plot) =>
@@ -912,8 +957,11 @@ export default function NodeSensorPage() {
   );
 
   const editSelectedPlot = useMemo(
-    () => plots.find((p) => String(p.id) === String(editPlotId)) || null,
-    [plots, editPlotId],
+    () =>
+      plots.find(
+        (p) => String(p.id) === String(formPlotId || editPlotId),
+      ) || null,
+    [plots, formPlotId, editPlotId],
   );
 
   const detectedFormNodeType = useMemo(
@@ -926,6 +974,30 @@ export default function NodeSensorPage() {
   const uidInvalid = (submitAttempted || uidTouched) && !formUid.trim();
   const nodeNameInvalid =
     (submitAttempted || nodeNameTouched) && !formNodeName.trim();
+  const currentFormSnapshot = useMemo(
+    () =>
+      buildFormSnapshot({
+        plotId: formPlotId,
+        uid: formUid,
+        nodeName: formNodeName,
+        marker: formMarker,
+        sensors: formSensors,
+      }),
+    [formPlotId, formUid, formNodeName, formMarker, formSensors],
+  );
+
+  const hasUnsavedChanges =
+    (view === "create" || view === "edit") &&
+    initialFormSnapshot !== null &&
+    currentFormSnapshot !== initialFormSnapshot;
+
+  const isNodeFormView = view === "create" || view === "edit";
+
+  const hasPendingLeaveGuard =
+    isNodeFormView ||
+    hasUnsavedChanges ||
+    (confirmState.open && (confirmState.type === "delete" || confirmState.type === "save"));
+
 
   useEffect(() => {
     const cleanUid = String(formUid || "")
@@ -973,6 +1045,124 @@ export default function NodeSensorPage() {
     setUidLookupBusy(false);
   }, [formUid, allNodes]);
 
+  useEffect(() => {
+    const onBeforeUnload = (event) => {
+      if (!hasPendingLeaveGuard || busy) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [hasPendingLeaveGuard, busy]);
+
+  useEffect(() => {
+    const onDocumentClick = (event) => {
+      if (!hasPendingLeaveGuard || busy) return;
+      if (event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!anchor) return;
+      if (anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+
+      const href = anchor.getAttribute("href") || "";
+      if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) return;
+
+      const nextUrl = new URL(anchor.href, window.location.href);
+      const currentUrl = new URL(window.location.href);
+      if (nextUrl.href === currentUrl.href) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      pendingLeaveUrlRef.current = nextUrl.href;
+      openConfirm({
+        type: "unsaved",
+        icon: "⚠️",
+        title:
+          lang === "en"
+            ? "You have unsaved changes"
+            : "มีการแก้ไขที่ยังไม่บันทึก",
+        sub:
+          lang === "en"
+            ? "You are currently adding or editing data.\nDo you want to discard the current changes and switch pages, or stay on this page?"
+            : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
+                secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
+        confirmText: lang === "en" ? "Discard changes" : "ยกเลิกการแก้ไข",
+        confirmClassName: "confirm-warn",
+        onSecondary: async () => {
+          pendingLeaveUrlRef.current = "";
+          closeConfirm();
+        },
+        onConfirm: async () => {
+          const target = pendingLeaveUrlRef.current;
+          pendingLeaveUrlRef.current = "";
+          performCancelForm();
+          closeConfirm();
+          if (target) window.location.assign(target);
+        },
+      });
+    };
+
+    document.addEventListener("click", onDocumentClick, true);
+    return () => document.removeEventListener("click", onDocumentClick, true);
+  }, [hasPendingLeaveGuard, busy, lang]);
+
+  useEffect(() => {
+    if (!isNodeFormView) {
+      popStateGuardRef.current = false;
+      return;
+    }
+
+    const shouldGuard = hasPendingLeaveGuard && !busy;
+    if (!shouldGuard) {
+      popStateGuardRef.current = false;
+      return;
+    }
+
+    if (!popStateGuardRef.current) {
+      window.history.pushState({ nodeGuard: true }, "", window.location.href);
+      popStateGuardRef.current = true;
+    }
+
+    const onPopState = () => {
+      if (!hasPendingLeaveGuard || busy) return;
+
+      window.history.pushState({ nodeGuard: true }, "", window.location.href);
+
+      openConfirm({
+        type: "unsaved",
+        icon: "⚠️",
+        title:
+          lang === "en"
+            ? "You have unsaved changes"
+            : "มีการแก้ไขที่ยังไม่บันทึก",
+        sub:
+          lang === "en"
+            ? "You are currently adding or editing data.\nDo you want to discard the current changes and switch pages, or stay on this page?"
+            : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
+                secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
+        confirmText: lang === "en" ? "Discard changes" : "ยกเลิกการแก้ไข",
+        confirmClassName: "confirm-warn",
+        onSecondary: async () => {
+          closeConfirm();
+        },
+        onConfirm: async () => {
+          closeConfirm();
+          performCancelForm();
+          popStateGuardRef.current = false;
+          window.history.back();
+        },
+      });
+    };
+
+    window.addEventListener("popstate", onPopState);
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+    };
+  }, [isNodeFormView, hasPendingLeaveGuard, busy, lang]);
+
   async function loadAll() {
     setLoading(true);
     setError("");
@@ -1015,7 +1205,6 @@ export default function NodeSensorPage() {
     setFormPlotId("");
     setFormUid("");
     setFormNodeName("");
-    setFormStatus("ACTIVE");
     setFormMarker(null);
     setFormSensors([]);
     setCanEditSensorLimit(false);
@@ -1025,20 +1214,71 @@ export default function NodeSensorPage() {
     resetValidation();
   }
 
+  function performCancelForm() {
+    setView("view");
+    setEditNodeId("");
+    setEditPlotId("");
+    setInitialFormSnapshot(null);
+    resetForm();
+    setError("");
+  }
+
+  function requestDiscardChanges(nextAction) {
+    openConfirm({
+      type: "unsaved",
+      icon: "⚠️",
+      title:
+        lang === "en"
+          ? "You have unsaved changes"
+          : "มีการแก้ไขที่ยังไม่บันทึก",
+      sub:
+        lang === "en"
+          ? "You are currently adding or editing data.\nDo you want to discard the current changes and switch pages, or stay on this page?"
+          : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
+            secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
+      confirmText: lang === "en" ? "Discard changes" : "ยกเลิกการแก้ไข",
+      confirmClassName: "confirm-warn",
+      onSecondary: async () => {
+        closeConfirm();
+      },
+      onConfirm: async () => {
+        performCancelForm();
+        if (typeof nextAction === "function") nextAction();
+      },
+    });
+  }
+
   function openCreate() {
+    if (hasUnsavedChanges) {
+      requestDiscardChanges(() => openCreate());
+      return;
+    }
+
     resetForm();
     setView("create");
+    setInitialFormSnapshot(
+      buildFormSnapshot({
+        plotId: "",
+        uid: "",
+        nodeName: "",
+        marker: null,
+        sensors: [],
+      }),
+    );
     setError("");
     setSuccess("");
   }
 
   function openEdit(node) {
+    if (hasUnsavedChanges) {
+      requestDiscardChanges(() => openEdit(node));
+      return;
+    }
     setEditNodeId(node._id);
     setEditPlotId(node.plotId);
     setFormPlotId(node.plotId);
     setFormUid(node.uid || "");
     setFormNodeName(node.nodeName || "");
-    setFormStatus(node.status || "ACTIVE");
     setFormMarker(
       Number.isFinite(node.lat) && Number.isFinite(node.lng)
         ? [node.lat, node.lng]
@@ -1052,16 +1292,37 @@ export default function NodeSensorPage() {
     setCanEditSensorLimit(false);
     resetValidation();
     setView("edit");
+    setInitialFormSnapshot(
+      buildFormSnapshot({
+        plotId: node.plotId,
+        uid: node.uid || "",
+        nodeName: node.nodeName || "",
+        marker:
+          Number.isFinite(node.lat) && Number.isFinite(node.lng)
+            ? [node.lat, node.lng]
+            : null,
+        sensors:
+          Array.isArray(node.sensors) && node.sensors.length
+            ? node.sensors.map((s) => ({
+                ...s,
+                sensorKey: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
+                name: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
+                rawName: s.rawName || s.name,
+              }))
+            : sensorPresetsByType(inferNodeTypeFromUid(node.uid)),
+      }),
+    );
     setError("");
     setSuccess("");
   }
 
   function cancelForm() {
-    setView("view");
-    setEditNodeId("");
-    setEditPlotId("");
-    resetForm();
-    setError("");
+    if (hasUnsavedChanges) {
+      requestDiscardChanges(() => performCancelForm());
+      return;
+    }
+
+    performCancelForm();
   }
 
   function validateForm() {
@@ -1151,14 +1412,30 @@ export default function NodeSensorPage() {
     );
   }
 
-  function openConfirm({ type = "delete", title, sub, icon, onConfirm }) {
+  function openConfirm({
+    type = "delete",
+    title,
+    sub,
+    icon,
+    confirmText = "",
+    cancelText = "",
+    secondaryText = "",
+    confirmClassName = "",
+    onConfirm,
+    onSecondary,
+  }) {
     setConfirmState({
       open: true,
       type,
       title,
       sub,
       icon,
+      confirmText,
+      cancelText,
+      secondaryText,
+      confirmClassName,
       onConfirm,
+      onSecondary,
     });
   }
 
@@ -1170,7 +1447,12 @@ export default function NodeSensorPage() {
       title: "",
       sub: "",
       icon: "🗑",
+      confirmText: "",
+      cancelText: "",
+      secondaryText: "",
+      confirmClassName: "",
       onConfirm: null,
+      onSecondary: null,
     });
   }
 
@@ -1184,8 +1466,21 @@ export default function NodeSensorPage() {
       title: "",
       sub: "",
       icon: "🗑",
+      confirmText: "",
+      cancelText: "",
+      secondaryText: "",
+      confirmClassName: "",
       onConfirm: null,
+      onSecondary: null,
     });
+  }
+
+  async function runSecondaryConfirm() {
+    if (typeof confirmState.onSecondary === "function") {
+      await confirmState.onSecondary();
+      return;
+    }
+    closeConfirm();
   }
 
   function handleSave() {
@@ -1219,7 +1514,10 @@ export default function NodeSensorPage() {
           const payload = {
             uid: formUid.trim(),
             nodeName: formNodeName.trim(),
-            status: formStatus,
+            status:
+              matchedNode?.status ||
+              allNodes.find((n) => String(n._id) === String(editNodeId))?.status ||
+              "ACTIVE",
             lat: formMarker[0],
             lng: formMarker[1],
             sensors: buildSensorPayload(),
@@ -1237,10 +1535,20 @@ export default function NodeSensorPage() {
                   : "บันทึก Node สำเร็จ"),
             );
           } else if (view === "edit") {
-            await apiFetch(`/api/plots/${editPlotId}/nodes/${editNodeId}`, {
-              method: "PATCH",
-              body: payload,
-            });
+            if (String(formPlotId) !== String(editPlotId)) {
+              await apiFetch(`/api/plots/${formPlotId}/nodes`, {
+                method: "POST",
+                body: payload,
+              });
+              await apiFetch(`/api/plots/${editPlotId}/nodes/${editNodeId}`, {
+                method: "DELETE",
+              });
+            } else {
+              await apiFetch(`/api/plots/${editPlotId}/nodes/${editNodeId}`, {
+                method: "PATCH",
+                body: payload,
+              });
+            }
             setSuccess(
               t.editNodeSuccess ||
                 (lang === "en"
@@ -1314,6 +1622,10 @@ export default function NodeSensorPage() {
   const editPolygons = editSelectedPlot
     ? [{ coords: editSelectedPlot.polygon, color: "#6c8f5d" }]
     : [];
+
+  if (!authChecked) {
+    return null;
+  }
 
   return (
     <DuwimsStaticPage current="node-sensor" htmlContent="">
@@ -1420,23 +1732,23 @@ export default function NodeSensorPage() {
 
                         <span className="node-summary-sep">|</span>
 
-                        <span className="node-summary-item">
+                        <span className="node-summary-item node-summary-item-compact">
                           <span className="node-summary-label">
                             {(t.plot || (lang === "en" ? "Plot" : "แปลง")) +
                               " :"}
                           </span>
-                          <span className="node-summary-value">
+                          <span className="node-summary-value" title={node.plotName || "-"}>
                             {node.plotName || "-"}
                           </span>
                         </span>
 
                         <span className="node-summary-sep">|</span>
 
-                        <span className="node-summary-item">
+                        <span className="node-summary-item node-summary-item-compact">
                           <span className="node-summary-label">
                             {(t.node || "Node").toLowerCase()} :
                           </span>
-                          <span className="node-summary-value">
+                          <span className="node-summary-value" title={node.nodeName || "-"}>
                             {node.nodeName || "-"}
                           </span>
                         </span>
@@ -1521,7 +1833,7 @@ export default function NodeSensorPage() {
                 style={{ padding: "7px 13px" }}
                 onClick={cancelForm}
               >
-                {t.back || (lang === "en" ? "← Back" : "← กลับ")}
+                {t.back || (lang === "en" ? "< Back" : "< กลับ")}
               </button>
               <div
                 style={{ fontSize: 15, fontWeight: 700, color: "var(--soil)" }}
@@ -1731,52 +2043,6 @@ export default function NodeSensorPage() {
                 </div>
               ) : null}
 
-              <div className="filter-field">
-                <div className="filter-field-label">
-                  {t.statusLabel || "Status"}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 14,
-                    alignItems: "center",
-                    fontSize: 12,
-                    color: "var(--text)",
-                    fontWeight: 600,
-                  }}
-                >
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      checked={formStatus === "ACTIVE"}
-                      onChange={() => setFormStatus("ACTIVE")}
-                    />
-                    ON
-                  </label>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      checked={formStatus !== "ACTIVE"}
-                      onChange={() => setFormStatus("INACTIVE")}
-                    />
-                    OFF
-                  </label>
-                </div>
-              </div>
 
               {shouldShowNodeDetails ? (
                 <div>
@@ -1790,7 +2056,7 @@ export default function NodeSensorPage() {
                       margin: "14px 0 8px",
                     }}
                   >
-                    <div className="card-title" style={{ marginBottom: 0 }}>
+                    <div className="card-title" style={{ marginBottom: 0, fontSize: 15, fontWeight: 700 }}>
                       {detectedFormNodeType === "soil"
                         ? lang === "en"
                           ? "Soil Sensors"
@@ -1846,8 +2112,8 @@ export default function NodeSensorPage() {
                 style={{
                   display: "flex",
                   justifyContent: "flex-end",
-                  gap: 8,
-                  marginTop: 14,
+                  gap: 14,
+                  marginTop: 20,
                 }}
               >
                 <button className="btn-cancel" onClick={cancelForm}>
@@ -1880,7 +2146,7 @@ export default function NodeSensorPage() {
                 style={{ padding: "7px 13px" }}
                 onClick={cancelForm}
               >
-                {t.back || (lang === "en" ? "← Back" : "← กลับ")}
+                {t.back || (lang === "en" ? "< Back" : "< กลับ")}
               </button>
               <div
                 style={{ fontSize: 15, fontWeight: 700, color: "var(--soil)" }}
@@ -1973,7 +2239,7 @@ export default function NodeSensorPage() {
                   flexWrap: "wrap",
                 }}
               >
-                <div className="card-title" style={{ marginBottom: 0 }}>
+                <div className="card-title" style={{ marginBottom: 0, fontSize: 15, fontWeight: 700 }}>
                   {t.editNodeTitle ||
                     (lang === "en" ? "✏️ Edit NODE" : "✏️ แก้ไข NODE")}
                 </div>
@@ -1996,10 +2262,17 @@ export default function NodeSensorPage() {
                   {t.plot || (lang === "en" ? "Plot" : "แปลง")}
                 </div>
                 <select
-                  className="form-select form-disabled-gray"
+                  className="form-select"
                   value={formPlotId}
-                  disabled
+                  onChange={(e) => {
+                    setFormPlotId(e.target.value);
+                    setFormMarker(null);
+                  }}
                 >
+                  <option value="">
+                    {t.selectPlot ||
+                      (lang === "en" ? "-- Select Plot --" : "-- เลือกแปลง --")}
+                  </option>
                   {plots.map((plot) => (
                     <option key={plot.id} value={plot.id}>
                       {plot.plotName}
@@ -2076,52 +2349,6 @@ export default function NodeSensorPage() {
                 </div>
               </div>
 
-              <div className="filter-field" style={{ marginTop: 13 }}>
-                <div className="filter-field-label">
-                  {t.statusLabel || "Status"}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 14,
-                    alignItems: "center",
-                    fontSize: 12,
-                    color: "var(--text)",
-                    fontWeight: 600,
-                  }}
-                >
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      checked={formStatus === "ACTIVE"}
-                      onChange={() => setFormStatus("ACTIVE")}
-                    />
-                    ON
-                  </label>
-                  <label
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      checked={formStatus !== "ACTIVE"}
-                      onChange={() => setFormStatus("INACTIVE")}
-                    />
-                    OFF
-                  </label>
-                </div>
-              </div>
 
               {shouldShowNodeDetails ? (
                 <div>
@@ -2135,7 +2362,7 @@ export default function NodeSensorPage() {
                       margin: "14px 0 8px",
                     }}
                   >
-                    <div className="card-title" style={{ marginBottom: 0 }}>
+                    <div className="card-title" style={{ marginBottom: 0, fontSize: 15, fontWeight: 700 }}>
                       {detectedFormNodeType === "soil"
                         ? lang === "en"
                           ? "Soil Sensors"
@@ -2178,8 +2405,8 @@ export default function NodeSensorPage() {
                 style={{
                   display: "flex",
                   justifyContent: "flex-end",
-                  gap: 8,
-                  marginTop: 14,
+                  gap: 14,
+                  marginTop: 20,
                 }}
               >
                 <button className="btn-cancel" onClick={cancelForm}>
@@ -2199,7 +2426,7 @@ export default function NodeSensorPage() {
 
         {confirmState.open ? (
           <div className="confirm-overlay" onClick={closeConfirm}>
-            <div className="confirm-box" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-dialog" onClick={(e) => e.stopPropagation()}>
               <div className="confirm-icon">{confirmState.icon}</div>
 
               <div className="confirm-title">{confirmState.title}</div>
@@ -2216,31 +2443,75 @@ export default function NodeSensorPage() {
               </div>
 
               <div className="confirm-actions">
-                <button
-                  type="button"
-                  className="btn-cancel"
-                  onClick={closeConfirm}
-                  disabled={busy}
-                >
-                  {t.cancel || (lang === "en" ? "Cancel" : "ยกเลิก")}
-                </button>
+                {confirmState.secondaryText ? (
+                  <>
+                    <button
+                      type="button"
+                      className="confirm-btn secondary"
+                      onClick={runSecondaryConfirm}
+                      disabled={busy}
+                    >
+                      {confirmState.secondaryText}
+                    </button>
 
-                <button
-                  type="button"
-                  className={`btn-confirm ${
-                    confirmState.type === "save"
-                      ? "confirm-save"
-                      : "confirm-delete"
-                  }`}
-                  onClick={runConfirm}
-                  disabled={busy}
-                >
-                  {busy
-                    ? lang === "en"
-                      ? "Processing..."
-                      : "กำลังดำเนินการ..."
-                    : t.confirm || (lang === "en" ? "Confirm" : "ยืนยัน")}
-                </button>
+                    <button
+                      type="button"
+                      className={`confirm-btn primary ${
+                        confirmState.confirmClassName ||
+                        (confirmState.type === "save"
+                          ? "confirm-save"
+                          : confirmState.type === "unsaved"
+                            ? "confirm-warn"
+                            : "confirm-delete")
+                      }`}
+                      onClick={runConfirm}
+                      disabled={busy}
+                    >
+                      {busy
+                        ? lang === "en"
+                          ? "Processing..."
+                          : "กำลังดำเนินการ..."
+                        : confirmState.confirmText ||
+                          t.confirm ||
+                          (lang === "en" ? "Confirm" : "ยืนยัน")}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="confirm-btn secondary"
+                      onClick={closeConfirm}
+                      disabled={busy}
+                    >
+                      {confirmState.cancelText ||
+                        t.cancel ||
+                        (lang === "en" ? "Cancel" : "ยกเลิก")}
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`confirm-btn primary ${
+                        confirmState.confirmClassName ||
+                        (confirmState.type === "save"
+                          ? "confirm-save"
+                          : confirmState.type === "unsaved"
+                            ? "confirm-warn"
+                            : "confirm-delete")
+                      }`}
+                      onClick={runConfirm}
+                      disabled={busy}
+                    >
+                      {busy
+                        ? lang === "en"
+                          ? "Processing..."
+                          : "กำลังดำเนินการ..."
+                        : confirmState.confirmText ||
+                          t.confirm ||
+                          (lang === "en" ? "Confirm" : "ยืนยัน")}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -2250,708 +2521,598 @@ export default function NodeSensorPage() {
           <div className="locate-global-status">{locateStatus}</div>
         ) : null}
 
-        <style jsx>{`
-          :root {
-            --soil: #254f17;
-            --card: #ffffff;
-            --muted: #7a8d73;
-            --text: #20311c;
-            --good: #2e7d32;
-            --bad: #d84343;
-          }
-
-          * {
-            box-sizing: border-box;
-          }
-
-          .page-content {
-            padding: 16px;
-            background: linear-gradient(180deg, #edf6e7 0%, #f8fbf6 100%);
-            min-height: calc(100vh - 76px);
-            color: var(--text);
-            font-family: Arial, Helvetica, sans-serif;
-          }
-
-          .card {
-            background: var(--card);
-            border: 1px solid #dce9d7;
-            border-radius: 16px;
-            padding: 14px;
-            box-shadow: 0 5px 16px rgba(51, 87, 37, 0.08);
-          }
-
-          .card-title {
-            font-size: 14px;
-            font-weight: 800;
-            color: var(--soil);
-          }
-
-          .filter-label,
-          .filter-field-label {
-            font-size: 11px;
-            font-weight: 800;
-            color: #5a6d54;
-            margin-bottom: 6px;
-          }
-
-          .filter-field {
-            margin-bottom: 12px;
-          }
-
-          .form-select,
-          .form-input {
-            width: 100%;
-            height: 40px;
-            border-radius: 12px;
-            border: 1px solid #cfe0c8;
-            background: #fbfef9;
-            color: #33422d;
-            padding: 0 12px;
-            outline: none;
-            font-size: 12px;
-            transition: 0.18s ease;
-          }
-
-          .form-disabled-gray {
-            color: #8a8f98 !important;
-            background: #f3f4f6 !important;
-            border-color: #d7dbe0 !important;
-            cursor: not-allowed !important;
-            pointer-events: none !important;
-            -webkit-text-fill-color: #8a8f98 !important;
-            opacity: 1 !important;
-          }
-
-          .form-input:focus,
-          .form-select:focus,
-          .limit-input:focus {
-            border-color: #7aa46f;
-            box-shadow: 0 0 0 3px rgba(122, 164, 111, 0.12);
-          }
-
-          .input-error {
-            border-color: #d84343 !important;
-            background: #fff7f7 !important;
-            color: #b71c1c !important;
-            box-shadow: 0 0 0 3px rgba(216, 67, 67, 0.1);
-          }
-
-          .label-error {
-            color: #d84343 !important;
-          }
-
-          .required-star {
-            color: #d84343;
-            margin-left: 2px;
-          }
-
-          .field-error-text {
-            margin-top: 6px;
-            font-size: 11px;
-            font-weight: 700;
-            color: #d84343;
-          }
-
-          .form-grid-2 {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-          }
-
-          .create-btn,
-          .btn-save,
-          .btn-confirm,
-          .locate-btn,
-          .locate-btn-inline {
-            border: none;
-            cursor: pointer;
-            border-radius: 12px;
-            font-weight: 800;
-            font-size: 12px;
-          }
-
-          .create-btn {
-            background: #1f4d0f;
-            color: #fff;
-            padding: 10px 14px;
-            box-shadow: 0 4px 12px rgba(31, 77, 15, 0.24);
-          }
-
-          .locate-btn {
-            position: absolute;
-            left: 12px;
-            bottom: 12px;
-            background: #fff;
-            color: #26491c;
-            padding: 8px 12px;
-            box-shadow: 0 4px 12px rgba(44, 78, 31, 0.18);
-            z-index: 1000;
-          }
-
-          .locate-btn-inline {
-            background: #fff;
-            color: #26491c;
-            padding: 8px 12px;
-            box-shadow: 0 4px 12px rgba(44, 78, 31, 0.08);
-            border: 1px solid #d7e4d0;
-          }
-
-          .btn-save {
-            background: #1f4d0f;
-            color: #fff;
-            padding: 10px 18px;
-          }
-
-          .btn-confirm {
-            background: #c62828;
-            color: #fff;
-            padding: 10px 18px;
-          }
-
-          .btn-cancel,
-          .btn-sm {
-            border: 1px solid #d7e4d0;
-            background: #fff;
-            color: #4a5f43;
-            cursor: pointer;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 700;
-            padding: 10px 16px;
-          }
-
-          .btn-sm.btn-edit {
-            color: #2e7d32;
-            border-color: #b8d7b2;
-            background: #f8fff7;
-          }
-
-          .btn-sm.btn-del {
-            color: #c62828;
-            border-color: #efc8c8;
-            background: #fff8f8;
-          }
-
-          .map-wrapper {
-            position: relative;
-            width: 100%;
-            min-height: 320px;
-          }
-
-          #currentMapHost,
-          #createMapHost,
-          #editMapHost {
-            width: 100%;
-            min-height: 320px;
-            border-radius: 18px;
-            overflow: hidden;
-            position: relative;
-            background: #dfeecf;
-            border: 1px solid rgba(0, 0, 0, 0.08);
-          }
-
-          .leaflet-box {
-            width: 100%;
-            height: 320px !important;
-            min-height: 320px !important;
-            display: block !important;
-            border-radius: 18px;
-            overflow: hidden;
-            background: #dfeecf;
-          }
-
-          .map-loading {
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #64715d;
-            font-size: 13px;
-          }
-
-          .node-card {
-            margin-bottom: 12px;
-            background: #fff;
-            border: 1px solid #dce9d7;
-            border-radius: 16px;
-            overflow: hidden;
-            box-shadow: 0 5px 16px rgba(51, 87, 37, 0.06);
-          }
-
-          .node-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-            padding: 12px 14px;
-            background: linear-gradient(90deg, #1a430d, #2c6617);
-            color: #fff;
-          }
-
-          .node-header-btn {
-            width: 100%;
-            border: none;
-            text-align: left;
-            cursor: pointer;
-          }
-
-          .node-header-left {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            min-width: 0;
-            flex: 1;
-          }
-
-          .node-summary-line {
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 8px;
-            row-gap: 6px;
-            min-width: 0;
-          }
-
-          .node-summary-item {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            min-width: 0;
-          }
-
-          .node-summary-label {
-            font-size: 11px;
-            font-weight: 700;
-            color: rgba(255, 255, 255, 0.82);
-            white-space: nowrap;
-          }
-
-          .node-summary-value {
-            font-size: 12px;
-            font-weight: 800;
-            color: #ffffff;
-            white-space: nowrap;
-          }
-
-          .node-summary-sep {
-            font-size: 12px;
-            font-weight: 700;
-            color: rgba(255, 255, 255, 0.45);
-          }
-
-          .node-type-badge {
-            display: inline-flex;
-            align-items: center;
-            border-radius: 999px;
-            padding: 3px 10px;
-            font-size: 10px;
-            font-weight: 800;
-            color: #fff;
-          }
-
-          .node-type-badge-inline {
-            padding: 4px 10px;
-            font-size: 10px;
-            white-space: nowrap;
-          }
-
-          .node-type-badge-inline.type-air {
-            background: rgba(25, 118, 210, 0.28);
-          }
-
-          .node-type-badge-inline.type-soil {
-            background: rgba(109, 76, 65, 0.35);
-          }
-
-          .node-status-pill-inline {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 24px;
-            padding: 4px 10px;
-            border-radius: 999px;
-            font-size: 10px;
-            font-weight: 800;
-            white-space: nowrap;
-            color: #fff;
-          }
-
-          .node-status-pill-inline.status-on {
-            background: rgba(76, 175, 80, 0.92);
-          }
-
-          .node-status-pill-inline.status-off {
-            background: rgba(211, 47, 47, 0.92);
-          }
-
-          .accordion-arrow {
-            font-size: 14px;
-            font-weight: 800;
-            transition: transform 0.2s ease;
-          }
-
-          .accordion-arrow.open {
-            transform: rotate(180deg);
-          }
-
-          .node-body {
-            padding: 12px 14px;
-            background: #fff;
-          }
-
-          .node-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 12px;
-          }
-
-          .node-sensor-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-          }
-
-          .node-sensor-table th {
-            text-align: left;
-            background: #eef5ea;
-            color: #667a60;
-            font-size: 10px;
-            font-weight: 800;
-            padding: 10px 10px;
-          }
-
-          .node-sensor-table td {
-            border-top: 1px solid #edf3ea;
-            padding: 10px 10px;
-            vertical-align: middle;
-          }
-
-          .val-green {
-            color: var(--good);
-            font-weight: 800;
-          }
-
-          .val-red {
-            color: var(--bad);
-            font-weight: 800;
-          }
-
-          .map-msg {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 10px;
-            border-radius: 999px;
-            background: rgba(21, 101, 192, 0.08);
-            color: #1565c0;
-            border: 1px solid rgba(21, 101, 192, 0.2);
-            font-size: 11px;
-            font-weight: 700;
-          }
-
-          .coord-read {
-            font-size: 12px;
-            color: #546e7a;
-            font-weight: 600;
-          }
-
-          .alert-box {
-            border-radius: 16px;
-            padding: 12px;
-            margin-bottom: 14px;
-          }
-
-          .alert-box.error {
-            background: linear-gradient(180deg, #fff2f2, #ffe0e0);
-            border: 1px solid #ffc7c7;
-            color: #7f1d1d;
-          }
-
-          .alert-box.success {
-            background: linear-gradient(180deg, #eefcf1, #dcfce7);
-            border: 1px solid #b7ebc6;
-            color: #14532d;
-          }
-
-          .alert-title {
-            font-weight: 800;
-            font-size: 12px;
-            margin-bottom: 4px;
-          }
-
-          .alert-text {
-            font-size: 12px;
-            line-height: 1.5;
-          }
-
-          .locate-global-status {
-            margin-top: 10px;
-            font-size: 12px;
-            color: #4f5c47;
-          }
-
-          .edit-limit-wrap {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-          }
-
-          .limit-input {
-            width: 84px;
-            height: 30px;
-            border-radius: 999px;
-            border: 1px solid #cfe0c8;
-            background: #fbfef9;
-            color: #33422d;
-            padding: 0 10px;
-            outline: none;
-            font-size: 12px;
-          }
-
-          .confirm-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 9999;
-            background: rgba(18, 28, 14, 0.42);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 16px;
-            backdrop-filter: blur(3px);
-          }
-
-          .confirm-box {
-            width: min(100%, 420px);
-            background: #ffffff;
-            border-radius: 22px;
-            padding: 22px 20px 18px;
-            box-shadow: 0 20px 60px rgba(19, 35, 14, 0.22);
-            border: 1px solid #e4eee0;
-            text-align: center;
-            animation: confirmPop 0.18s ease-out;
-          }
-
-          .confirm-icon {
-            width: 62px;
-            height: 62px;
-            margin: 0 auto 12px;
-            border-radius: 999px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 28px;
-            background: linear-gradient(180deg, #fff4f4 0%, #ffe6e6 100%);
-            border: 1px solid #ffd3d3;
-          }
-
-          .confirm-title {
-            font-size: 20px;
-            font-weight: 800;
-            color: #1f2f1a;
-            margin-bottom: 8px;
-            line-height: 1.25;
-          }
-
-          .confirm-sub {
-            font-size: 14px;
-            line-height: 1.65;
-            color: #60705a;
-            margin-bottom: 18px;
-          }
-
-          .confirm-actions {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-            flex-wrap: wrap;
-          }
-
-          .confirm-actions .btn-cancel {
-            min-width: 120px;
-            height: 42px;
-            border-radius: 12px;
-            border: 1px solid #d8e4d2;
-            background: #ffffff;
-            color: #496141;
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-          }
-
-          .confirm-actions .btn-confirm {
-            min-width: 120px;
-            height: 42px;
-            border: none;
-            border-radius: 12px;
-            color: #fff;
-            font-size: 14px;
-            font-weight: 800;
-            cursor: pointer;
-            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
-          }
-
-          .confirm-actions .btn-confirm.confirm-delete {
-            background: linear-gradient(180deg, #e53935 0%, #c62828 100%);
-          }
-
-          .confirm-actions .btn-confirm.confirm-save {
-            background: linear-gradient(180deg, #2e7d32 0%, #1f6b24 100%);
-          }
-
-          .confirm-actions button:disabled {
-            opacity: 0.7;
-            cursor: not-allowed;
-          }
-
-          @keyframes confirmPop {
-            from {
-              transform: translateY(8px) scale(0.98);
-              opacity: 0;
-            }
-            to {
-              transform: translateY(0) scale(1);
-              opacity: 1;
-            }
-          }
-
-          :global(.leaflet-container) {
-            width: 100% !important;
-            height: 100% !important;
-            min-height: 320px !important;
-            z-index: 1;
-          }
-
-          @media (max-width: 900px) {
-            .form-grid-2 {
-              grid-template-columns: 1fr;
-            }
-
-            .node-summary-line {
-              gap: 6px;
-            }
-
-            .node-summary-sep {
-              display: none;
-              /* ===== FIX RESPONSIVE เพิ่ม ===== */
-
-.page-content,
-.card,
-.node-card {
-  min-width: 0;
-}
-
-/* ป้องกัน text ล้น */
-.card-title,
-.alert-text,
-.coord-read,
-.node-summary-value {
-  word-break: break-word;
-  overflow-wrap: break-word;
-}
-
-/* ===== NODE FLEX FIX ===== */
-.node-header-left {
-  min-width: 0;
-}
-
-.node-summary-item {
-  max-width: 100%;
-}
-
-/* ===== ACTION BUTTON ===== */
-.node-actions {
-  flex-wrap: wrap;
-}
-
-/* ===== TABLE SCROLL ===== */
-.node-sensor-table {
-  display: block;
-  overflow-x: auto;
-  width: 100%;
-}
-
-/* ===== MAP RESPONSIVE ===== */
-@media (max-width: 768px) {
-  .map-wrapper {
-    min-height: 260px;
+<style jsx>{`
+  :root {
+    --soil: #254f17;
+    --card: #ffffff;
+    --muted: #7a8d73;
+    --text: #20311c;
+    --good: #2e7d32;
+    --bad: #d84343;
   }
 
-  #currentMapHost,
-  #createMapHost,
-  #editMapHost {
-    min-height: 260px;
+  * {
+    box-sizing: border-box;
   }
-
-  .leaflet-box {
-    height: 260px !important;
-    min-height: 260px !important;
-  }
-}
-
-/* ===== MOBILE ===== */
-@media (max-width: 640px) {
 
   .page-content {
-    padding: 12px;
+    padding: 16px;
+    background: linear-gradient(180deg, #edf6e7 0%, #f8fbf6 100%);
+    min-height: calc(100vh - 76px);
+    color: var(--text);
+    font-family: Arial, Helvetica, sans-serif;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid #dce9d7;
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 5px 16px rgba(51, 87, 37, 0.08);
+  }
+
+  .card-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--soil);
+  }
+
+  .filter-field,
+  .filter-label {
+    margin-bottom: 12px;
+  }
+
+  .filter-label,
+  .filter-field-label {
+    font-size: 13px;
+    font-weight: 800;
+    color: #5a6d54;
+    margin-bottom: 6px;
+  }
+
+  .form-grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .form-select,
+  .form-input {
+    width: 100%;
+    height: 44px;
+    border-radius: 12px;
+    border: 1px solid #cfe0c8;
+    background: #fbfef9;
+    color: #33422d;
+    padding: 0 12px;
+    outline: none;
+    font-size: 14px;
+    transition: 0.18s ease;
+  }
+
+  .form-disabled-gray {
+    color: #8a8f98 !important;
+    background: #f3f4f6 !important;
+    border-color: #d7dbe0 !important;
+    cursor: not-allowed !important;
+    pointer-events: none !important;
+    -webkit-text-fill-color: #8a8f98 !important;
+    opacity: 1 !important;
+  }
+
+  .form-input:focus,
+  .form-select:focus,
+  .limit-input:focus {
+    border-color: #7aa46f;
+    box-shadow: 0 0 0 3px rgba(122, 164, 111, 0.12);
+  }
+
+  .input-error {
+    border-color: #d84343 !important;
+    background: #fff7f7 !important;
+    color: #b71c1c !important;
+    box-shadow: 0 0 0 3px rgba(216, 67, 67, 0.1);
+  }
+
+  .label-error {
+    color: #d84343 !important;
+  }
+
+  .required-star {
+    color: #d84343;
+    margin-left: 2px;
+  }
+
+  .field-error-text {
+    margin-top: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #d84343;
+  }
+
+  .create-btn,
+  .btn-save,
+  .btn-confirm,
+  .locate-btn,
+  .locate-btn-inline {
+    border: none;
+    cursor: pointer;
+    border-radius: 12px;
+    font-weight: 800;
+    font-size: 14px;
   }
 
   .create-btn {
-    width: 100%;
-    text-align: center;
+    background: #1f4d0f;
+    color: #fff;
+    padding: 10px 16px;
+    box-shadow: 0 4px 12px rgba(31, 77, 15, 0.24);
   }
 
-  .node-actions {
-    flex-direction: column;
+  .locate-btn {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    background: #fff;
+    color: #26491c;
+    padding: 8px 12px;
+    box-shadow: 0 4px 12px rgba(44, 78, 31, 0.18);
+    z-index: 1000;
   }
 
-  .node-actions .btn-sm {
-    width: 100%;
+  .locate-btn-inline {
+    background: #fff;
+    color: #26491c;
+    padding: 8px 12px;
+    box-shadow: 0 4px 12px rgba(44, 78, 31, 0.08);
+    border: 1px solid #d7e4d0;
   }
 
-  .node-summary-item {
-    width: 100%;
+  .btn-save {
+    background: #1f4d0f;
+    color: #fff;
+    padding: 10px 18px;
   }
 
-  .node-summary-sep {
-    display: none;
+  .btn-confirm {
+    background: #c62828;
+    color: #fff;
+    padding: 10px 18px;
   }
 
-  .coord-read {
-    width: 100%;
+  .btn-cancel,
+  .btn-sm {
+    border: 1px solid #d7e4d0;
+    background: #fff;
+    color: #4a5f43;
+    cursor: pointer;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1.15;
+    padding: 7px 13px;
+    font-family: inherit;
   }
-}
 
-/* ===== SMALL MOBILE ===== */
-@media (max-width: 480px) {
+  .btn-sm.btn-edit {
+    color: #2e7d32;
+    border-color: #b8d7b2;
+    background: #f8fff7;
+  }
+
+  .btn-sm.btn-del {
+    color: #c62828;
+    border-color: #efc8c8;
+    background: #fff8f8;
+  }
 
   .map-wrapper {
-    min-height: 220px;
+    position: relative;
+    width: 100%;
+    min-height: 320px;
   }
 
   #currentMapHost,
   #createMapHost,
   #editMapHost {
-    min-height: 220px;
+    width: 100%;
+    min-height: 320px;
+    border-radius: 18px;
+    overflow: hidden;
+    position: relative;
+    background: #dfeecf;
+    border: 1px solid rgba(0, 0, 0, 0.08);
   }
 
   .leaflet-box {
-    height: 220px !important;
-    min-height: 220px !important;
+    width: 100%;
+    height: 320px !important;
+    min-height: 320px !important;
+    display: block !important;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #dfeecf;
+  }
+
+  .map-loading {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #64715d;
+    font-size: 13px;
+  }
+
+  .node-card {
+    margin-bottom: 12px;
+    background: #fff;
+    border: 1px solid #dce9d7;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 5px 16px rgba(51, 87, 37, 0.06);
+    min-width: 0;
   }
 
   .node-header {
-    flex-direction: column;
-    align-items: flex-start;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 12px;
+    background: linear-gradient(90deg, #1a430d, #2c6617);
+    color: #fff;
   }
 
   .node-header-btn {
-    padding: 12px;
+    width: 100%;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    padding: 8px 12px;
   }
-}
-            }
-          }
-        `}</style>
+
+  .node-header-left {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 auto;
+    overflow: visible;
+  }
+
+  .node-summary-line {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .node-summary-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    flex-shrink: 0;
+  }
+
+  .node-summary-item-compact {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: visible;
+  }
+
+  .node-summary-ellipsis {
+    display: inline-block;
+    max-width: none;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    vertical-align: bottom;
+  }
+
+  .node-summary-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.82);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .node-summary-value,
+  .coord-read,
+  .alert-text,
+  .card-title {
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+
+  .node-summary-value {
+    font-size: 13px;
+    font-weight: 800;
+    color: #ffffff;
+    white-space: normal;
+    min-width: 0;
+  }
+
+  .node-summary-sep {
+    font-size: 16px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .node-type-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 800;
+    color: #fff;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .node-type-badge-inline.type-air {
+    background: rgba(25, 118, 210, 0.28);
+  }
+
+  .node-type-badge-inline.type-soil {
+    background: rgba(109, 76, 65, 0.35);
+  }
+
+  .node-status-pill-inline {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+    color: #fff;
+  }
+
+  .node-status-pill-inline.status-on {
+    background: rgba(76, 175, 80, 0.92);
+  }
+
+  .node-status-pill-inline.status-off {
+    background: rgba(211, 47, 47, 0.92);
+  }
+
+  .accordion-arrow {
+    font-size: 13px;
+    font-weight: 800;
+    line-height: 1;
+    color: #fff;
+    transition: transform 0.2s ease;
+  }
+
+  .accordion-arrow.open {
+    transform: rotate(180deg);
+  }
+
+  .node-body {
+    padding: 14px 16px;
+    background: #fff;
+  }
+
+  .node-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 22px;
+    flex-wrap: wrap;
+  }
+
+  .node-sensor-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+  }
+
+  .node-sensor-table th,
+  .node-sensor-table td,
+  .node-sensor-table .sensor-name-cell,
+  .node-sensor-table .sensor-value-cell,
+  .node-sensor-table .sensor-unit-text {
+    font-size: 38px !important;
+    line-height: 1.38 !important;
+    font-family: inherit !important;
+  }
+
+  .node-sensor-table th {
+    text-align: left;
+    background: #eef5ea;
+    color: #667a60;
+    font-weight: 800;
+    padding: 18px 18px;
+    white-space: nowrap;
+  }
+
+  .node-sensor-table td {
+    border-top: 1px solid #edf3ea;
+    padding: 18px 18px;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  .sensor-name-cell,
+  .sensor-value-cell,
+  .sensor-unit-text {
+    white-space: nowrap;
+  }
+
+  .edit-limit-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+
+  .limit-input {
+    width: 170px;
+    height: 62px;
+    border-radius: 12px;
+    border: 1px solid #cfe0c8;
+    background: #fbfef9;
+    color: #33422d;
+    padding: 0 12px;
+    outline: none;
+    font-size: 38px !important;
+    line-height: 1.35 !important;
+    font-family: inherit !important;
+  }
+
+  .confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(18, 28, 14, 0.34);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 18px;
+  }
+
+  .confirm-dialog {
+    width: min(470px, calc(100vw - 28px));
+    background: #f7f8f2;
+    border-radius: 24px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.16);
+    padding: 22px 22px 16px;
+    text-align: center;
+  }
+
+  .confirm-icon {
+    width: 82px;
+    height: 82px;
+    border-radius: 999px;
+    margin: 0 auto 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f5e4b8;
+    color: #f39b2f;
+    font-size: 36px;
+    line-height: 1;
+  }
+
+  .confirm-title {
+    font-size: 22px;
+    line-height: 1.3;
+    font-weight: 800;
+    color: #2f4724;
+    margin-bottom: 10px;
+  }
+
+  .confirm-sub {
+    font-size: 15px;
+    line-height: 1.75;
+    color: #5d6e54;
+    white-space: pre-line;
+    margin: 0 auto 18px;
+    max-width: 370px;
+  }
+
+  .confirm-actions {
+    display: flex;
+    justify-content: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+
+  .confirm-btn {
+    min-width: 154px;
+    min-height: 52px;
+    border-radius: 16px;
+    border: 1px solid transparent;
+    font-size: 16px;
+    font-weight: 800;
+    padding: 0 18px;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  }
+
+  .confirm-btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .confirm-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .confirm-btn.secondary {
+    background: #f7f8f2;
+    color: #355126;
+    border-color: #cfd8c5;
+  }
+
+  .confirm-btn.primary,
+  .confirm-btn.confirm-delete,
+  .confirm-btn.confirm-save,
+  .confirm-btn.confirm-warn {
+    color: #fff;
+    border-color: transparent;
+  }
+
+  .confirm-btn.confirm-delete {
+    background: linear-gradient(180deg, #e53935 0%, #c62828 100%);
+    box-shadow: 0 10px 22px rgba(198, 40, 40, 0.22);
+  }
+
+  .confirm-btn.confirm-save {
+    background: linear-gradient(180deg, #2e7d32 0%, #1f6b24 100%);
+    box-shadow: 0 10px 22px rgba(31, 107, 36, 0.22);
+  }
+
+  .confirm-btn.confirm-warn,
+  .confirm-btn.primary {
+    background: linear-gradient(180deg, #eb4a3c, #cf2f24);
+    box-shadow: 0 10px 22px rgba(207, 47, 36, 0.22);
+  }
+
+  @media (max-width: 640px) {
+    .confirm-dialog {
+      width: min(420px, calc(100vw - 24px));
+      border-radius: 22px;
+      padding: 20px 18px 14px;
+    }
+
+    .confirm-icon {
+      width: 74px;
+      height: 74px;
+      font-size: 32px;
+      margin-bottom: 12px;
+    }
+
+    .confirm-title {
+      font-size: 20px;
+    }
+
+    .confirm-sub {
+      font-size: 14px;
+      max-width: 320px;
+    }
+
+    .confirm-btn {
+      min-width: 138px;
+      min-height: 48px;
+      font-size: 15px;
+      border-radius: 14px;
+    }
+  }
+
+  `}</style>
       </div>
     </DuwimsStaticPage>
   );

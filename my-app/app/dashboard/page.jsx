@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
 import "leaflet/dist/leaflet.css";
 import { useDuwimsT } from "../components/language-context";
+
 const AUTH_KEYS = [
   "AUTH_TOKEN_V1",
   "token",
@@ -44,6 +45,24 @@ function getToken() {
     } catch {}
   }
   return "";
+}
+
+function parseJwt(token) {
+  try {
+    if (!token) return null;
+    const base64 = token.split(".")[1];
+    if (!base64) return null;
+    const normalized = base64.replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(
+      atob(normalized)
+        .split("")
+        .map((c) => `%${("00" + c.charCodeAt(0).toString(16)).slice(-2)}`)
+        .join("")
+    );
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
 }
 
 function toNum(v) {
@@ -117,19 +136,6 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
-}
-
-function formatDateTime(value, lang) {
-  if (!value) return "-";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleString(lang === "en" ? "en-US" : "th-TH", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function displayLatest(sensor) {
@@ -492,8 +498,6 @@ function getSensorStatusInfo(sensor = {}, sensorName = "", t, lang = "th") {
   };
 }
 
-
-
 function getDayShortLabel(dateStr, lang = "th") {
   const d = new Date(dateStr);
   if (Number.isNaN(d.getTime())) return "-";
@@ -633,7 +637,7 @@ function buildMapData(plotsRaw, t, lang) {
   return { polygons, pins };
 }
 
-function buildHtmlContent(t, weatherView, weatherLoading, weatherError) {
+function buildHtmlContent(t, weatherView, weatherLoading, weatherError, lang, role) {
   const weatherDaysHtml = weatherView?.days?.length
     ? weatherView.days
         .map(
@@ -663,6 +667,47 @@ function buildHtmlContent(t, weatherView, weatherLoading, weatherError) {
     weatherView?.rain7Days != null
       ? `${Math.round(Number(weatherView.rain7Days) * 10) / 10} mm`
       : "-";
+
+  const statusOnCardHtml =
+    role === "employee"
+      ? `
+        <div class="status-on" style="
+          width:100%;
+          display:block;
+          box-sizing:border-box;
+          margin-bottom:12px;
+          padding:12px 14px;
+        ">
+          <div class="on-label">${t.workingStatus}</div>
+          <div style="font-size:11px;opacity:0.85;margin-bottom:8px">
+            ${lang === "en" ? "Employee view" : "มุมมองพนักงาน"}
+          </div>
+          <div class="on-value" style="font-size:20px;line-height:1.2">
+            ${t.on} <span id="dashboardNodeOnCount" style="font-size:20px">0</span> ${t.machineUnit}
+          </div>
+          <div class="on-sub" style="font-size:14px;line-height:1.35">
+            ${t.off} <span id="dashboardNodeOffCount" style="font-size:16px">0</span> ${t.machineUnit}
+          </div>
+        </div>
+      `
+      : `
+        <div class="status-on" style="
+          width:100%;
+          display:block;
+          box-sizing:border-box;
+          margin-bottom:12px;
+          padding:12px 14px;
+        ">
+          <div class="on-label">${t.workingStatus}</div>
+          <div style="font-size:11px;opacity:0.85;margin-bottom:8px">${t.updatedLatest}</div>
+          <div class="on-value" style="font-size:20px;line-height:1.2">
+            ${t.on} <span id="dashboardNodeOnCount" style="font-size:20px">0</span> ${t.machineUnit}
+          </div>
+          <div class="on-sub" style="font-size:14px;line-height:1.35">
+            ${t.off} <span id="dashboardNodeOffCount" style="font-size:16px">0</span> ${t.machineUnit}
+          </div>
+        </div>
+      `;
 
   return `<div id="p1" class="page active">
 
@@ -717,22 +762,26 @@ function buildHtmlContent(t, weatherView, weatherLoading, weatherError) {
     </div>
   </div>
 
-  <div class="grid-2" style="margin-bottom:16px">
-    <div class="status-on">
-      <div class="on-label">${t.workingStatus}</div>
-      <div style="font-size:11px;opacity:0.80;margin-bottom:10px">${t.updatedLatest}</div>
-      <div class="on-value">${t.on} <span id="dashboardNodeOnCount" style="font-size:20px">0</span> ${t.machineUnit}</div>
-      <div class="on-sub">${t.off} <span id="dashboardNodeOffCount">0</span> ${t.machineUnit}</div>
-    </div>
-    <div class="status-alert">
-      <div style="font-size:14px;font-weight:700;color:#7c2d12;margin-bottom:8px">${t.issuesFound}</div>
-      <div id="dashboardIssueCount" style="font-size:13px;font-weight:700;color:#7c2d12;margin-bottom:8px">${t.issuesCount(0)}</div>
+  <div style="margin-bottom:16px;display:flex;flex-direction:column;width:100%;">
+    ${statusOnCardHtml}
+    <div class="status-alert" style="width:100%;">
+      <div style="font-size:16px;font-weight:800;color:#7c2d12;margin-bottom:8px">${t.issuesFound}</div>
+      <div id="dashboardIssueCount" style="font-size:15px;font-weight:800;color:#7c2d12;margin-bottom:8px">${t.issuesCount(0)}</div>
       <div id="dashboardIssueList"></div>
     </div>
   </div>
 
   <div class="section-title">${t.plotSensorData}</div>
-  <div id="dashboardSensorCards" class="grid-2"></div>
+  <div
+    id="dashboardSensorCards"
+    style="
+      display:grid;
+      grid-template-columns:repeat(3,minmax(0,0.92fr));
+      gap:14px;
+      align-items:start;
+      justify-content:center;
+    "
+  ></div>
 </div>`;
 }
 
@@ -769,52 +818,91 @@ function buildSensorCards(plots = [], t, lang) {
 
               const sensorBoxStyle = sensorStatus.isOut
                 ? `
-                  border:1.5px solid #ef4444;
-                  background:#fef2f2;
-                  box-shadow:0 0 0 1px rgba(239,68,68,.08) inset;
-                `
+                    border:1.5px solid #ef4444;
+                    background:#fef2f2;
+                    box-shadow:0 0 0 1px rgba(239,68,68,.08) inset;
+                  `
                 : `
-                  border:1.5px solid #22c55e;
-                  background:#f0fdf4;
-                  box-shadow:0 0 0 1px rgba(34,197,94,.08) inset;
-                `;
+                    border:1.5px solid #22c55e;
+                    background:#f0fdf4;
+                    box-shadow:0 0 0 1px rgba(34,197,94,.08) inset;
+                  `;
 
               const valueStyle = sensorStatus.isOut
-                ? "color:#dc2626;font-weight:800;"
-                : "color:#166534;font-weight:800;";
+                ? "color:#dc2626;font-weight:800;font-size:17px;"
+                : "color:#166534;font-weight:800;font-size:17px;";
 
               const statusStyle = sensorStatus.isOut
-                ? "color:#dc2626;font-weight:800;"
-                : "color:#166534;font-weight:800;";
+                ? "color:#dc2626;font-weight:800;font-size:13px;"
+                : "color:#166534;font-weight:800;font-size:13px;";
 
               return `
-                <div class="sensor-group">
-                  <div class="sg-title">${escapeHtml(sensorName)}</div>
-                  <div class="sg-grid">
-                    <div class="sg-item" style="${sensorBoxStyle}">
-                      <div class="sgi-name">${escapeHtml(sensorName)}</div>
-                      <div class="sgi-vmm">
-                        <div class="sgi-row">
-                          <span class="sgi-row-label">${t.currentValue}</span>
-                          <span class="sgi-row-val" style="${valueStyle}">
-                            ${escapeHtml(latestValueText)}
-                          </span>
-                        </div>
-                        <div class="sgi-row">
-                          <span class="sgi-row-label">MIN</span>
-                          <span class="sgi-row-sub">${escapeHtml(range.displayMin)}</span>
-                        </div>
-                        <div class="sgi-row">
-                          <span class="sgi-row-label">MAX</span>
-                          <span class="sgi-row-sub">${escapeHtml(range.displayMax)}</span>
-                        </div>
-                        <div class="sgi-row">
-                          <span class="sgi-row-label" style="${statusStyle}">${t.status}</span>
-                          <span class="sgi-row-sub" style="${statusStyle}">
-                            ${escapeHtml(sensorStatus.statusText)}
-                          </span>
-                        </div>
-                      </div>
+                <div class="sensor-group" style="
+                  ${sensorBoxStyle}
+                  border-radius:14px;
+                  padding:10px 12px;
+                  margin-bottom:10px;
+                ">
+                  <div class="sg-title" style="
+                    font-size:16px;
+                    font-weight:800;
+                    margin-bottom:8px;
+                    line-height:1.3;
+                  ">
+                    ${escapeHtml(sensorName)}
+                  </div>
+
+                  <div class="sgi-vmm" style="
+                    display:flex;
+                    flex-direction:column;
+                    gap:6px;
+                  ">
+                    <div class="sgi-row" style="
+                      display:grid;
+                      grid-template-columns:92px minmax(0,1fr);
+                      column-gap:10px;
+                      align-items:flex-start;
+                    ">
+                      <span class="sgi-row-label" style="font-size:13px;font-weight:700;">${t.currentValue}</span>
+                      <span class="sgi-row-val" style="${valueStyle}text-align:left;padding-left:2px;">
+                        ${escapeHtml(latestValueText)}
+                      </span>
+                    </div>
+
+                    <div class="sgi-row" style="
+                      display:grid;
+                      grid-template-columns:92px minmax(0,1fr);
+                      column-gap:10px;
+                      align-items:flex-start;
+                    ">
+                      <span class="sgi-row-label" style="font-size:13px;font-weight:700;">MIN</span>
+                      <span class="sgi-row-sub" style="font-size:13px;font-weight:700;text-align:left;padding-left:2px;">
+                        ${escapeHtml(range.displayMin)}
+                      </span>
+                    </div>
+
+                    <div class="sgi-row" style="
+                      display:grid;
+                      grid-template-columns:92px minmax(0,1fr);
+                      column-gap:10px;
+                      align-items:flex-start;
+                    ">
+                      <span class="sgi-row-label" style="font-size:13px;font-weight:700;">MAX</span>
+                      <span class="sgi-row-sub" style="font-size:13px;font-weight:700;text-align:left;padding-left:2px;">
+                        ${escapeHtml(range.displayMax)}
+                      </span>
+                    </div>
+
+                    <div class="sgi-row" style="
+                      display:grid;
+                      grid-template-columns:92px minmax(0,1fr);
+                      column-gap:10px;
+                      align-items:flex-start;
+                    ">
+                      <span class="sgi-row-label" style="${statusStyle}">${t.status}</span>
+                      <span class="sgi-row-sub" style="${statusStyle}text-align:left;padding-left:2px;">
+                        ${escapeHtml(sensorStatus.statusText)}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -822,16 +910,24 @@ function buildSensorCards(plots = [], t, lang) {
             })
             .join("")
         : `
-          <div class="sensor-group">
-            <div class="sg-title">${t.noSensor}</div>
-            <div class="sg-grid">
-              <div class="sg-item" style="
-                border:1.5px solid #22c55e;
-                background:#f0fdf4;
-                box-shadow:0 0 0 1px rgba(34,197,94,.08) inset;
-              ">
-                <div class="sgi-name">${t.noSensorDataYet}</div>
-              </div>
+          <div class="sensor-group" style="
+            border:1.5px solid #22c55e;
+            background:#f0fdf4;
+            box-shadow:0 0 0 1px rgba(34,197,94,.08) inset;
+            border-radius:14px;
+            padding:10px 12px;
+            margin-bottom:10px;
+          ">
+            <div class="sg-title" style="
+              font-size:16px;
+              font-weight:800;
+              margin-bottom:8px;
+              line-height:1.3;
+            ">
+              ${t.noSensor}
+            </div>
+            <div class="sgi-name" style="font-size:14px;font-weight:700;">
+              ${t.noSensorDataYet}
             </div>
           </div>
         `;
@@ -861,15 +957,23 @@ function buildSensorCards(plots = [], t, lang) {
         `;
 
       cards.push(`
-        <div class="pin-card" style="${cardStyle}">
-          <div class="pin-header">
+        <div class="pin-card" style="
+          ${cardStyle}
+          padding:12px 12px 10px 12px;
+          border-radius:16px;
+        ">
+          <div class="pin-header" style="align-items:flex-start;gap:10px;margin-bottom:6px;">
             <div>
-              <div class="pin-name">${t.dataLabel} : ${escapeHtml(plotName)} • ${escapeHtml(
+              <div class="pin-name" style="font-size:18px;font-weight:800;line-height:1.35;">
+                ${t.dataLabel} : ${escapeHtml(plotName)} • ${escapeHtml(
         nodeType === "soil" ? t.soilNode : t.airNode
-      )} • ${t.node}:${escapeHtml(nodeName)}</div>
-              <div class="pin-sub">${t.deviceAndSensorDetails}</div>
+      )} • ${t.node}:${escapeHtml(nodeName)}
+              </div>
+              <div class="pin-sub" style="font-size:13px;line-height:1.4;margin-top:4px;">
+                ${t.deviceAndSensorDetails}
+              </div>
             </div>
-            <div class="status-badge" style="${badgeStyle}">
+            <div class="status-badge" style="${badgeStyle}font-size:12px;font-weight:800;padding:6px 10px;border-radius:999px;white-space:nowrap;">
               ${hasProblemInNode ? t.abnormal : t.normal} • ${escapeHtml(nodeStatus)}
             </div>
           </div>
@@ -917,14 +1021,17 @@ function buildIssueSummary(plots = [], t, lang) {
 export default function Page() {
   const { t, lang } = useDuwimsT();
   const mapRef = useRef(null);
+
   const [plots, setPlots] = useState([]);
   const [loadingMap, setLoadingMap] = useState(true);
   const [mapError, setMapError] = useState("");
   const [weatherData, setWeatherData] = useState(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState("");
+  const [role, setRole] = useState("");
 
   const mapData = useMemo(() => buildMapData(plots, t, lang), [plots, t, lang]);
+
   const weatherView = useMemo(() => {
     const daily = weatherData?.daily;
     if (!daily?.time?.length) return null;
@@ -949,73 +1056,85 @@ export default function Page() {
   }, [weatherData, lang]);
 
   const htmlContent = useMemo(
-    () => buildHtmlContent(t, weatherView, weatherLoading, weatherError),
-    [t, weatherView, weatherLoading, weatherError]
+    () => buildHtmlContent(t, weatherView, weatherLoading, weatherError, lang, role),
+    [t, weatherView, weatherLoading, weatherError, lang, role]
   );
 
   useEffect(() => {
-  let alive = true;
+    let alive = true;
 
-  async function loadPlots() {
-    setLoadingMap(true);
-    setMapError("");
+    async function loadPlots() {
+      setLoadingMap(true);
+      setMapError("");
 
-    try {
-      const url = new URL(window.location.href);
-      const tokenFromUrl = url.searchParams.get("token");
+      try {
+        const url = new URL(window.location.href);
+        const tokenFromUrl = url.searchParams.get("token");
 
-      if (tokenFromUrl) {
-        saveTokenToStorage(tokenFromUrl);
-        url.searchParams.delete("token");
-        url.searchParams.delete("error");
-        window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
-      }
+        if (tokenFromUrl) {
+          saveTokenToStorage(tokenFromUrl);
+          url.searchParams.delete("token");
+          url.searchParams.delete("error");
+          window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+        }
 
-      const token = tokenFromUrl || getToken();
-      if (!token) {
+        const token = tokenFromUrl || getToken();
+        if (!token) {
+          setPlots([]);
+          setMapError("กรุณาเข้าสู่ระบบก่อน");
+          window.location.replace("/");
+          return;
+        }
+
+        const payload = parseJwt(token);
+        if (alive) {
+          setRole(
+            String(
+              payload?.role ||
+                payload?.user?.role ||
+                payload?.data?.role ||
+                ""
+            ).toLowerCase()
+          );
+        }
+
+        const res = await fetch(`${getApiBase()}/api/plots`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(`${t.loadPlotFailed} (${res.status}) ${text || ""}`);
+        }
+
+        const data = await res.json();
+        const rows = Array.isArray(data?.items)
+          ? data.items
+          : Array.isArray(data)
+          ? data
+          : [];
+
+        if (!alive) return;
+        setPlots(rows);
+      } catch (err) {
+        if (!alive) return;
         setPlots([]);
-        setMapError("กรุณาเข้าสู่ระบบก่อน");
-        window.location.replace("/");
-        return;
+        setMapError(err?.message || t.loadDashboardFailed);
+      } finally {
+        if (alive) setLoadingMap(false);
       }
-
-      const res = await fetch(`${getApiBase()}/api/plots`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        cache: "no-store",
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`${t.loadPlotFailed} (${res.status}) ${text || ""}`);
-      }
-
-      const data = await res.json();
-      const rows = Array.isArray(data?.items)
-        ? data.items
-        : Array.isArray(data)
-        ? data
-        : [];
-
-      if (!alive) return;
-      setPlots(rows);
-    } catch (err) {
-      if (!alive) return;
-      setPlots([]);
-      setMapError(err?.message || t.loadDashboardFailed);
-    } finally {
-      if (alive) setLoadingMap(false);
     }
-  }
 
-  loadPlots();
-  return () => {
-    alive = false;
-  };
-}, [t]);
+    loadPlots();
+    return () => {
+      alive = false;
+    };
+  }, [t]);
 
   useEffect(() => {
     let alive = true;
@@ -1113,28 +1232,62 @@ export default function Page() {
   }, [plots, t, lang, htmlContent]);
 
   useEffect(() => {
-  let mounted = true;
-  let mapInstance = null;
-  let resizeTimer = null;
+    let mounted = true;
+    let mapInstance = null;
+    let resizeTimer = null;
 
-  async function initLeaflet() {
-    if (loadingMap) return;
+    async function initLeaflet() {
+      if (loadingMap) return;
 
-    const hostEl = document.getElementById("dashboardMapHost");
-    const plotCountEl = document.getElementById("mapPlotCount");
-    const pinCountEl = document.getElementById("mapPinCount");
+      const hostEl = document.getElementById("dashboardMapHost");
+      const plotCountEl = document.getElementById("mapPlotCount");
+      const pinCountEl = document.getElementById("mapPinCount");
 
-    if (plotCountEl) {
-      plotCountEl.textContent = `${t.plotCount}: ${mapData.polygons.length}`;
-    }
+      if (plotCountEl) {
+        plotCountEl.textContent = `${t.plotCount}: ${mapData.polygons.length}`;
+      }
 
-    if (pinCountEl) {
-      pinCountEl.textContent = `${t.pinCount}: ${mapData.pins.length}`;
-    }
+      if (pinCountEl) {
+        pinCountEl.textContent = `${t.pinCount}: ${mapData.pins.length}`;
+      }
 
-    if (!hostEl) return;
+      if (!hostEl) return;
 
-    if (mapError) {
+      if (mapError) {
+        if (mapRef.current) {
+          try {
+            mapRef.current.remove();
+          } catch {}
+          mapRef.current = null;
+        }
+
+        hostEl.innerHTML = `
+          <div style="
+            height:320px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            text-align:center;
+            padding:24px;
+            color:#9a3412;
+            background:#fff7ed;
+            font-weight:700;
+          ">
+            ${escapeHtml(mapError)}
+          </div>
+        `;
+        return;
+      }
+
+      let mapEl = document.getElementById("dashboardMap");
+
+      if (!mapEl) {
+        hostEl.innerHTML = `<div id="dashboardMap" style="width:100%;height:320px;min-height:320px;display:block;border-radius:18px;overflow:hidden;background:#dfeecf"></div>`;
+        mapEl = document.getElementById("dashboardMap");
+      }
+
+      if (!mapEl || !mapEl.isConnected) return;
+
       if (mapRef.current) {
         try {
           mapRef.current.remove();
@@ -1142,226 +1295,192 @@ export default function Page() {
         mapRef.current = null;
       }
 
-      hostEl.innerHTML = `
-        <div style="
-          height:320px;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          text-align:center;
-          padding:24px;
-          color:#9a3412;
-          background:#fff7ed;
-          font-weight:700;
-        ">
-          ${escapeHtml(mapError)}
-        </div>
-      `;
-      return;
-    }
-
-    let mapEl = document.getElementById("dashboardMap");
-
-    if (!mapEl) {
-      hostEl.innerHTML = `<div id="dashboardMap" style="width:100%;height:320px;min-height:320px;display:block;border-radius:18px;overflow:hidden;background:#dfeecf"></div>`;
-      mapEl = document.getElementById("dashboardMap");
-    }
-
-    if (!mapEl || !mapEl.isConnected) return;
-
-    if (mapRef.current) {
-      try {
-        mapRef.current.remove();
-      } catch {}
-      mapRef.current = null;
-    }
-
-    if (mapEl._leaflet_id) {
-      try {
-        mapEl._leaflet_id = null;
-      } catch {}
-    }
-
-    try {
-      const leafletModule = await import("leaflet");
-      const L = leafletModule.default || leafletModule;
-
-      if (!mounted || !L || !mapEl || !mapEl.isConnected) return;
-
-      delete L.Icon.Default.prototype._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl:
-          "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-        shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-      });
-
-      function makeDotIcon(color) {
-        return L.divIcon({
-          className: "dashboard-node-marker",
-          html: `
-            <div style="
-              width:18px;
-              height:18px;
-              border-radius:999px;
-              background:${color};
-              border:3px solid #ffffff;
-              box-shadow:0 4px 10px rgba(0,0,0,.25);
-            "></div>
-          `,
-          iconSize: [18, 18],
-          iconAnchor: [9, 9],
-          popupAnchor: [0, -10],
-        });
-      }
-
-      const airIcon = makeDotIcon("#2563eb");
-      const soilIcon = makeDotIcon("#16a34a");
-
-      const defaultCenter = [13.112, 100.926];
-      const center =
-        mapData.polygons?.[0]?.coords?.[0] ||
-        (mapData.pins?.[0] ? [mapData.pins[0].lat, mapData.pins[0].lng] : defaultCenter);
-
-      mapInstance = L.map(mapEl, {
-        center,
-        zoom: 17,
-        zoomControl: true,
-      });
-
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 20,
-        attribution: "&copy; OpenStreetMap contributors",
-      }).addTo(mapInstance);
-
-      const bounds = [];
-
-      mapData.polygons.forEach((poly) => {
-        const layer = L.polygon(poly.coords, {
-          color: poly.color || "#6c8f5d",
-          weight: 2,
-          fillColor: poly.color || "#6c8f5d",
-          fillOpacity: 0.12,
-        }).addTo(mapInstance);
-
-        layer.bindTooltip(poly.name, { sticky: true });
-
-        layer.bindPopup(`
-          <div style="min-width:180px">
-            <div style="font-weight:800;margin-bottom:6px">${escapeHtml(poly.name)}</div>
-            <div>${t.polygonPointCount}: ${poly.coords.length}</div>
-          </div>
-        `);
-
-        poly.coords.forEach((pt) => bounds.push(pt));
-      });
-
-      mapData.pins.forEach((pin) => {
-        const node = pin.nodes?.[0] || {};
-        const nodeType = String(node?.nodeType || "air").toLowerCase();
-        const marker = L.marker([pin.lat, pin.lng], {
-          icon: nodeType === "soil" ? soilIcon : airIcon,
-        }).addTo(mapInstance);
-
-        const sensorList = Array.isArray(node?.sensors) ? node.sensors : [];
-
-        const sensorListHtml = sensorList.length
-          ? `<ul style="padding-left:18px;margin:6px 0 0 0">
-              ${sensorList
-                .map((sensor, i) => {
-                  const sensorName = translateSensorName(
-                    sensor?.name || sensor?.uid || `${t.sensor} ${i + 1}`,
-                    lang
-                  );
-                  const latestValue = displayLatest(sensor);
-                  return `<li>${escapeHtml(sensorName)} • ${escapeHtml(latestValue)}</li>`;
-                })
-                .join("")}
-             </ul>`
-          : `<div>${t.noSensorLower}</div>`;
-
-        marker.bindTooltip(pin.pinName, {
-          direction: "top",
-          offset: [0, -8],
-          opacity: 1,
-        });
-
-        marker.bindPopup(`
-          <div style="min-width:240px">
-            <div style="font-weight:800;margin-bottom:6px">${escapeHtml(pin.pinName)}</div>
-            <div style="margin-bottom:4px">${t.plot}: ${escapeHtml(pin.plotName)}</div>
-            <div style="margin-bottom:4px">${t.type}: ${escapeHtml(
-              nodeType === "soil" ? t.soilNode : t.airNode
-            )}</div>
-            <div style="margin-bottom:4px">${t.status}: ${escapeHtml(node?.status || "-")}</div>
-            <div style="margin-bottom:4px">lat ${escapeHtml(pin.lat)}, lng ${escapeHtml(pin.lng)}</div>
-            <div style="font-weight:700;margin-top:8px;margin-bottom:4px">${t.currentSensors}</div>
-            ${sensorListHtml}
-          </div>
-        `);
-
-        bounds.push([pin.lat, pin.lng]);
-      });
-
-      if (bounds.length) {
-        mapInstance.fitBounds(bounds, { padding: [20, 20] });
-      } else {
-        mapInstance.setView(defaultCenter, 17);
-      }
-
-      mapRef.current = mapInstance;
-
-      resizeTimer = setTimeout(() => {
+      if (mapEl._leaflet_id) {
         try {
-          if (!mounted) return;
-          if (!mapInstance) return;
-          if (mapRef.current !== mapInstance) return;
-          if (!mapEl || !mapEl.isConnected) return;
-          mapInstance.invalidateSize();
+          mapEl._leaflet_id = null;
         } catch {}
-      }, 250);
-    } catch {
-      if (!mounted) return;
-      hostEl.innerHTML = `
-        <div style="
-          height:320px;
-          display:flex;
-          align-items:center;
-          justify-content:center;
-          text-align:center;
-          padding:24px;
-          color:#9a3412;
-          background:#fff7ed;
-          font-weight:700;
-        ">
-          ${t.leafletLoadFailed}
-        </div>
-      `;
-    }
-  }
+      }
 
-  const tm = setTimeout(initLeaflet, 100);
-
-  return () => {
-    mounted = false;
-    clearTimeout(tm);
-    if (resizeTimer) clearTimeout(resizeTimer);
-
-    if (mapRef.current) {
       try {
-        mapRef.current.remove();
-      } catch {}
-      mapRef.current = null;
+        const leafletModule = await import("leaflet");
+        const L = leafletModule.default || leafletModule;
+
+        if (!mounted || !L || !mapEl || !mapEl.isConnected) return;
+
+        delete L.Icon.Default.prototype._getIconUrl;
+        L.Icon.Default.mergeOptions({
+          iconRetinaUrl:
+            "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+          iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+          shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+        });
+
+        function makeDotIcon(color) {
+          return L.divIcon({
+            className: "dashboard-node-marker",
+            html: `
+              <div style="
+                width:18px;
+                height:18px;
+                border-radius:999px;
+                background:${color};
+                border:3px solid #ffffff;
+                box-shadow:0 4px 10px rgba(0,0,0,.25);
+              "></div>
+            `,
+            iconSize: [18, 18],
+            iconAnchor: [9, 9],
+            popupAnchor: [0, -10],
+          });
+        }
+
+        const airIcon = makeDotIcon("#2563eb");
+        const soilIcon = makeDotIcon("#16a34a");
+
+        const defaultCenter = [13.112, 100.926];
+        const center =
+          mapData.polygons?.[0]?.coords?.[0] ||
+          (mapData.pins?.[0] ? [mapData.pins[0].lat, mapData.pins[0].lng] : defaultCenter);
+
+        mapInstance = L.map(mapEl, {
+          center,
+          zoom: 17,
+          zoomControl: true,
+        });
+
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 20,
+          attribution: "&copy; OpenStreetMap contributors",
+        }).addTo(mapInstance);
+
+        const bounds = [];
+
+        mapData.polygons.forEach((poly) => {
+          const layer = L.polygon(poly.coords, {
+            color: poly.color || "#6c8f5d",
+            weight: 2,
+            fillColor: poly.color || "#6c8f5d",
+            fillOpacity: 0.12,
+          }).addTo(mapInstance);
+
+          layer.bindTooltip(poly.name, { sticky: true });
+
+          layer.bindPopup(`
+            <div style="min-width:180px">
+              <div style="font-weight:800;margin-bottom:6px">${escapeHtml(poly.name)}</div>
+              <div>${t.polygonPointCount}: ${poly.coords.length}</div>
+            </div>
+          `);
+
+          poly.coords.forEach((pt) => bounds.push(pt));
+        });
+
+        mapData.pins.forEach((pin) => {
+          const node = pin.nodes?.[0] || {};
+          const nodeType = String(node?.nodeType || "air").toLowerCase();
+          const marker = L.marker([pin.lat, pin.lng], {
+            icon: nodeType === "soil" ? soilIcon : airIcon,
+          }).addTo(mapInstance);
+
+          const sensorList = Array.isArray(node?.sensors) ? node.sensors : [];
+
+          const sensorListHtml = sensorList.length
+            ? `<ul style="padding-left:18px;margin:6px 0 0 0">
+                ${sensorList
+                  .map((sensor, i) => {
+                    const sensorName = translateSensorName(
+                      sensor?.name || sensor?.uid || `${t.sensor} ${i + 1}`,
+                      lang
+                    );
+                    const latestValue = displayLatest(sensor);
+                    return `<li>${escapeHtml(sensorName)} • ${escapeHtml(latestValue)}</li>`;
+                  })
+                  .join("")}
+               </ul>`
+            : `<div>${t.noSensorLower}</div>`;
+
+          marker.bindTooltip(pin.pinName, {
+            direction: "top",
+            offset: [0, -8],
+            opacity: 1,
+          });
+
+          marker.bindPopup(`
+            <div style="min-width:240px">
+              <div style="font-weight:800;margin-bottom:6px">${escapeHtml(pin.pinName)}</div>
+              <div style="margin-bottom:4px">${t.plot}: ${escapeHtml(pin.plotName)}</div>
+              <div style="margin-bottom:4px">${t.type}: ${escapeHtml(
+                nodeType === "soil" ? t.soilNode : t.airNode
+              )}</div>
+              <div style="margin-bottom:4px">${t.status}: ${escapeHtml(node?.status || "-")}</div>
+              <div style="margin-bottom:4px">lat ${escapeHtml(pin.lat)}, lng ${escapeHtml(pin.lng)}</div>
+              <div style="font-weight:700;margin-top:8px;margin-bottom:4px">${t.currentSensors}</div>
+              ${sensorListHtml}
+            </div>
+          `);
+
+          bounds.push([pin.lat, pin.lng]);
+        });
+
+        if (bounds.length) {
+          mapInstance.fitBounds(bounds, { padding: [20, 20] });
+        } else {
+          mapInstance.setView(defaultCenter, 17);
+        }
+
+        mapRef.current = mapInstance;
+
+        resizeTimer = setTimeout(() => {
+          try {
+            if (!mounted) return;
+            if (!mapInstance) return;
+            if (mapRef.current !== mapInstance) return;
+            if (!mapEl || !mapEl.isConnected) return;
+            mapInstance.invalidateSize();
+          } catch {}
+        }, 250);
+      } catch {
+        if (!mounted) return;
+        hostEl.innerHTML = `
+          <div style="
+            height:320px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            text-align:center;
+            padding:24px;
+            color:#9a3412;
+            background:#fff7ed;
+            font-weight:700;
+          ">
+            ${t.leafletLoadFailed}
+          </div>
+        `;
+      }
     }
 
-    const mapEl = document.getElementById("dashboardMap");
-    if (mapEl && mapEl._leaflet_id) {
-      try {
-        mapEl._leaflet_id = null;
-      } catch {}
-    }
-  };
-}, [loadingMap, mapError, mapData, t, lang, htmlContent]);
+    const tm = setTimeout(initLeaflet, 100);
+
+    return () => {
+      mounted = false;
+      clearTimeout(tm);
+      if (resizeTimer) clearTimeout(resizeTimer);
+
+      if (mapRef.current) {
+        try {
+          mapRef.current.remove();
+        } catch {}
+        mapRef.current = null;
+      }
+
+      const mapEl = document.getElementById("dashboardMap");
+      if (mapEl && mapEl._leaflet_id) {
+        try {
+          mapEl._leaflet_id = null;
+        } catch {}
+      }
+    };
+  }, [loadingMap, mapError, mapData, t, lang, htmlContent]);
 
   return <DuwimsStaticPage current="dashboard" htmlContent={htmlContent} />;
 }
