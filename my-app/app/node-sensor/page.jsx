@@ -18,6 +18,7 @@ const AUTH_KEYS = [
   "duwims_token",
 ];
 
+
 function getToken() {
   if (typeof window === "undefined") return "";
   for (const key of AUTH_KEYS) {
@@ -105,12 +106,14 @@ function normalizeSensor(sensor = {}) {
 
 function normalizeNode(node = {}) {
   return {
-    _id: safeText(node._id || ""),
-    uid: safeText(node.uid || node._id || ""),
+    _id: safeText(node._id || node.id || ""),
+    uid: safeText(node.uid || node._id || node.id || ""),
     nodeName: safeText(node.nodeName || ""),
     status: safeText(node.status || "ACTIVE"),
     lat: toNum(node.lat),
     lng: toNum(node.lng),
+    plotId: safeText(node.plotId || ""),
+    ownerRef: safeText(node.ownerRef || ""),
     sensors: Array.isArray(node.sensors)
       ? node.sensors.map(normalizeSensor)
       : [],
@@ -132,12 +135,27 @@ function normalizePlot(plot = {}) {
   };
 }
 
-function inferNodeTypeFromUid(uid = "") {
-  const value = String(uid || "")
-    .trim()
-    .toLowerCase();
+function inferNodeTypeFromUid(uid = "", sensors = [], nodeName = "") {
+  const value = `${uid} ${nodeName}`.trim().toLowerCase();
+
   if (value.includes("soil")) return "soil";
-  return "air";
+  if (value.includes("air")) return "air";
+
+  const sensorKeys = (Array.isArray(sensors) ? sensors : []).map((sensor) =>
+    canonicalizeSensorName(
+      sensor?.sensorKey || sensor?.name || sensor?.rawName || "",
+      sensor?.uid || "",
+    ),
+  );
+
+  const hasSoilSensor =
+    sensorKeys.includes("soil_moisture") ||
+    sensorKeys.includes("n") ||
+    sensorKeys.includes("p") ||
+    sensorKeys.includes("k") ||
+    sensorKeys.includes("water_availability");
+
+  return hasSoilSensor ? "soil" : "air";
 }
 
 function nodeTypeLabel(type) {
@@ -151,44 +169,85 @@ const SENSOR_LABELS = {
   light: { th: "ความเข้มแสง", en: "Light Intensity" },
   rainfall: { th: "ปริมาณน้ำฝน", en: "Rainfall" },
   soil_moisture: { th: "ความชื้นดิน", en: "Soil Moisture" },
-  n: { th: "N", en: "N" },
-  p: { th: "P", en: "P" },
-  k: { th: "K", en: "K" },
+  n: { th: "N", en: "Nitrogen" },
+  p: { th: "P", en: "Phosphorus" },
+  k: { th: "K", en: "Potassium" },
   water_availability: { th: "ความพร้อมใช้น้ำ", en: "Water Availability" },
 };
 
 function canonicalizeSensorName(name = "", uid = "") {
   const v = `${name} ${uid}`.trim().toLowerCase();
 
-  if (v.includes("temp_rh") || v.includes("temperature") || v.includes("temp") || v.includes("อุณหภูมิ")) {
+  if (
+    v.includes("temp_rh") ||
+    v.includes("temperature") ||
+    v.includes("temp") ||
+    v.includes("อุณหภูมิ")
+  ) {
     return "temperature";
   }
 
-  if (v.includes("relative humidity") || v.includes("humidity") || v === "rh" || v.includes("ความชื้นสัมพัทธ์")) {
+  if (
+    v.includes("relative humidity") ||
+    v.includes("humidity") ||
+    v === "rh" ||
+    v.includes("ความชื้นสัมพัทธ์")
+  ) {
     return "humidity";
   }
 
-  if (v.includes("wind_speed") || v.includes("wind speed") || v.includes("wind") || v.includes("ความเร็วลม") || v.includes("วัดความเร็วลม")) {
+  if (
+    v.includes("wind_speed") ||
+    v.includes("wind speed") ||
+    v.includes("wind") ||
+    v.includes("ความเร็วลม") ||
+    v.includes("วัดความเร็วลม")
+  ) {
     return "wind_speed";
   }
 
-  if (v.includes("light intensity") || v.includes("light") || v.includes("lux") || v.includes("ความเข้มแสง") || v.includes("แสง")) {
+  if (
+    v.includes("light intensity") ||
+    v.includes("light") ||
+    v.includes("lux") ||
+    v.includes("ความเข้มแสง") ||
+    v.includes("แสง")
+  ) {
     return "light";
   }
 
-  if (v.includes("rainfall") || v.includes("rain") || v.includes("ปริมาณน้ำฝน") || v.includes("ฝน")) {
+  if (
+    v.includes("rainfall") ||
+    v.includes("rain") ||
+    v.includes("ปริมาณน้ำฝน") ||
+    v.includes("ฝน")
+  ) {
     return "rainfall";
   }
 
-  if (v.includes("soil_moisture") || v.includes("soil moisture") || v.includes("ความชื้นในดิน") || v.includes("ความชื้นดิน") || v == "moisture") {
+  if (
+    v.includes("soil_moisture") ||
+    v.includes("soil moisture") ||
+    v.includes("ความชื้นในดิน") ||
+    v.includes("ความชื้นดิน") ||
+    v === "moisture"
+  ) {
     return "soil_moisture";
   }
 
-  if (v == "n") return "n";
-  if (v == "p") return "p";
-  if (v == "k") return "k";
+  if (v === "n" || v.includes("nitrogen")) return "n";
+  if (v === "p" || v.includes("phosphorus")) return "p";
+  if (v === "k" || v.includes("potassium")) return "k";
 
-  if (v.includes("water availability") || v.includes("water_level") || v.includes("water level") || v.includes("irrigation") || v.includes("ความพร้อมใช้น้ำ") || v.includes("ให้น้ำ")) {
+  if (
+    v.includes("water availability") ||
+    v.includes("water potential") ||
+    v.includes("water_level") ||
+    v.includes("water level") ||
+    v.includes("irrigation") ||
+    v.includes("ความพร้อมใช้น้ำ") ||
+    v.includes("ให้น้ำ")
+  ) {
     return "water_availability";
   }
 
@@ -741,15 +800,15 @@ function NodeMap({
   );
 }
 
-function SensorTable({ sensors, t, lang }) {
+function SensorTable({ sensors, t, lang, showLimits = false }) {
   return (
     <table className="node-sensor-table">
       <thead>
         <tr>
           <th>{t.sensorTableSensor || "sensor"}</th>
           <th>{t.sensorTableData || (lang === "en" ? "Data" : "ข้อมูล")}</th>
-          <th>{t.sensorTableMax || "Max"}</th>
-          <th>{t.sensorTableMin || "Min"}</th>
+          {showLimits ? <th>{t.sensorTableMax || "Max"}</th> : null}
+          {showLimits ? <th>{t.sensorTableMin || "Min"}</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -764,12 +823,22 @@ function SensorTable({ sensors, t, lang }) {
 
           return (
             <tr key={sensor._id || sensor.uid || sensor.name}>
-              <td className="sensor-name-cell">{getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}</td>
+              <td className="sensor-name-cell">
+                {getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}
+              </td>
               <td className={`${bad ? "val-red" : "val-green"} sensor-value-cell`}>
                 {formatSensorValue(latest, sensor.sensorKey || sensor.name, sensor.uid)}
               </td>
-              <td className="sensor-value-cell">{formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)}</td>
-              <td className="sensor-value-cell">{formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}</td>
+              {showLimits ? (
+                <td className="sensor-value-cell">
+                  {formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)}
+                </td>
+              ) : null}
+              {showLimits ? (
+                <td className="sensor-value-cell">
+                  {formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}
+                </td>
+              ) : null}
             </tr>
           );
         })}
@@ -781,6 +850,7 @@ function SensorTable({ sensors, t, lang }) {
 function EditableSensorTable({
   sensors,
   canEditLimits,
+  showLimits = false,
   onChangeMin,
   onChangeMax,
   t,
@@ -792,8 +862,8 @@ function EditableSensorTable({
         <tr>
           <th>{t.sensorTableSensor || "sensor"}</th>
           <th>{t.sensorTableData || (lang === "en" ? "Data" : "ข้อมูล")}</th>
-          <th>{t.sensorTableMax || "Max"}</th>
-          <th>{t.sensorTableMin || "Min"}</th>
+          {showLimits ? <th>{t.sensorTableMax || "Max"}</th> : null}
+          {showLimits ? <th>{t.sensorTableMin || "Min"}</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -808,42 +878,54 @@ function EditableSensorTable({
 
           return (
             <tr key={sensor._id || sensor.uid || index}>
-              <td className="sensor-name-cell">{getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}</td>
+              <td className="sensor-name-cell">
+                {getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}
+              </td>
               <td className={`${bad ? "val-red" : "val-green"} sensor-value-cell`}>
                 {formatSensorValue(latest, sensor.sensorKey || sensor.name, sensor.uid)}
               </td>
-              <td>
-                {canEditLimits ? (
-                  <div className="edit-limit-wrap">
-                    <input
-                      className="limit-input"
-                      type="number"
-                      step="any"
-                      value={sensor.maxValue ?? ""}
-                      onChange={(e) => onChangeMax(index, e.target.value)}
-                    />
-                    <span className="sensor-unit-text">{sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}</span>
-                  </div>
-                ) : (
-                  formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)
-                )}
-              </td>
-              <td>
-                {canEditLimits ? (
-                  <div className="edit-limit-wrap">
-                    <input
-                      className="limit-input"
-                      type="number"
-                      step="any"
-                      value={sensor.minValue ?? ""}
-                      onChange={(e) => onChangeMin(index, e.target.value)}
-                    />
-                    <span className="sensor-unit-text">{sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}</span>
-                  </div>
-                ) : (
-                  formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)
-                )}
-              </td>
+
+              {showLimits ? (
+                <td>
+                  {canEditLimits ? (
+                    <div className="edit-limit-wrap">
+                      <input
+                        className="limit-input"
+                        type="number"
+                        step="any"
+                        value={sensor.maxValue ?? ""}
+                        onChange={(e) => onChangeMax(index, e.target.value)}
+                      />
+                      <span className="sensor-unit-text">
+                        {sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}
+                      </span>
+                    </div>
+                  ) : (
+                    formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)
+                  )}
+                </td>
+              ) : null}
+
+              {showLimits ? (
+                <td>
+                  {canEditLimits ? (
+                    <div className="edit-limit-wrap">
+                      <input
+                        className="limit-input"
+                        type="number"
+                        step="any"
+                        value={sensor.minValue ?? ""}
+                        onChange={(e) => onChangeMin(index, e.target.value)}
+                      />
+                      <span className="sensor-unit-text">
+                        {sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}
+                      </span>
+                    </div>
+                  ) : (
+                    formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)
+                  )}
+                </td>
+              ) : null}
             </tr>
           );
         })}
@@ -862,6 +944,7 @@ export default function NodeSensorPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [nodes, setNodes] = useState([]);
 
   const [view, setView] = useState("view");
   const [plots, setPlots] = useState([]);
@@ -882,6 +965,7 @@ export default function NodeSensorPage() {
   const [formMarker, setFormMarker] = useState(null);
   const [formSensors, setFormSensors] = useState(sensorPresetsByType("air"));
   const [canEditSensorLimit, setCanEditSensorLimit] = useState(false);
+  const [showSensorLimits, setShowSensorLimits] = useState(false);
   const [matchedNode, setMatchedNode] = useState(null);
   const [uidLookupBusy, setUidLookupBusy] = useState(false);
   const [uidLookupMessage, setUidLookupMessage] = useState("");
@@ -924,15 +1008,16 @@ export default function NodeSensorPage() {
   }, [authChecked]);
 
   const allNodes = useMemo(() => {
-    return plots.flatMap((plot) =>
-      plot.nodes.map((node) => ({
-        ...node,
-        plotId: plot.id,
-        plotName: plot.plotName,
-        nodeType: inferNodeTypeFromUid(node.uid),
-      })),
-    );
-  }, [plots]);
+  return nodes.map((node) => {
+    const plot = plots.find((p) => String(p.id) === String(node.plotId));
+    return {
+      ...node,
+      plotId: node.plotId || "",
+      plotName: plot?.plotName || "-",
+      nodeType: inferNodeTypeFromUid(node.uid, node.sensors, node.nodeName),
+    };
+  });
+}, [nodes, plots]);
 
   const filteredPlotsForMap = useMemo(() => {
     if (selectedMapPlotId === "all") return plots;
@@ -940,16 +1025,20 @@ export default function NodeSensorPage() {
   }, [plots, selectedMapPlotId]);
 
   const filteredNodes = useMemo(() => {
-    return allNodes.filter((node) => {
-      const matchPlot =
-        selectedMapPlotId === "all" ||
-        String(node.plotId) === String(selectedMapPlotId);
-      const matchType =
-        selectedNodeType === "all" ||
-        String(node.nodeType) === String(selectedNodeType);
-      return matchPlot && matchType;
-    });
-  }, [allNodes, selectedMapPlotId, selectedNodeType]);
+  return allNodes.filter((node) => {
+    if (!node.plotId) return false;
+
+    const matchPlot =
+      selectedMapPlotId === "all" ||
+      String(node.plotId) === String(selectedMapPlotId);
+
+    const matchType =
+      selectedNodeType === "all" ||
+      String(node.nodeType) === String(selectedNodeType);
+
+    return matchPlot && matchType;
+  });
+}, [allNodes, selectedMapPlotId, selectedNodeType]);
 
   const createSelectedPlot = useMemo(
     () => plots.find((p) => String(p.id) === String(formPlotId)) || null,
@@ -965,7 +1054,14 @@ export default function NodeSensorPage() {
   );
 
   const detectedFormNodeType = useMemo(
-    () => (matchedNode ? inferNodeTypeFromUid(matchedNode.uid) : ""),
+    () =>
+      matchedNode
+        ? inferNodeTypeFromUid(
+            matchedNode.uid,
+            matchedNode.sensors,
+            matchedNode.nodeName,
+          )
+        : "",
     [matchedNode],
   );
 
@@ -1000,50 +1096,59 @@ export default function NodeSensorPage() {
 
 
   useEffect(() => {
-    const cleanUid = String(formUid || "")
-      .trim()
-      .toLowerCase();
+  const cleanUid = String(formUid || "").trim();
 
-    if (!cleanUid) {
-      setMatchedNode(null);
-      setUidLookupBusy(false);
-      setUidLookupMessage("");
-      setFormSensors([]);
-      return;
-    }
+  if (!cleanUid) {
+    setMatchedNode(null);
+    setUidLookupBusy(false);
+    setUidLookupMessage("");
+    setFormSensors([]);
+    return;
+  }
 
-    setUidLookupBusy(true);
+  let alive = true;
+  setUidLookupBusy(true);
 
-    const found = allNodes.find(
-      (node) =>
-        String(node.uid || "")
-          .trim()
-          .toLowerCase() === cleanUid,
-    );
+  (async () => {
+    try {
+      const res = await apiFetch(`/api/nodes/by-uid/${encodeURIComponent(cleanUid)}`);
+      const found = normalizeNode(res?.item || {});
 
-    if (!found) {
+      if (!alive) return;
+
+      setMatchedNode(found);
+      setFormSensors(
+        Array.isArray(found.sensors)
+          ? found.sensors.map((s) => ({
+              ...s,
+              sensorKey: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
+              name: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
+              rawName: s.rawName || s.name,
+            }))
+          : []
+      );
+      setUidLookupMessage(
+        t.uidFoundInDb ||
+          (lang === "en" ? "UID found in database" : "พบ UID ในฐานข้อมูล")
+      );
+    } catch (e) {
+      if (!alive) return;
       setMatchedNode(null);
       setFormSensors([]);
       setUidLookupMessage(
-        t.uidNotFoundInDb ||
-          (lang === "en"
-            ? "UID not found in database"
-            : "ไม่พบ UID นี้ในฐานข้อมูล"),
+        e?.message ||
+          t.uidNotFoundInDb ||
+          (lang === "en" ? "UID not found in database" : "ไม่พบ UID นี้ในฐานข้อมูล")
       );
-      setUidLookupBusy(false);
-      return;
+    } finally {
+      if (alive) setUidLookupBusy(false);
     }
+  })();
 
-    setMatchedNode(found);
-    setFormSensors(
-      Array.isArray(found.sensors) ? found.sensors.map((s) => ({ ...s, sensorKey: s.sensorKey || canonicalizeSensorName(s.name, s.uid), name: s.sensorKey || canonicalizeSensorName(s.name, s.uid), rawName: s.rawName || s.name })) : [],
-    );
-    setUidLookupMessage(
-      t.uidFoundInDb ||
-        (lang === "en" ? "UID found in database" : "พบ UID ในฐานข้อมูล"),
-    );
-    setUidLookupBusy(false);
-  }, [formUid, allNodes]);
+  return () => {
+    alive = false;
+  };
+}, [formUid, lang]);
 
   useEffect(() => {
     const onBeforeUnload = (event) => {
@@ -1164,36 +1269,47 @@ export default function NodeSensorPage() {
   }, [isNodeFormView, hasPendingLeaveGuard, busy, lang]);
 
   async function loadAll() {
-    setLoading(true);
-    setError("");
-    setSuccess("");
+  setLoading(true);
+  setError("");
+  setSuccess("");
 
-    try {
-      const res = await apiFetch("/api/plots");
-      const items = Array.isArray(res?.items)
-        ? res.items.map(normalizePlot)
-        : Array.isArray(res)
-          ? res.map(normalizePlot)
-          : [];
+  try {
+    const [plotsRes, nodesRes] = await Promise.all([
+      apiFetch("/api/plots"),
+      apiFetch("/api/nodes"),
+    ]);
 
-      setPlots(items);
+    const plotItems = Array.isArray(plotsRes?.items)
+      ? plotsRes.items.map(normalizePlot)
+      : Array.isArray(plotsRes)
+        ? plotsRes.map(normalizePlot)
+        : [];
 
-      const firstNode = items.flatMap((plot) => plot.nodes).find(Boolean);
-      if (firstNode?._id && !openNodeId) {
-        setOpenNodeId(firstNode._id);
-      }
-    } catch (e) {
-      setError(
-        e?.message ||
-          t.loadNodeFailed ||
-          (lang === "en"
-            ? "Failed to load node data"
-            : "โหลดข้อมูล node ไม่สำเร็จ"),
-      );
-    } finally {
-      setLoading(false);
+    const nodeItems = Array.isArray(nodesRes?.items)
+      ? nodesRes.items.map(normalizeNode)
+      : Array.isArray(nodesRes)
+        ? nodesRes.map(normalizeNode)
+        : [];
+
+    setPlots(plotItems);
+    setNodes(nodeItems);
+
+    const firstNode = nodeItems.find((node) => node?.plotId);
+    if (firstNode?._id && !openNodeId) {
+      setOpenNodeId(firstNode._id);
     }
+  } catch (e) {
+    setError(
+      e?.message ||
+        t.loadNodeFailed ||
+        (lang === "en"
+          ? "Failed to load node data"
+          : "โหลดข้อมูล node ไม่สำเร็จ")
+    );
+  } finally {
+    setLoading(false);
   }
+}
 
   function resetValidation() {
     setUidTouched(false);
@@ -1202,6 +1318,8 @@ export default function NodeSensorPage() {
   }
 
   function resetForm() {
+    setCanEditSensorLimit(false);
+    setShowSensorLimits(false);
     setFormPlotId("");
     setFormUid("");
     setFormNodeName("");
@@ -1287,7 +1405,7 @@ export default function NodeSensorPage() {
     setFormSensors(
       Array.isArray(node.sensors) && node.sensors.length
         ? node.sensors.map((s) => ({ ...s, sensorKey: s.sensorKey || canonicalizeSensorName(s.name, s.uid), name: s.sensorKey || canonicalizeSensorName(s.name, s.uid), rawName: s.rawName || s.name }))
-        : sensorPresetsByType(inferNodeTypeFromUid(node.uid)),
+        : sensorPresetsByType(inferNodeTypeFromUid(node.uid, node.sensors, node.nodeName)),
     );
     setCanEditSensorLimit(false);
     resetValidation();
@@ -1309,7 +1427,7 @@ export default function NodeSensorPage() {
                 name: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
                 rawName: s.rawName || s.name,
               }))
-            : sensorPresetsByType(inferNodeTypeFromUid(node.uid)),
+            : sensorPresetsByType(inferNodeTypeFromUid(node.uid, node.sensors, node.nodeName)),
       }),
     );
     setError("");
@@ -1484,131 +1602,136 @@ export default function NodeSensorPage() {
   }
 
   function handleSave() {
-    if (!validateForm()) return;
+  if (!validateForm()) return;
 
-    openConfirm({
-      type: "save",
-      icon: "💾",
-      title:
-        view === "create"
-          ? t.confirmSaveNodeTitle ||
-            (lang === "en" ? "Confirm save" : "ยืนยันการบันทึกข้อมูล")
-          : t.confirmEditNodeTitle ||
-            (lang === "en" ? "Confirm edit save" : "ยืนยันการบันทึกการแก้ไข"),
-      sub:
-        view === "create"
-          ? t.confirmCreateNodeSub ||
-            (lang === "en"
-              ? "Do you want to save this node to the system?"
-              : "ต้องการบันทึก Node นี้เข้าสู่ระบบใช่หรือไม่?")
-          : t.confirmEditNodeSub ||
-            (lang === "en"
-              ? "Do you want to save changes to this node?"
-              : "ต้องการบันทึกการแก้ไข Node นี้ใช่หรือไม่?"),
-      onConfirm: async () => {
-        setBusy(true);
-        setError("");
-        setSuccess("");
+  openConfirm({
+    type: "save",
+    icon: "💾",
+    title:
+      view === "create"
+        ? t.confirmSaveNodeTitle ||
+          (lang === "en" ? "Confirm save" : "ยืนยันการบันทึกข้อมูล")
+        : t.confirmEditNodeTitle ||
+          (lang === "en" ? "Confirm edit save" : "ยืนยันการบันทึกการแก้ไข"),
+    sub:
+      view === "create"
+        ? t.confirmCreateNodeSub ||
+          (lang === "en"
+            ? "Do you want to save this node to the system?"
+            : "ต้องการบันทึก Node นี้เข้าสู่ระบบใช่หรือไม่?")
+        : t.confirmEditNodeSub ||
+          (lang === "en"
+            ? "Do you want to save changes to this node?"
+            : "ต้องการบันทึกการแก้ไข Node นี้ใช่หรือไม่?"),
+    onConfirm: async () => {
+      setBusy(true);
+      setError("");
+      setSuccess("");
 
-        try {
-          const payload = {
-            uid: formUid.trim(),
-            nodeName: formNodeName.trim(),
-            status:
-              matchedNode?.status ||
-              allNodes.find((n) => String(n._id) === String(editNodeId))?.status ||
-              "ACTIVE",
-            lat: formMarker[0],
-            lng: formMarker[1],
-            sensors: buildSensorPayload(),
-          };
+      try {
+        const payload = {
+          uid: formUid.trim(),
+          nodeName: formNodeName.trim(),
+          status:
+            matchedNode?.status ||
+            allNodes.find((n) => String(n._id) === String(editNodeId))?.status ||
+            "ACTIVE",
+          plotId: formPlotId,
+          lat: formMarker[0],
+          lng: formMarker[1],
+          sensors: buildSensorPayload(),
+        };
 
-          if (view === "create") {
-            await apiFetch(`/api/plots/${formPlotId}/nodes`, {
-              method: "POST",
-              body: payload,
-            });
-            setSuccess(
-              t.saveNodeSuccess ||
-                (lang === "en"
-                  ? "Node saved successfully"
-                  : "บันทึก Node สำเร็จ"),
-            );
-          } else if (view === "edit") {
-            if (String(formPlotId) !== String(editPlotId)) {
-              await apiFetch(`/api/plots/${formPlotId}/nodes`, {
-                method: "POST",
-                body: payload,
-              });
-              await apiFetch(`/api/plots/${editPlotId}/nodes/${editNodeId}`, {
-                method: "DELETE",
-              });
-            } else {
-              await apiFetch(`/api/plots/${editPlotId}/nodes/${editNodeId}`, {
-                method: "PATCH",
-                body: payload,
-              });
-            }
-            setSuccess(
-              t.editNodeSuccess ||
-                (lang === "en"
-                  ? "Node updated successfully"
-                  : "แก้ไข Node สำเร็จ"),
-            );
-          }
+        if (view === "create") {
+          await apiFetch("/api/nodes/link-by-uid", {
+            method: "PATCH",
+            body: payload,
+          });
 
-          await loadAll();
-          cancelForm();
-        } catch (e) {
-          setError(
-            e?.message ||
-              t.saveNodeFailed ||
-              (lang === "en" ? "Failed to save node" : "บันทึก Node ไม่สำเร็จ"),
+          setSuccess(
+            t.saveNodeSuccess ||
+              (lang === "en"
+                ? "Node linked successfully"
+                : "ผูก Node กับแปลงสำเร็จ")
           );
-        } finally {
-          setBusy(false);
+        } else if (view === "edit") {
+          await apiFetch(`/api/nodes/${editNodeId}`, {
+            method: "PATCH",
+            body: payload,
+          });
+
+          setSuccess(
+            t.editNodeSuccess ||
+              (lang === "en"
+                ? "Node updated successfully"
+                : "แก้ไข Node สำเร็จ")
+          );
         }
-      },
-    });
-  }
+
+        await loadAll();
+        performCancelForm();
+      } catch (e) {
+        setError(
+          e?.message ||
+            t.saveNodeFailed ||
+            (lang === "en" ? "Failed to save node" : "บันทึก Node ไม่สำเร็จ")
+        );
+      } finally {
+        setBusy(false);
+        closeConfirm();
+      }
+    },
+  });
+}
 
   function handleDelete(node) {
-    openConfirm({
-      type: "delete",
-      icon: "🗑",
-      title:
-        t.confirmDeleteNodeTitle ||
-        (lang === "en" ? "Confirm deletion" : "ยืนยันการลบข้อมูล"),
-      sub: "ต้องการลบข้อมูล Node นี้ออกจากระบบ?\nการดำเนินการนี้ไม่สามารถกู้คืนได้",
-      onConfirm: async () => {
-        setBusy(true);
-        setError("");
-        setSuccess("");
+  openConfirm({
+    type: "delete",
+    icon: "🗑",
+    title:
+      t.confirmDeleteNodeTitle ||
+      (lang === "en" ? "Confirm deletion" : "ยืนยันการลบข้อมูล"),
+    sub:
+      lang === "en"
+        ? "Do you want to unlink this node from the plot?"
+        : "ต้องการยกเลิกการผูก Node นี้ออกจากแปลงใช่หรือไม่?",
+    onConfirm: async () => {
+      setBusy(true);
+      setError("");
+      setSuccess("");
 
-        try {
-          await apiFetch(`/api/plots/${node.plotId}/nodes/${node._id}`, {
-            method: "DELETE",
-          });
-          setSuccess(
-            t.deleteNodeSuccess ||
-              (lang === "en" ? "Node deleted successfully" : "ลบ Node สำเร็จ"),
-          );
-          if (String(openNodeId) === String(node._id)) {
-            setOpenNodeId("");
-          }
-          await loadAll();
-        } catch (e) {
-          setError(
-            e?.message ||
-              t.deleteNodeFailed ||
-              (lang === "en" ? "Failed to delete node" : "ลบ Node ไม่สำเร็จ"),
-          );
-        } finally {
-          setBusy(false);
+      try {
+        await apiFetch(`/api/nodes/${node._id}/unlink`, {
+          method: "PATCH",
+        });
+
+        setSuccess(
+          t.deleteNodeSuccess ||
+            (lang === "en"
+              ? "Node unlinked successfully"
+              : "ยกเลิกการผูก Node สำเร็จ")
+        );
+
+        if (String(openNodeId) === String(node._id)) {
+          setOpenNodeId("");
         }
-      },
-    });
-  }
+
+        await loadAll();
+      } catch (e) {
+        setError(
+          e?.message ||
+            t.deleteNodeFailed ||
+            (lang === "en"
+              ? "Failed to unlink node"
+              : "ยกเลิกการผูก Node ไม่สำเร็จ")
+        );
+      } finally {
+        setBusy(false);
+        closeConfirm();
+      }
+    },
+  });
+}
 
   const viewPolygons = filteredPlotsForMap.map((plot) => ({
     coords: plot.polygon,
@@ -1792,7 +1915,7 @@ export default function NodeSensorPage() {
 
                   {isOpen ? (
                     <div className="node-body" style={{ display: "block" }}>
-                      <SensorTable sensors={node.sensors} t={t} lang={lang} />
+                      <SensorTable sensors={node.sensors} t={t} lang={lang} showLimits={true} />
 
                       <div className="node-actions">
                         <button
@@ -1836,7 +1959,7 @@ export default function NodeSensorPage() {
                 {t.back || (lang === "en" ? "< Back" : "< กลับ")}
               </button>
               <div
-                style={{ fontSize: 15, fontWeight: 700, color: "var(--soil)" }}
+                style={{ fontSize: 22, fontWeight: 800, color: "var(--soil)" }}
               >
                 {t.addNode || (lang === "en" ? "＋ Add NODE" : "＋ เพิ่ม NODE")}
               </div>
@@ -1855,7 +1978,7 @@ export default function NodeSensorPage() {
               >
                 <div className="card-title">
                   {t.currentMap || "🗺 Current Map"}{" "}
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                  <span style={{ fontSize: 20, color: "var(--muted)" }}>
                     {t.clickMapToPin ||
                       (lang === "en"
                         ? "(click the map to pin a marker)"
@@ -2031,7 +2154,7 @@ export default function NodeSensorPage() {
                     borderRadius: 11,
                     background: "rgba(76,175,80,.08)",
                     border: "1px solid rgba(76,175,80,.24)",
-                    fontSize: 12,
+                    fontSize: 14,
                     color: "var(--soil)",
                     fontWeight: 600,
                   }}
@@ -2051,38 +2174,62 @@ export default function NodeSensorPage() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      gap: 8,
+                      gap: 12,
                       flexWrap: "wrap",
-                      margin: "14px 0 8px",
+                      margin: "14px 0 10px",
                     }}
                   >
-                    <div className="card-title" style={{ marginBottom: 0, fontSize: 15, fontWeight: 700 }}>
+                    <div className="card-title" style={{ marginBottom: 0, fontSize: 20, fontWeight: 800 }}>
                       {detectedFormNodeType === "soil"
-                        ? lang === "en"
-                          ? "Soil Sensors"
-                          : "Soil Sensors"
-                        : lang === "en"
-                          ? "Air Sensors"
-                          : "Air Sensors"}
+                        ? "Soil Sensors"
+                        : "Air Sensors"}
                     </div>
-                    <button
-                      className="btn-sm btn-edit"
-                      type="button"
-                      onClick={() => setCanEditSensorLimit((v) => !v)}
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        flexWrap: "wrap",
+                      }}
                     >
-                      {canEditSensorLimit
-                        ? lang === "en"
-                          ? "Close Max/Min edit"
-                          : "ปิดแก้ไข Max/Min"
-                        : lang === "en"
-                          ? "Edit Max/Min"
-                          : "แก้ไข Max/Min"}
-                    </button>
+                      <label className="limits-toggle-label">
+                        <input
+                          type="checkbox"
+                          checked={showSensorLimits}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setShowSensorLimits(checked);
+                            if (!checked) setCanEditSensorLimit(false);
+                          }}
+                        />
+                        <span>
+                          {lang === "en" ? "Show Max/Min" : "แสดง Max/Min"}
+                        </span>
+                      </label>
+
+                      {showSensorLimits ? (
+                        <button
+                          className="btn-sm btn-edit"
+                          type="button"
+                          onClick={() => setCanEditSensorLimit((v) => !v)}
+                        >
+                          {canEditSensorLimit
+                            ? lang === "en"
+                              ? "Close Max/Min edit"
+                              : "ปิดแก้ไข Max/Min"
+                            : lang === "en"
+                              ? "Edit Max/Min"
+                              : "แก้ไข Max/Min"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
                   <EditableSensorTable
                     sensors={formSensors}
                     canEditLimits={canEditSensorLimit}
+                    showLimits={showSensorLimits}
                     onChangeMin={updateSensorMin}
                     onChangeMax={updateSensorMax}
                     t={t}
@@ -2098,7 +2245,7 @@ export default function NodeSensorPage() {
                     background: "#fff8f8",
                     border: "1px solid #efc8c8",
                     color: "#c62828",
-                    fontSize: 12,
+                    fontSize: 14,
                     fontWeight: 700,
                   }}
                 >
@@ -2149,7 +2296,7 @@ export default function NodeSensorPage() {
                 {t.back || (lang === "en" ? "< Back" : "< กลับ")}
               </button>
               <div
-                style={{ fontSize: 15, fontWeight: 700, color: "var(--soil)" }}
+                style={{ fontSize: 22, fontWeight: 800, color: "var(--soil)" }}
               >
                 {t.editNodeTitle ||
                   (lang === "en" ? "✏️ Edit NODE" : "✏️ แก้ไข NODE")}
@@ -2169,7 +2316,7 @@ export default function NodeSensorPage() {
               >
                 <div className="card-title">
                   {t.currentMap || "🗺 Current Map"}{" "}
-                  <span style={{ fontSize: 11, color: "var(--muted)" }}>
+                  <span style={{ fontSize: 20, color: "var(--muted)" }}>
                     {lang === "en"
                       ? "(click the map to move the marker)"
                       : "(คลิกแผนที่เพื่อย้ายหมุด)"}
@@ -2357,25 +2504,62 @@ export default function NodeSensorPage() {
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      gap: 8,
+                      gap: 12,
                       flexWrap: "wrap",
-                      margin: "14px 0 8px",
+                      margin: "14px 0 10px",
                     }}
                   >
-                    <div className="card-title" style={{ marginBottom: 0, fontSize: 15, fontWeight: 700 }}>
+                    <div className="card-title" style={{ marginBottom: 0, fontSize: 20, fontWeight: 800 }}>
                       {detectedFormNodeType === "soil"
-                        ? lang === "en"
-                          ? "Soil Sensors"
-                          : "Soil Sensors"
-                        : lang === "en"
-                          ? "Air Sensors"
-                          : "Air Sensors"}
+                        ? "Soil Sensors"
+                        : "Air Sensors"}
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <label className="limits-toggle-label">
+                        <input
+                          type="checkbox"
+                          checked={showSensorLimits}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setShowSensorLimits(checked);
+                            if (!checked) setCanEditSensorLimit(false);
+                          }}
+                        />
+                        <span>
+                          {lang === "en" ? "Show Max/Min" : "แสดง Max/Min"}
+                        </span>
+                      </label>
+
+                      {showSensorLimits ? (
+                        <button
+                          className="btn-sm btn-edit"
+                          type="button"
+                          onClick={() => setCanEditSensorLimit((v) => !v)}
+                        >
+                          {canEditSensorLimit
+                            ? lang === "en"
+                              ? "Close Max/Min edit"
+                              : "ปิดแก้ไข Max/Min"
+                            : lang === "en"
+                              ? "Edit Max/Min"
+                              : "แก้ไข Max/Min"}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
 
                   <EditableSensorTable
                     sensors={formSensors}
-                    canEditLimits={true}
+                    canEditLimits={canEditSensorLimit}
+                    showLimits={showSensorLimits}
                     onChangeMin={updateSensorMin}
                     onChangeMax={updateSensorMax}
                     t={t}
@@ -2391,7 +2575,7 @@ export default function NodeSensorPage() {
                     background: "#fff8f8",
                     border: "1px solid #efc8c8",
                     color: "#c62828",
-                    fontSize: 12,
+                    fontSize: 14,
                     fontWeight: 700,
                   }}
                 >
@@ -2552,9 +2736,8 @@ export default function NodeSensorPage() {
   }
 
   .card-title {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--soil);
+    font-size: 20px !important;
+    font-weight: 800 !important;
   }
 
   .filter-field,
@@ -2564,10 +2747,10 @@ export default function NodeSensorPage() {
 
   .filter-label,
   .filter-field-label {
-    font-size: 13px;
+    font-size: 16px;
     font-weight: 800;
     color: #5a6d54;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 
   .form-grid-2 {
@@ -2579,14 +2762,14 @@ export default function NodeSensorPage() {
   .form-select,
   .form-input {
     width: 100%;
-    height: 44px;
+    height: 48px;
     border-radius: 12px;
     border: 1px solid #cfe0c8;
     background: #fbfef9;
     color: #33422d;
     padding: 0 12px;
     outline: none;
-    font-size: 14px;
+    font-size: 15px;
     transition: 0.18s ease;
   }
 
@@ -2625,7 +2808,7 @@ export default function NodeSensorPage() {
 
   .field-error-text {
     margin-top: 6px;
-    font-size: 11px;
+    font-size: 15px;
     font-weight: 700;
     color: #d84343;
   }
@@ -2639,7 +2822,7 @@ export default function NodeSensorPage() {
     cursor: pointer;
     border-radius: 12px;
     font-weight: 800;
-    font-size: 14px;
+    font-size: 15px;
   }
 
   .create-btn {
@@ -2687,7 +2870,7 @@ export default function NodeSensorPage() {
     color: #4a5f43;
     cursor: pointer;
     border-radius: 14px;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 800;
     line-height: 1.15;
     padding: 7px 13px;
@@ -2740,7 +2923,7 @@ export default function NodeSensorPage() {
     align-items: center;
     justify-content: center;
     color: #64715d;
-    font-size: 13px;
+    font-size: 15px;
   }
 
   .node-card {
@@ -2816,7 +2999,7 @@ export default function NodeSensorPage() {
   }
 
   .node-summary-label {
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     color: rgba(255, 255, 255, 0.82);
     white-space: nowrap;
@@ -2832,7 +3015,7 @@ export default function NodeSensorPage() {
   }
 
   .node-summary-value {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 800;
     color: #ffffff;
     white-space: normal;
@@ -2850,7 +3033,7 @@ export default function NodeSensorPage() {
     align-items: center;
     border-radius: 999px;
     padding: 4px 10px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 800;
     color: #fff;
     white-space: nowrap;
@@ -2872,7 +3055,7 @@ export default function NodeSensorPage() {
     min-height: 24px;
     padding: 4px 10px;
     border-radius: 999px;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 800;
     white-space: nowrap;
     color: #fff;
@@ -2887,7 +3070,7 @@ export default function NodeSensorPage() {
   }
 
   .accordion-arrow {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 800;
     line-height: 1;
     color: #fff;
@@ -2922,8 +3105,8 @@ export default function NodeSensorPage() {
   .node-sensor-table .sensor-name-cell,
   .node-sensor-table .sensor-value-cell,
   .node-sensor-table .sensor-unit-text {
-    font-size: 38px !important;
-    line-height: 1.38 !important;
+    font-size: 16px !important;
+    line-height: 1.45 !important;
     font-family: inherit !important;
   }
 
@@ -2932,13 +3115,13 @@ export default function NodeSensorPage() {
     background: #eef5ea;
     color: #667a60;
     font-weight: 800;
-    padding: 18px 18px;
+    padding: 12px 12px;
     white-space: nowrap;
   }
 
   .node-sensor-table td {
     border-top: 1px solid #edf3ea;
-    padding: 18px 18px;
+    padding: 12px 12px;
     vertical-align: middle;
     white-space: nowrap;
   }
@@ -2947,6 +3130,23 @@ export default function NodeSensorPage() {
   .sensor-value-cell,
   .sensor-unit-text {
     white-space: nowrap;
+  }
+
+  .limits-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 800;
+    color: #355e2d;
+    cursor: pointer;
+  }
+
+  .limits-toggle-label input {
+    width: 16px;
+    height: 16px;
+    accent-color: #2e7d32;
+    cursor: pointer;
   }
 
   .edit-limit-wrap {
@@ -2958,15 +3158,15 @@ export default function NodeSensorPage() {
   }
 
   .limit-input {
-    width: 170px;
-    height: 62px;
+    width: 120px;
+    height: 42px;
     border-radius: 12px;
     border: 1px solid #cfe0c8;
     background: #fbfef9;
     color: #33422d;
     padding: 0 12px;
     outline: none;
-    font-size: 38px !important;
+    font-size: 16px !important;
     line-height: 1.35 !important;
     font-family: inherit !important;
   }
@@ -3100,7 +3300,7 @@ export default function NodeSensorPage() {
     }
 
     .confirm-sub {
-      font-size: 14px;
+      font-size: 15px;
       max-width: 320px;
     }
 

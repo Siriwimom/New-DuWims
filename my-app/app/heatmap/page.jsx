@@ -1030,6 +1030,47 @@ function getPlotFillStats(plot, points, sensorKey) {
   };
 }
 
+function getDistanceInLatLng(a, b) {
+  const dLat = Number(a?.lat || 0) - Number(b?.lat || 0);
+  const dLng = Number(a?.lng || 0) - Number(b?.lng || 0);
+  return Math.sqrt(dLat * dLat + dLng * dLng);
+}
+
+function distancePointToSegment(point, a, b) {
+  const abLat = b.lat - a.lat;
+  const abLng = b.lng - a.lng;
+  const apLat = point.lat - a.lat;
+  const apLng = point.lng - a.lng;
+
+  const abLenSq = abLat * abLat + abLng * abLng;
+  if (abLenSq <= 1e-12) return getDistanceInLatLng(point, a);
+
+  let t = (apLat * abLat + apLng * abLng) / abLenSq;
+  t = clamp(t, 0, 1);
+
+  const proj = {
+    lat: a.lat + abLat * t,
+    lng: a.lng + abLng * t,
+  };
+
+  return getDistanceInLatLng(point, proj);
+}
+
+function getDistanceToPolygonEdge(point, polygon) {
+  if (!Array.isArray(polygon) || polygon.length < 2) return 0;
+
+  let minDist = Infinity;
+
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    const dist = distancePointToSegment(point, a, b);
+    if (dist < minDist) minDist = dist;
+  }
+
+  return Number.isFinite(minDist) ? minDist : 0;
+}
+
 function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
   if (!plots.length || !points.length) return [];
 
@@ -1041,12 +1082,17 @@ function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
   const height = bounds.maxLat - bounds.minLat;
   if (width <= 0 || height <= 0) return [];
 
-  const cols = density;
-  const rows = Math.max(16, Math.round((height / width) * cols));
+  const cols = Math.max(24, density);
+  const rows = Math.max(18, Math.round((height / width) * cols));
   const cellLng = width / cols;
   const cellLat = height / rows;
 
   const cells = [];
+  const validPoints = points.filter(
+    (p) => p?.lat != null && p?.lng != null && p?.value != null && !Number.isNaN(Number(p.value))
+  );
+
+  if (!validPoints.length) return [];
 
   for (let row = 0; row < rows; row += 1) {
     for (let col = 0; col < cols; col += 1) {
@@ -1063,29 +1109,46 @@ function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
       const ownerPlot = plots.find((plot) => pointInPolygon(center, plot.coords));
       if (!ownerPlot) continue;
 
-      let weighted = 0;
-      let totalWeight = 0;
+      let nearestPoint = null;
       let nearestDistance = Infinity;
 
-      for (const p of points) {
-        if (p.value == null || Number.isNaN(p.value)) continue;
-
-        const dLat = center.lat - p.lat;
-        const dLng = center.lng - p.lng;
-        const dist = Math.sqrt(dLat * dLat + dLng * dLng);
-
-        nearestDistance = Math.min(nearestDistance, dist);
-
-        const w = 1 / Math.pow(dist + 0.00012, 2);
-        weighted += p.value * w;
-        totalWeight += w;
+      for (const p of validPoints) {
+        if (!pointInPolygon({ lat: p.lat, lng: p.lng }, ownerPlot.coords)) continue;
+        const dist = getDistanceInLatLng(center, { lat: p.lat, lng: p.lng });
+        if (dist < nearestDistance) {
+          nearestDistance = dist;
+          nearestPoint = p;
+        }
       }
 
-      if (!totalWeight) continue;
+      if (!nearestPoint) {
+        for (const p of validPoints) {
+          const dist = getDistanceInLatLng(center, { lat: p.lat, lng: p.lng });
+          if (dist < nearestDistance) {
+            nearestDistance = dist;
+            nearestPoint = p;
+          }
+        }
+      }
 
-      const value = weighted / totalWeight;
-      const ratio = getSensorRatio(sensorKey, value);
-      const opacityBase = 0.34 + (1 - clamp(nearestDistance / 0.028, 0, 1)) * 0.62;
+      if (!nearestPoint) continue;
+
+      const sourceValue = Number(nearestPoint.value);
+      const ratio = getSensorRatio(sensorKey, sourceValue);
+      const color = getHeatColorByRatio(ratio);
+
+      const sourcePoint = { lat: nearestPoint.lat, lng: nearestPoint.lng };
+      const edgeDistanceFromSource = Math.max(
+        getDistanceToPolygonEdge(sourcePoint, ownerPlot.coords),
+        Math.max(cellLat, cellLng) * 0.75,
+        0.00025
+      );
+
+      const distRatio = clamp(nearestDistance / edgeDistanceFromSource, 0, 1);
+      const intensity = Math.pow(1 - distRatio, 2.6);
+
+      // ชิดจุดเข้ม แต่รอบนอกค่อย ๆ จาง และปลายขอบไม่กลืนทั้งแปลง
+      const opacity = clamp(0.015 + intensity * 0.34, 0.012, 0.36);
 
       const clippedPolygon = clipPolygonWithConvexPolygon(
         getRectPolygon(minLat, maxLat, minLng, maxLng),
@@ -1096,10 +1159,10 @@ function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
       cells.push({
         id: `${row}-${col}`,
         positions: clippedPolygon.map((p) => [p.lat, p.lng]),
-        value,
+        value: sourceValue,
         ratio,
-        color: getHeatColorByRatio(ratio),
-        opacity: clamp(opacityBase, 0.30, 0.96),
+        color,
+        opacity,
       });
     }
   }
