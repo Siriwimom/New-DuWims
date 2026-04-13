@@ -1,0 +1,781 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import TopBar from "../components/TopBar";
+
+const AUTH_KEYS = ["AUTH_TOKEN_V1", "token", "authToken", "pmtool_token", "duwims_token"];
+const DIRTY_KEY = "DUWIMS_UNSAVED_PROFILE";
+const PROFILE_NAME_KEY = "DUWIMS_PROFILE_NAME_LOCAL";
+
+function readToken() {
+  if (typeof window === "undefined") return "";
+  for (const k of AUTH_KEYS) {
+    const v = window.localStorage.getItem(k);
+    if (v) return v;
+  }
+  return "";
+}
+
+function writeTokenToAllKeys(token) {
+  if (typeof window === "undefined" || !token) return;
+  for (const k of AUTH_KEYS) {
+    try {
+      window.localStorage.setItem(k, token);
+    } catch {}
+  }
+}
+
+function getApiBase() {
+  if (typeof window === "undefined") return "";
+  return (
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    window.localStorage.getItem("NEXT_PUBLIC_API_BASE_URL") ||
+    "http://localhost:3001"
+  ).replace(/\/$/, "");
+}
+
+async function requestJson(url, options = {}) {
+  const res = await fetch(url, options);
+
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const message =
+      data?.message ||
+      data?.error ||
+      data?.detail ||
+      `Request failed (${res.status})`;
+    throw new Error(message);
+  }
+
+  return data;
+}
+
+function readLocalName() {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(PROFILE_NAME_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeLocalName(name) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PROFILE_NAME_KEY, String(name || "").trim());
+  } catch {}
+}
+
+function clearLocalName() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(PROFILE_NAME_KEY);
+  } catch {}
+}
+
+export default function AccountProfilePage() {
+  const router = useRouter();
+  const apiBase = getApiBase();
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+
+  const [savedName, setSavedName] = useState("");
+  const [draftName, setDraftName] = useState("");
+
+  const [popupOpen, setPopupOpen] = useState(false);
+  const [popupType, setPopupType] = useState("success");
+  const [popupTitle, setPopupTitle] = useState("");
+  const [popupMessage, setPopupMessage] = useState("");
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [pendingHref, setPendingHref] = useState("");
+
+  const dirty = useMemo(() => {
+    return editMode && String(draftName || "").trim() !== String(savedName || "").trim();
+  }, [draftName, savedName, editMode]);
+
+  const hasProfileData = useMemo(() => {
+    return Boolean(String(savedName || "").trim());
+  }, [savedName]);
+
+  const openPopup = (type, title, message) => {
+    setPopupType(type);
+    setPopupTitle(title);
+    setPopupMessage(message);
+    setPopupOpen(true);
+  };
+
+  useEffect(() => {
+    const token = readToken();
+    if (!token) {
+      router.replace("/");
+      return;
+    }
+
+    let active = true;
+
+    async function loadMe() {
+      const localName = readLocalName();
+
+      try {
+        const me = await requestJson(`${apiBase}/auth/me`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!active) return;
+
+        const user = me?.user || {};
+        const backendName =
+          user?.nickname ||
+          user?.displayName ||
+          user?.name ||
+          user?.fullName ||
+          user?.username ||
+          "";
+
+        // ให้ local มาก่อน backend
+        const nextName = String(localName || backendName || "").trim();
+
+        setSavedName(nextName);
+        setDraftName(nextName);
+
+        if (nextName) writeLocalName(nextName);
+
+        if (!nextName) {
+          setEditMode(true);
+        }
+      } catch {
+        if (!active) return;
+
+        setSavedName(localName);
+        setDraftName(localName);
+
+        if (!localName) {
+          setEditMode(true);
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadMe();
+
+    return () => {
+      active = false;
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem(DIRTY_KEY);
+      }
+    };
+  }, [apiBase, router]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (dirty) window.sessionStorage.setItem(DIRTY_KEY, "1");
+    else window.sessionStorage.removeItem(DIRTY_KEY);
+  }, [dirty]);
+
+  useEffect(() => {
+    const beforeUnload = (e) => {
+      if (!dirty) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  }, [dirty]);
+
+  const askBeforeLeave = (href) => {
+    if (!dirty) {
+      router.push(href);
+      return;
+    }
+
+    setPendingHref(href);
+    setConfirmTitle("มีการแก้ไขที่ยังไม่บันทึก");
+    setConfirmMessage(
+      "คุณกำลังอยู่ระหว่างแก้ไขชื่อผู้ใช้\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ"
+    );
+    setConfirmOpen(true);
+  };
+
+  const discardAndLeave = () => {
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem(DIRTY_KEY);
+    }
+    setDraftName(savedName);
+    setEditMode(false);
+    setConfirmOpen(false);
+
+    const href = pendingHref;
+    setPendingHref("");
+    if (href) router.push(href);
+  };
+
+  const clearDraft = () => {
+    setDraftName("");
+  };
+
+  const cancelEdit = () => {
+    if (dirty) {
+      setConfirmTitle("ยกเลิกการแก้ไข");
+      setConfirmMessage("ต้องการยกเลิกการแก้ไขชื่อและกลับไปใช้ข้อมูลเดิมหรือไม่");
+      setPendingHref("__RESET__");
+      setConfirmOpen(true);
+      return;
+    }
+
+    setDraftName(savedName);
+    setEditMode(false);
+  };
+
+  const onConfirmPopup = () => {
+    if (pendingHref === "__RESET__") {
+      setDraftName(savedName);
+      setEditMode(false);
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem(DIRTY_KEY);
+      }
+      setConfirmOpen(false);
+      setPendingHref("");
+      return;
+    }
+
+    discardAndLeave();
+  };
+
+  const handleSave = async () => {
+    const token = readToken();
+
+    if (!token) {
+      openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบ token การเข้าสู่ระบบ");
+      return;
+    }
+
+    const nextName = String(draftName || "").trim();
+
+    if (!nextName) {
+      openPopup("error", "บันทึกไม่สำเร็จ", "กรุณากรอกชื่อ");
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      writeLocalName(nextName);
+
+      setSavedName(nextName);
+      setDraftName(nextName);
+      setEditMode(false);
+
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem(DIRTY_KEY);
+      }
+
+      try {
+        const result = await requestJson(`${apiBase}/auth/update-profile`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            nickname: nextName,
+          }),
+        });
+
+        if (result?.token) {
+          writeTokenToAllKeys(result.token);
+        }
+      } catch {}
+
+      openPopup("success", "บันทึกสำเร็จ", "บันทึกชื่อเรียบร้อยแล้ว");
+    } catch (err) {
+      openPopup("error", "บันทึกไม่สำเร็จ", err?.message || "ไม่สามารถบันทึกชื่อได้");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <TopBar />
+
+      <div className="page-shell">
+        <div className="page-card">
+          <div className="page-head">
+            <button
+              type="button"
+              className="back-btn"
+              onClick={() => askBeforeLeave("/dashboard")}
+            >
+              ← กลับ
+            </button>
+
+            <div className="head-copy">
+              <div className="page-title">setting name</div>
+              <div className="page-subtitle">ตั้งค่าชื่อ</div>
+            </div>
+
+            {hasProfileData && !loading && !editMode ? (
+              <button
+                type="button"
+                className="top-edit-btn"
+                onClick={() => setEditMode(true)}
+              >
+                แก้ไข
+              </button>
+            ) : null}
+          </div>
+
+          {loading ? (
+            <div className="loading-box">กำลังโหลดข้อมูล...</div>
+          ) : !hasProfileData ? (
+            <div className="content-wrap">
+              <div className="empty-note-card">
+                <div className="empty-note-title">ยังไม่มีชื่อผู้ใช้</div>
+                <div className="empty-note-list">กรุณากรอกชื่อ</div>
+              </div>
+
+              <div className="form-grid one-col">
+                <div className="field">
+                  <label className="label">
+                    ชื่อ <span className="required-star">*</span>
+                  </label>
+                  <input
+                    className="input"
+                    type="text"
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    disabled={saving}
+                    placeholder="กรุณากรอกชื่อ"
+                  />
+                </div>
+              </div>
+
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="save-btn"
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  {saving ? "กำลังบันทึก..." : "บันทึก"}
+                </button>
+
+                <button
+                  type="button"
+                  className="cancel-btn"
+                  onClick={() => askBeforeLeave("/dashboard")}
+                  disabled={saving}
+                >
+                  ยกเลิก
+                </button>
+              </div>
+            </div>
+          ) : !editMode ? (
+            <div className="content-wrap">
+              <div className="view-grid one-col">
+                <div className="view-card">
+                  <div className="view-label">ชื่อ</div>
+                  <div className="view-value">{savedName || "-"}</div>
+                 
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="content-wrap">
+              <div className="form-grid one-col">
+                <div className="field">
+                  <label className="label">
+                    ชื่อ <span className="required-star">*</span>
+                  </label>
+                  <input
+                    className="input"
+                    type="text"
+                    value={draftName}
+                    onChange={(e) => setDraftName(e.target.value)}
+                    disabled={saving}
+                    placeholder="กรุณากรอกชื่อ"
+                  />
+                </div>
+              </div>
+
+              <div className="action-row">
+                <button
+                  type="button"
+                  className="save-btn"
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  {saving ? "กำลังบันทึก..." : "บันทึก"}
+                </button>
+
+                
+
+                <button
+                  type="button"
+                  className="cancel-btn"
+                  onClick={cancelEdit}
+                  disabled={saving}
+                >
+                  ยกเลิก
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {popupOpen && (
+        <div className="popup-overlay" onClick={() => setPopupOpen(false)}>
+          <div className="popup-card" onClick={(e) => e.stopPropagation()}>
+            <div className={`popup-icon ${popupType}`}>
+              {popupType === "success" ? "✓" : "!"}
+            </div>
+            <div className="popup-title">{popupTitle}</div>
+            <div className="popup-message">{popupMessage}</div>
+            <button
+              type="button"
+              className={`popup-btn ${popupType}`}
+              onClick={() => setPopupOpen(false)}
+            >
+              ตกลง
+            </button>
+          </div>
+        </div>
+      )}
+
+      {confirmOpen && (
+        <div className="popup-overlay" onClick={() => setConfirmOpen(false)}>
+          <div className="popup-card" onClick={(e) => e.stopPropagation()}>
+            <div className="popup-icon warn">!</div>
+            <div className="popup-title">{confirmTitle}</div>
+            <div className="popup-message">{confirmMessage}</div>
+            <div className="popup-actions">
+              <button
+                type="button"
+                className="popup-btn ghost"
+                onClick={() => setConfirmOpen(false)}
+              >
+                อยู่หน้าเดิม
+              </button>
+              <button
+                type="button"
+                className="popup-btn danger"
+                onClick={onConfirmPopup}
+              >
+                ยกเลิกการแก้ไข
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style jsx>{`
+        .page-shell {
+          min-height: calc(100vh - 68px);
+          background: #f4f7f3;
+          padding: 28px 20px 40px;
+        }
+
+        .page-card {
+          max-width: 980px;
+          margin: 0 auto;
+          background: #fff;
+          border: 1px solid #d9e2d7;
+          border-radius: 26px;
+          padding: 28px 30px 30px;
+          box-shadow: 0 10px 28px rgba(0, 0, 0, 0.06);
+        }
+
+        .page-head {
+          display: flex;
+          align-items: flex-start;
+          gap: 18px;
+          margin-bottom: 28px;
+        }
+
+        .head-copy {
+          min-width: 0;
+          padding-top: 2px;
+          flex: 1;
+        }
+
+        .back-btn {
+          border: 0;
+          background: #e6ede4;
+          color: #1d5124;
+          min-width: 108px;
+          height: 54px;
+          border-radius: 16px;
+          font-size: 18px;
+          font-weight: 800;
+          cursor: pointer;
+          padding: 0 18px;
+          flex: 0 0 auto;
+        }
+
+        .top-edit-btn {
+          border: 0;
+          background: #2f9445;
+          color: #fff;
+          min-width: 120px;
+          height: 48px;
+          border-radius: 14px;
+          font-size: 16px;
+          font-weight: 800;
+          cursor: pointer;
+          padding: 0 18px;
+          flex: 0 0 auto;
+        }
+
+        .page-title {
+          font-size: 30px;
+          line-height: 1.2;
+          font-weight: 900;
+          color: #15381a;
+        }
+
+        .page-subtitle {
+          margin-top: 6px;
+          font-size: 16px;
+          color: #58705c;
+          font-weight: 600;
+        }
+
+        .loading-box {
+          min-height: 220px;
+          display: grid;
+          place-items: center;
+          font-size: 20px;
+          font-weight: 800;
+          color: #315c39;
+        }
+
+        .content-wrap {
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+
+        .empty-note-card,
+        .view-card {
+          background: #f7faf6;
+          border: 1px solid #dbe7d8;
+          border-radius: 18px;
+          padding: 18px 20px;
+        }
+
+        .empty-note-title,
+        .view-label {
+          font-size: 18px;
+          font-weight: 900;
+          color: #214b29;
+          margin-bottom: 8px;
+        }
+
+        .empty-note-list,
+        .view-value,
+        .field-hint {
+          font-size: 16px;
+          color: #39553d;
+          line-height: 1.6;
+        }
+
+        .form-grid,
+        .view-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 18px;
+        }
+
+        .one-col {
+          grid-template-columns: 1fr;
+        }
+
+        .field {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .label {
+          font-size: 16px;
+          font-weight: 800;
+          color: #1f4626;
+        }
+
+        .required-star {
+          color: #d93a3a;
+        }
+
+        .input {
+          width: 100%;
+          height: 54px;
+          border-radius: 14px;
+          border: 1px solid #cdd9ca;
+          padding: 0 16px;
+          font-size: 16px;
+          font-weight: 600;
+          outline: none;
+          background: #fff;
+        }
+
+        .action-row {
+          display: flex;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .save-btn,
+        .delete-btn,
+        .cancel-btn {
+          border: 0;
+          min-width: 120px;
+          height: 50px;
+          border-radius: 14px;
+          padding: 0 18px;
+          font-size: 16px;
+          font-weight: 800;
+          cursor: pointer;
+        }
+
+        .save-btn {
+          background: #2f9445;
+          color: #fff;
+        }
+
+        .delete-btn {
+          background: #f1e3c8;
+          color: #7a4b00;
+        }
+
+        .cancel-btn {
+          background: #e9ece8;
+          color: #304235;
+        }
+
+        .popup-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.35);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 9999;
+          padding: 20px;
+        }
+
+        .popup-card {
+          width: 100%;
+          max-width: 420px;
+          background: #fff;
+          border-radius: 22px;
+          padding: 24px 22px;
+          box-shadow: 0 18px 50px rgba(0,0,0,0.18);
+          text-align: center;
+        }
+
+        .popup-icon {
+          width: 58px;
+          height: 58px;
+          border-radius: 999px;
+          margin: 0 auto 12px;
+          display: grid;
+          place-items: center;
+          font-size: 28px;
+          font-weight: 900;
+        }
+
+        .popup-icon.success {
+          background: #e4f7e8;
+          color: #1f8b39;
+        }
+
+        .popup-icon.error,
+        .popup-icon.warn {
+          background: #fde8e8;
+          color: #c73636;
+        }
+
+        .popup-title {
+          font-size: 22px;
+          font-weight: 900;
+          color: #1d3421;
+          margin-bottom: 8px;
+        }
+
+        .popup-message {
+          white-space: pre-line;
+          font-size: 16px;
+          line-height: 1.6;
+          color: #425847;
+          margin-bottom: 16px;
+        }
+
+        .popup-actions {
+          display: flex;
+          gap: 10px;
+          justify-content: center;
+          flex-wrap: wrap;
+        }
+
+        .popup-btn {
+          border: 0;
+          min-width: 120px;
+          height: 46px;
+          border-radius: 12px;
+          font-size: 15px;
+          font-weight: 800;
+          cursor: pointer;
+          padding: 0 16px;
+        }
+
+        .popup-btn.success {
+          background: #2f9445;
+          color: #fff;
+        }
+
+        .popup-btn.error,
+        .popup-btn.danger {
+          background: #d64a4a;
+          color: #fff;
+        }
+
+        .popup-btn.ghost {
+          background: #ecefed;
+          color: #314436;
+        }
+
+        @media (max-width: 768px) {
+          .form-grid,
+          .view-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .page-head {
+            flex-wrap: wrap;
+          }
+
+          .page-card {
+            padding: 22px 18px 24px;
+          }
+        }
+      `}</style>
+    </>
+  );
+}

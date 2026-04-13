@@ -6,6 +6,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useDuwimsT } from "./language-context";
 
 const AUTH_KEYS = ["AUTH_TOKEN_V1", "token", "authToken", "pmtool_token", "duwims_token"];
+const UNSAVED_KEYS = ["DUWIMS_UNSAVED_PROFILE", "DUWIMS_UNSAVED_PASSWORD"];
+const PROFILE_NAME_KEY = "DUWIMS_PROFILE_NAME_LOCAL";
+const PROFILE_UPDATED_EVENT = "duwims-profile-updated";
 
 function readToken() {
   if (typeof window === "undefined") return "";
@@ -83,6 +86,25 @@ async function requestJson(url, options = {}) {
   return data;
 }
 
+function hasUnsavedAccountChanges() {
+  if (typeof window === "undefined") return false;
+  return UNSAVED_KEYS.some((key) => window.sessionStorage.getItem(key) === "1");
+}
+
+function clearUnsavedAccountChanges() {
+  if (typeof window === "undefined") return;
+  UNSAVED_KEYS.forEach((key) => window.sessionStorage.removeItem(key));
+}
+
+function readLocalName() {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(PROFILE_NAME_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
 export default function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
@@ -103,25 +125,15 @@ export default function TopBar() {
   const [linkOwnerUid, setLinkOwnerUid] = useState("");
   const [linkingOwner, setLinkingOwner] = useState(false);
 
-  const [isEditingName, setIsEditingName] = useState(false);
-  const [isPasswordOpen, setIsPasswordOpen] = useState(false);
-
-  const [draftDisplayName, setDraftDisplayName] = useState("ผู้ใช้งาน");
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-
-  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  const [savingProfile, setSavingProfile] = useState(false);
-  const [savingPassword, setSavingPassword] = useState(false);
-
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupType, setPopupType] = useState("success");
   const [popupTitle, setPopupTitle] = useState("");
   const [popupMessage, setPopupMessage] = useState("");
+
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmTitle, setConfirmTitle] = useState("");
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [pendingAction, setPendingAction] = useState(null);
 
   const menuRef = useRef(null);
   const profileRef = useRef(null);
@@ -131,6 +143,8 @@ export default function TopBar() {
   const syncAuth = async () => {
     try {
       const token = readToken();
+      const localName = readLocalName();
+
       setHasToken(!!token);
 
       if (token) {
@@ -147,7 +161,7 @@ export default function TopBar() {
           });
 
           const user = me?.user || {};
-          const nextName =
+          const backendName =
             user?.nickname ||
             payload?.nickname ||
             payload?.displayName ||
@@ -156,33 +170,32 @@ export default function TopBar() {
             payload?.username ||
             "ผู้ใช้งาน";
 
+          const nextName = localName || backendName || "ผู้ใช้งาน";
+
           setDisplayName(nextName);
-          setDraftDisplayName(nextName);
           setEmail(user?.email || payload?.email || "user@example.com");
           setProvider(user?.provider || payload?.provider || "local");
           setRole(String(user?.role || nextRole || "").toLowerCase());
           setOwnerUid(user?.ownerUid || payload?.ownerUid || "");
         } catch {
-          const nextName =
+          const fallbackName =
             payload?.nickname ||
             payload?.displayName ||
             payload?.name ||
             payload?.fullName ||
             payload?.username ||
             "ผู้ใช้งาน";
-          const nextEmail = payload?.email || "user@example.com";
-          const nextProvider = payload?.provider || "local";
+
+          const nextName = localName || fallbackName || "ผู้ใช้งาน";
 
           setDisplayName(nextName);
-          setDraftDisplayName(nextName);
-          setEmail(nextEmail);
-          setProvider(nextProvider);
+          setEmail(payload?.email || "user@example.com");
+          setProvider(payload?.provider || "local");
           setOwnerUid(payload?.ownerUid || "");
         }
       } else {
         setRole("");
         setDisplayName("ผู้ใช้งาน");
-        setDraftDisplayName("ผู้ใช้งาน");
         setEmail("user@example.com");
         setProvider("local");
         setOwnerUid("");
@@ -190,8 +203,7 @@ export default function TopBar() {
     } catch {
       setHasToken(false);
       setRole("");
-      setDisplayName("ผู้ใช้งาน");
-      setDraftDisplayName("ผู้ใช้งาน");
+      setDisplayName(readLocalName() || "ผู้ใช้งาน");
       setEmail("user@example.com");
       setProvider("local");
       setOwnerUid("");
@@ -207,16 +219,44 @@ export default function TopBar() {
     setPopupOpen(true);
   };
 
+  const runGuardedAction = (action) => {
+    if (hasUnsavedAccountChanges()) {
+      setConfirmTitle("มีการแก้ไขที่ยังไม่บันทึก");
+      setConfirmMessage(
+        "คุณกำลังอยู่ระหว่างแก้ไขข้อมูล\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ"
+      );
+      setPendingAction(() => action);
+      setConfirmOpen(true);
+      return;
+    }
+    action();
+  };
+
+  const confirmDiscardAndContinue = () => {
+    clearUnsavedAccountChanges();
+    setConfirmOpen(false);
+    const action = pendingAction;
+    setPendingAction(null);
+    if (typeof action === "function") action();
+  };
+
+  const cancelDiscard = () => {
+    setConfirmOpen(false);
+    setPendingAction(null);
+  };
+
   useEffect(() => {
     setMounted(true);
 
     syncAuth();
     window.addEventListener("storage", syncAuth);
     window.addEventListener("focus", syncAuth);
+    window.addEventListener(PROFILE_UPDATED_EVENT, syncAuth);
 
     return () => {
       window.removeEventListener("storage", syncAuth);
       window.removeEventListener("focus", syncAuth);
+      window.removeEventListener(PROFILE_UPDATED_EVENT, syncAuth);
     };
   }, []);
 
@@ -247,8 +287,6 @@ export default function TopBar() {
       }
       if (profileRef.current && !profileRef.current.contains(event.target)) {
         setProfileOpen(false);
-        setIsEditingName(false);
-        setIsPasswordOpen(false);
       }
     }
 
@@ -268,150 +306,17 @@ export default function TopBar() {
   }, []);
 
   const logout = () => {
-    try {
-      AUTH_KEYS.forEach((k) => window.localStorage.removeItem(k));
-      setHasToken(false);
-      setRole("");
-      setOwnerUid("");
-      setProfileOpen(false);
-      setIsEditingName(false);
-      setIsPasswordOpen(false);
-    } catch {}
-    router.push("/");
-  };
-
-  const handleUpdateProfile = async (e) => {
-    e.preventDefault();
-
-    const token = readToken();
-    const nextName = String(draftDisplayName || "").trim();
-
-    if (!token) {
-      openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบ token การเข้าสู่ระบบ");
-      return;
-    }
-
-    if (!nextName) {
-      openPopup("error", "บันทึกไม่สำเร็จ", "กรุณากรอกชื่อที่แสดง");
-      return;
-    }
-
-    setSavingProfile(true);
-
-    try {
-      const result = await requestJson(`${apiBase}/auth/update-profile`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          nickname: nextName,
-        }),
-      });
-
-      if (result?.token) {
-        writeTokenToAllKeys(result.token);
-      }
-
-      const updatedName = result?.user?.nickname || nextName;
-
-      setDisplayName(updatedName);
-      setDraftDisplayName(updatedName);
-      setIsEditingName(false);
-      syncAuth();
-
-      openPopup("success", "บันทึกสำเร็จ", "อัปเดตข้อมูลส่วนตัวเรียบร้อยแล้ว");
-    } catch (err) {
-      openPopup("error", "บันทึกไม่สำเร็จ", err?.message || "ไม่สามารถอัปเดตข้อมูลได้");
-    } finally {
-      setSavingProfile(false);
-    }
-  };
-
-  const handleChangePassword = async (e) => {
-    e.preventDefault();
-
-    const token = readToken();
-
-    if (!token) {
-      openPopup("error", "เปลี่ยนรหัสผ่านไม่สำเร็จ", "ไม่พบ token การเข้าสู่ระบบ");
-      return;
-    }
-
-    if (provider === "google") {
-      openPopup(
-        "error",
-        "เปลี่ยนรหัสผ่านไม่ได้",
-        "บัญชี Google ไม่สามารถเปลี่ยนรหัสผ่านด้วยวิธีนี้ได้"
-      );
-      return;
-    }
-
-    if (!currentPassword.trim()) {
-      openPopup("error", "ข้อมูลไม่ครบ", "กรุณากรอกรหัสผ่านปัจจุบัน");
-      return;
-    }
-
-    if (!newPassword.trim()) {
-      openPopup("error", "ข้อมูลไม่ครบ", "กรุณากรอกรหัสผ่านใหม่");
-      return;
-    }
-
-    if (!confirmPassword.trim()) {
-      openPopup("error", "ข้อมูลไม่ครบ", "กรุณากรอกยืนยันรหัสผ่านใหม่");
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      openPopup("error", "เปลี่ยนรหัสผ่านไม่สำเร็จ", "รหัสผ่านใหม่และการยืนยันรหัสผ่านไม่ตรงกัน");
-      return;
-    }
-
-    if (newPassword.length < 8) {
-      openPopup("error", "เปลี่ยนรหัสผ่านไม่สำเร็จ", "รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร");
-      return;
-    }
-
-    if (currentPassword === newPassword) {
-      openPopup("error", "เปลี่ยนรหัสผ่านไม่สำเร็จ", "รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสผ่านเดิม");
-      return;
-    }
-
-    setSavingPassword(true);
-
-    try {
-      await requestJson(`${apiBase}/auth/change-password`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          currentPassword,
-          newPassword,
-          confirmPassword,
-        }),
-      });
-
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      setShowCurrentPassword(false);
-      setShowNewPassword(false);
-      setShowConfirmPassword(false);
-      setIsPasswordOpen(false);
-
-      openPopup("success", "เปลี่ยนรหัสผ่านสำเร็จ", "ระบบได้อัปเดตรหัสผ่านของคุณเรียบร้อยแล้ว");
-    } catch (err) {
-      openPopup(
-        "error",
-        "เปลี่ยนรหัสผ่านไม่สำเร็จ",
-        err?.message || "ไม่สามารถเปลี่ยนรหัสผ่านได้"
-      );
-    } finally {
-      setSavingPassword(false);
-    }
+    runGuardedAction(() => {
+      try {
+        AUTH_KEYS.forEach((k) => window.localStorage.removeItem(k));
+        clearUnsavedAccountChanges();
+        setHasToken(false);
+        setRole("");
+        setOwnerUid("");
+        setProfileOpen(false);
+      } catch {}
+      router.push("/");
+    });
   };
 
   const handleLinkOwner = async (e) => {
@@ -480,6 +385,14 @@ export default function TopBar() {
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
+  const goTo = (href) => {
+    runGuardedAction(() => {
+      setProfileOpen(false);
+      setMenuOpen(false);
+      router.push(href);
+    });
+  };
+
   return (
     <>
       <header className="topbar-shell">
@@ -493,13 +406,14 @@ export default function TopBar() {
         <div className="topbar-center">
           <nav className="nav-tabs desktop-nav" aria-label="Main navigation">
             {tabs.map((tab) => (
-              <Link
+              <button
                 key={tab.key}
-                href={tab.href}
-                className={`nav-tab ${isActive(tab.href) ? "active" : ""}`}
+                type="button"
+                className={`nav-tab nav-tab-btn ${isActive(tab.href) ? "active" : ""}`}
+                onClick={() => goTo(tab.href)}
               >
                 {tab.label}
-              </Link>
+              </button>
             ))}
           </nav>
         </div>
@@ -556,7 +470,12 @@ export default function TopBar() {
                     <div className="profile-card">
                       <div
                         className="profile-row-btn"
-                        style={{ cursor: "default", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+                        style={{
+                          cursor: "default",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                        }}
                       >
                         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                           <div className="profile-icon">#</div>
@@ -592,10 +511,7 @@ export default function TopBar() {
                       <button
                         type="button"
                         className="profile-row-btn"
-                        onClick={() => {
-                          setIsEditingName(false);
-                          setIsPasswordOpen(false);
-                        }}
+                        onClick={() => {}}
                         style={{ cursor: "default" }}
                       >
                         <div className="profile-icon">#</div>
@@ -634,143 +550,27 @@ export default function TopBar() {
                     <button
                       type="button"
                       className="profile-row-btn"
-                      onClick={() => {
-                        setIsEditingName((v) => !v);
-                        setIsPasswordOpen(false);
-                      }}
+                      onClick={() => goTo("/profile")}
                     >
                       <div className="profile-icon">◌</div>
                       <div className="profile-row-text">
-                        <div className="profile-row-title">ข้อมูลส่วนตัว</div>
-                        <div className="profile-row-sub">จัดการชื่อที่แสดงบนระบบ</div>
+                        <div className="profile-row-title">setting name</div>
                       </div>
                     </button>
-
-                    {isEditingName && (
-                      <div className="profile-expand">
-                        <form onSubmit={handleUpdateProfile} className="form-stack">
-                          <div>
-                            <label className="form-label">ชื่อที่แสดง</label>
-                            <input
-                              type="text"
-                              value={draftDisplayName}
-                              onChange={(e) => setDraftDisplayName(e.target.value)}
-                              className="form-input"
-                            />
-                          </div>
-
-                          <div className="form-actions">
-                            <button type="submit" className="save-btn" disabled={savingProfile}>
-                              {savingProfile ? "กำลังบันทึก..." : "บันทึก"}
-                            </button>
-                            <button
-                              type="button"
-                              className="cancel-btn"
-                              onClick={() => {
-                                setDraftDisplayName(displayName);
-                                setIsEditingName(false);
-                              }}
-                              disabled={savingProfile}
-                            >
-                              ยกเลิก
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-                    )}
                   </div>
 
                   <div className="profile-card">
                     <button
                       type="button"
                       className="profile-row-btn"
-                      onClick={() => {
-                        setIsPasswordOpen((v) => !v);
-                        setIsEditingName(false);
-                      }}
+                      onClick={() => goTo("/change-password")}
                     >
                       <div className="profile-icon">⟲</div>
                       <div className="profile-row-text">
                         <div className="profile-row-title">เปลี่ยนรหัสผ่าน</div>
-                        <div className="profile-row-sub">อัพเดทรหัสผ่านของคุณ</div>
+                        <div className="profile-row-sub">ไปยังหน้าจัดการรหัสผ่าน</div>
                       </div>
                     </button>
-
-                    {isPasswordOpen && (
-                      <div className="profile-expand">
-                        <form onSubmit={handleChangePassword} className="form-stack">
-                          <div>
-                            <label className="form-label">รหัสผ่านปัจจุบัน</label>
-                            <div className="password-wrap">
-                              <input
-                                type={showCurrentPassword ? "text" : "password"}
-                                value={currentPassword}
-                                onChange={(e) => setCurrentPassword(e.target.value)}
-                                className="form-input password-input"
-                                required
-                              />
-                              <button
-                                type="button"
-                                className="toggle-password-btn"
-                                onClick={() => setShowCurrentPassword((v) => !v)}
-                              >
-                                {showCurrentPassword ? "Hide" : "Show"}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="form-label">รหัสผ่านใหม่</label>
-                            <div className="password-wrap">
-                              <input
-                                type={showNewPassword ? "text" : "password"}
-                                value={newPassword}
-                                onChange={(e) => setNewPassword(e.target.value)}
-                                className="form-input password-input"
-                                required
-                              />
-                              <button
-                                type="button"
-                                className="toggle-password-btn"
-                                onClick={() => setShowNewPassword((v) => !v)}
-                              >
-                                {showNewPassword ? "Hide" : "Show"}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div>
-                            <label className="form-label">ยืนยันรหัสผ่านใหม่</label>
-                            <div className="password-wrap">
-                              <input
-                                type={showConfirmPassword ? "text" : "password"}
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
-                                className="form-input password-input"
-                                required
-                              />
-                              <button
-                                type="button"
-                                className="toggle-password-btn"
-                                onClick={() => setShowConfirmPassword((v) => !v)}
-                              >
-                                {showConfirmPassword ? "Hide" : "Show"}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="form-actions">
-                            <button
-                              type="submit"
-                              className="save-btn"
-                              disabled={savingPassword}
-                            >
-                              {savingPassword ? "กำลังบันทึก..." : "เปลี่ยนรหัสผ่าน"}
-                            </button>
-                          </div>
-                        </form>
-                      </div>
-                    )}
                   </div>
 
                   <div className="profile-card signout-card">
@@ -801,13 +601,14 @@ export default function TopBar() {
             {menuOpen && (
               <nav className="mobile-dropdown" aria-label="Mobile navigation">
                 {tabs.map((tab) => (
-                  <Link
+                  <button
                     key={tab.key}
-                    href={tab.href}
+                    type="button"
                     className={`mobile-nav-tab ${isActive(tab.href) ? "active" : ""}`}
+                    onClick={() => goTo(tab.href)}
                   >
                     {tab.label}
-                  </Link>
+                  </button>
                 ))}
               </nav>
             )}
@@ -829,6 +630,24 @@ export default function TopBar() {
               >
                 ตกลง
               </button>
+            </div>
+          </div>
+        )}
+
+        {confirmOpen && (
+          <div className="popup-overlay" onClick={cancelDiscard}>
+            <div className="popup-card" onClick={(e) => e.stopPropagation()}>
+              <div className="popup-icon warn">!</div>
+              <div className="popup-title">{confirmTitle}</div>
+              <div className="popup-message">{confirmMessage}</div>
+              <div className="popup-actions-2">
+                <button type="button" className="popup-btn ghost" onClick={cancelDiscard}>
+                  อยู่หน้าเดิม
+                </button>
+                <button type="button" className="popup-btn danger" onClick={confirmDiscardAndContinue}>
+                  ยกเลิกการแก้ไข
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -932,6 +751,13 @@ export default function TopBar() {
             flex: 1 1 0;
             min-width: 0;
             text-align: center;
+          }
+
+          .nav-tab-btn,
+          .mobile-nav-tab {
+            border: 0;
+            cursor: pointer;
+            background: transparent;
           }
 
           .nav-tab:hover {
@@ -1240,38 +1066,6 @@ export default function TopBar() {
             text-align: left;
           }
 
-          .form-input:focus {
-            border-color: #4a90ff;
-            box-shadow: 0 0 0 2px rgba(74, 144, 255, 0.12);
-          }
-
-          .password-wrap {
-            position: relative;
-          }
-
-          .password-input {
-            padding-right: 68px;
-          }
-
-          .toggle-password-btn {
-            position: absolute;
-            top: 50%;
-            right: 8px;
-            transform: translateY(-50%);
-            border: 0;
-            background: transparent;
-            color: #1f6fff;
-            font-size: 11px;
-            font-weight: 700;
-            cursor: pointer;
-            padding: 4px 6px;
-            border-radius: 6px;
-          }
-
-          .toggle-password-btn:hover {
-            background: rgba(31, 111, 255, 0.08);
-          }
-
           .form-actions {
             display: flex;
             gap: 8px;
@@ -1363,18 +1157,13 @@ export default function TopBar() {
             z-index: 1200;
           }
 
-          .mobile-nav-tab,
-          .mobile-dropdown :global(a),
-          .mobile-dropdown :global(a:link),
-          .mobile-dropdown :global(a:visited) {
+          .mobile-nav-tab {
             display: flex;
             align-items: center;
             justify-content: flex-start;
             min-height: 38px;
             padding: 9px 11px;
             border-radius: 11px;
-            background: transparent;
-            text-decoration: none;
             text-align: left;
             color: #ffffff !important;
             font-size: 12px;
@@ -1383,25 +1172,18 @@ export default function TopBar() {
             transition: background 0.18s ease, transform 0.18s ease, color 0.18s ease;
           }
 
-          .mobile-nav-tab:hover,
-          .mobile-dropdown :global(a:hover) {
+          .mobile-nav-tab:hover {
             background: rgba(127, 222, 160, 0.24);
             color: #ffffff !important;
           }
 
-          .mobile-nav-tab:active,
-          .mobile-dropdown :global(a:active) {
+          .mobile-nav-tab:active {
             transform: scale(0.985);
             background: #7fdea0;
             color: #ffffff !important;
           }
 
-          .mobile-nav-tab.active,
-          .mobile-nav-tab.active:link,
-          .mobile-nav-tab.active:visited,
-          .mobile-dropdown :global(a.active),
-          .mobile-dropdown :global(a.active:link),
-          .mobile-dropdown :global(a.active:visited) {
+          .mobile-nav-tab.active {
             background: #7fdea0;
             color: #ffffff !important;
           }
@@ -1419,7 +1201,7 @@ export default function TopBar() {
 
           .popup-card {
             width: 100%;
-            max-width: 360px;
+            max-width: 380px;
             background: #ffffff;
             border-radius: 18px;
             padding: 22px 18px 18px;
@@ -1448,6 +1230,10 @@ export default function TopBar() {
             background: #e53935;
           }
 
+          .popup-icon.warn {
+            background: #ff9800;
+          }
+
           .popup-title {
             font-size: 18px;
             font-weight: 800;
@@ -1461,6 +1247,13 @@ export default function TopBar() {
             color: #555;
             margin-bottom: 16px;
             white-space: pre-line;
+          }
+
+          .popup-actions-2 {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
           }
 
           .popup-btn {
@@ -1478,8 +1271,14 @@ export default function TopBar() {
             background: #1f6fff;
           }
 
-          .popup-btn.error {
+          .popup-btn.error,
+          .popup-btn.danger {
             background: #e53935;
+          }
+
+          .popup-btn.ghost {
+            background: #e3e3e3;
+            color: #333;
           }
 
           @media (max-width: 1260px) {
@@ -1531,84 +1330,44 @@ export default function TopBar() {
 
             .profile-trigger {
               max-width: unset;
-              min-height: 32px;
-              padding: 2px 6px 2px 2px;
+              min-height: 34px;
+              padding: 3px 8px 3px 4px;
+              gap: 6px;
             }
 
-            .profile-panel {
-              width: min(340px, calc(100vw - 16px));
-            }
-          }
-
-          @media (max-width: 720px) {
-            .topbar-shell {
-              padding: 7px 10px;
-              gap: 8px;
-            }
-
-            .topbar-right-tools {
-              gap: 4px;
-            }
-
-            .lang-btn {
-              min-width: 38px;
-              height: 27px;
-              padding: 0 6px;
+            .profile-avatar-mini {
+              width: 26px;
+              height: 26px;
               font-size: 10px;
             }
 
             .hamburger-btn {
-              width: 30px;
-              height: 30px;
-              font-size: 15px;
-              border-radius: 8px;
-            }
-
-            .mobile-dropdown {
-              right: 0;
-              left: auto;
-              width: min(220px, calc(100vw - 14px));
-            }
-
-            .profile-panel {
-              right: -4px;
+              width: 32px;
+              height: 32px;
+              border-radius: 9px;
+              font-size: 16px;
             }
           }
 
-          @media (max-width: 430px) {
+          @media (max-width: 640px) {
             .topbar-shell {
-              padding: 7px 8px;
+              padding: 8px 10px;
               gap: 6px;
             }
 
             .logo-text {
               font-size: 12px;
+              letter-spacing: 0.12em;
             }
 
-            .lang-btn {
-              min-width: 36px;
-              height: 26px;
-              font-size: 9px;
+            .logo-dot {
+              width: 12px;
+              height: 12px;
             }
 
-            .profile-trigger {
-              padding: 2px;
-            }
-
-            .profile-caret {
-              display: none;
-            }
-
-            .hamburger-btn {
-              width: 28px;
-              height: 28px;
-              font-size: 14px;
-            }
-
-            .mobile-dropdown {
+            .profile-panel {
               right: 0;
-              left: auto;
-              width: min(210px, calc(100vw - 12px));
+              width: min(320px, calc(100vw - 12px));
             }
           }
         `}</style>

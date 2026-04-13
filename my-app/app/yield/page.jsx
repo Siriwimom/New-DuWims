@@ -35,18 +35,14 @@ function setToken(token) {
   });
 }
 
-function formatThaiDate(value, lang = "th") {
+function formatDisplayDate(value) {
   if (!value) return "-";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "-";
 
-  if (lang === "en") {
-    return d.toLocaleDateString("en-GB");
-  }
-
   const dd = String(d.getDate()).padStart(2, "0");
   const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear() + 543;
+  const yyyy = d.getFullYear();
   return `${dd}/${mm}/${yyyy}`;
 }
 
@@ -87,6 +83,19 @@ function createEmptyForm() {
   };
 }
 
+function isHarvestBeforeStart(startDate, harvestDate) {
+  if (!startDate || !harvestDate) return false;
+  return String(harvestDate) < String(startDate);
+}
+
+function escapeCsvValue(value) {
+  const text = value === null || value === undefined ? "" : String(value);
+  if (/[",\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
 export default function YieldPage() {
   const { lang, t } = useDuwimsT();
 
@@ -94,6 +103,7 @@ export default function YieldPage() {
     () => ({
       title: lang === "en" ? "🌾 Management Planting" : "🌾 Management Planting",
       addYield: lang === "en" ? "＋ Add Yield Data" : "＋ เพิ่มข้อมูลผลผลิต",
+      exportCsv: lang === "en" ? "⬇ Export CSV" : "⬇ Export CSV",
 
       plot: lang === "en" ? "Plot" : "แปลง",
       allPlots: lang === "en" ? "All Plots" : "ทุกแปลง",
@@ -169,14 +179,24 @@ export default function YieldPage() {
           : "คุณกำลังอยู่ระหว่างเพิ่มหรือแก้ไขข้อมูลผลผลิต",
       leaveSub2:
         lang === "en"
-          ? "Do you want to leave this page?"
-          : "ต้องการออกจากหน้านี้และเปลี่ยนหน้าใช่หรือไม่?",
+          ? "Do you want to cancel editing and leave this page?"
+          : "ต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
       stayHere: lang === "en" ? "Stay" : "อยู่หน้าเดิม",
-      leavePage: lang === "en" ? "Leave page" : "เปลี่ยนหน้า",
+      leavePage: lang === "en" ? "Leave page" : "ยกเลิกการแก้ไขและเปลี่ยนหน้า",
       loginRequired:
         lang === "en"
           ? "Please log in before accessing this page."
           : "กรุณาเข้าสู่ระบบก่อนเข้าใช้งานหน้านี้",
+
+      harvestInvalid:
+        lang === "en"
+          ? "Harvest date cannot be earlier than planting date."
+          : "วันที่เก็บเกี่ยวห้ามก่อนวันที่ปลูก",
+
+      exportNoData:
+        lang === "en"
+          ? "No data available for CSV export."
+          : "ไม่มีข้อมูลสำหรับ Export CSV",
     }),
     [lang, t]
   );
@@ -210,6 +230,9 @@ export default function YieldPage() {
   const allowNavigationRef = useRef(false);
 
   const isEditing = createOpen || editOpen;
+
+  const createDateInvalid = isHarvestBeforeStart(createForm.startDate, createForm.harvestDate);
+  const editDateInvalid = isHarvestBeforeStart(editForm.startDate, editForm.harvestDate);
 
   const plotMap = useMemo(() => {
     const map = {};
@@ -450,6 +473,7 @@ export default function YieldPage() {
   }
 
   function openCreatePopup() {
+    setError("");
     setCreateForm({
       id: "",
       plot: plotOptions[0]?.id || "",
@@ -462,6 +486,7 @@ export default function YieldPage() {
   }
 
   function openEditPopup(item) {
+    setError("");
     setEditForm({
       id: item?.id || "",
       plot: item?.plot || "",
@@ -480,11 +505,19 @@ export default function YieldPage() {
   }
 
   function requestSaveCreate() {
+    if (createDateInvalid) {
+      setError(tx.harvestInvalid);
+      return;
+    }
     setSaveMode("create");
     setConfirmSaveOpen(true);
   }
 
   function requestSaveEdit() {
+    if (editDateInvalid) {
+      setError(tx.harvestInvalid);
+      return;
+    }
     setSaveMode("edit");
     setConfirmSaveOpen(true);
   }
@@ -529,7 +562,62 @@ export default function YieldPage() {
     }
   }
 
+  function handleExportCsv() {
+    try {
+      if (!filteredItems.length) {
+        setError(tx.exportNoData);
+        return;
+      }
+
+      setError("");
+
+      const header = [
+        lang === "en" ? "Plot" : "แปลง",
+        lang === "en" ? "Plant Species" : "ชนิดของพืช",
+        lang === "en" ? "Planting Date" : "วันที่ปลูก",
+        lang === "en" ? "Harvest Date" : "วันที่เก็บเกี่ยว",
+        lang === "en" ? "Volume (tons)" : "ปริมาณ (ตัน)",
+      ];
+
+      const rows = filteredItems.map((item) => [
+        getPlotLabelById(item?.plot),
+        item?.species || "",
+        formatDisplayDate(item?.startDate),
+        formatDisplayDate(item?.harvestDate),
+        item?.volume ?? "",
+      ]);
+
+      const csv = [header, ...rows]
+        .map((row) => row.map(escapeCsvValue).join(","))
+        .join("\n");
+
+      const blob = new Blob(["\uFEFF" + csv], {
+        type: "text/csv;charset=utf-8;",
+      });
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const dateStamp = new Date().toISOString().slice(0, 10);
+      a.href = url;
+      a.download = `yield-data-${dateStamp}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setError(tx.exportNoData);
+    }
+  }
+
   async function handleConfirmSave() {
+    const form = saveMode === "create" ? createForm : editForm;
+
+    if (isHarvestBeforeStart(form.startDate, form.harvestDate)) {
+      setError(tx.harvestInvalid);
+      setConfirmSaveOpen(false);
+      return;
+    }
+
     setSaving(true);
     setError("");
 
@@ -608,14 +696,25 @@ export default function YieldPage() {
           <div className="card-title" style={{ fontSize: 15 }}>
             {tx.title}
           </div>
-          <button
-            className="create-btn"
-            style={{ marginBottom: 0 }}
-            onClick={openCreatePopup}
-            type="button"
-          >
-            {tx.addYield}
-          </button>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="export-btn"
+              style={{ marginBottom: 0 }}
+              onClick={handleExportCsv}
+              type="button"
+            >
+              {tx.exportCsv}
+            </button>
+            <button
+              className="create-btn"
+              style={{ marginBottom: 0 }}
+              onClick={openCreatePopup}
+              type="button"
+            >
+              {tx.addYield}
+            </button>
+          </div>
         </div>
 
         {error ? <div className="yield-error-banner">{error}</div> : null}
@@ -717,8 +816,8 @@ export default function YieldPage() {
                         <td>
                           {icon} {item?.species || "-"}
                         </td>
-                        <td>{formatThaiDate(item?.startDate, lang)}</td>
-                        <td>{formatThaiDate(item?.harvestDate, lang)}</td>
+                        <td>{formatDisplayDate(item?.startDate)}</td>
+                        <td>{formatDisplayDate(item?.harvestDate)}</td>
                         <td>
                           <strong>{formatVolume(item?.volume, lang)}</strong>
                         </td>
@@ -802,7 +901,19 @@ export default function YieldPage() {
                   type="date"
                   value={createForm.startDate}
                   onChange={(e) =>
-                    setCreateForm((prev) => ({ ...prev, startDate: e.target.value }))
+                    setCreateForm((prev) => {
+                      const nextStartDate = e.target.value;
+                      const nextHarvestDate =
+                        prev.harvestDate && prev.harvestDate < nextStartDate
+                          ? ""
+                          : prev.harvestDate;
+
+                      return {
+                        ...prev,
+                        startDate: nextStartDate,
+                        harvestDate: nextHarvestDate,
+                      };
+                    })
                   }
                 />
               </div>
@@ -812,11 +923,15 @@ export default function YieldPage() {
                 <input
                   className="form-input"
                   type="date"
+                  min={createForm.startDate || undefined}
                   value={createForm.harvestDate}
                   onChange={(e) =>
                     setCreateForm((prev) => ({ ...prev, harvestDate: e.target.value }))
                   }
                 />
+                {createDateInvalid ? (
+                  <div className="date-error-text">{tx.harvestInvalid}</div>
+                ) : null}
               </div>
 
               <div className="form-field">
@@ -847,7 +962,8 @@ export default function YieldPage() {
                     saving ||
                     !createForm.plot ||
                     !String(createForm.species || "").trim() ||
-                    !createForm.startDate
+                    !createForm.startDate ||
+                    createDateInvalid
                   }
                   onClick={requestSaveCreate}
                 >
@@ -913,7 +1029,19 @@ export default function YieldPage() {
                   type="date"
                   value={editForm.startDate}
                   onChange={(e) =>
-                    setEditForm((prev) => ({ ...prev, startDate: e.target.value }))
+                    setEditForm((prev) => {
+                      const nextStartDate = e.target.value;
+                      const nextHarvestDate =
+                        prev.harvestDate && prev.harvestDate < nextStartDate
+                          ? ""
+                          : prev.harvestDate;
+
+                      return {
+                        ...prev,
+                        startDate: nextStartDate,
+                        harvestDate: nextHarvestDate,
+                      };
+                    })
                   }
                 />
               </div>
@@ -923,11 +1051,15 @@ export default function YieldPage() {
                 <input
                   className="form-input"
                   type="date"
+                  min={editForm.startDate || undefined}
                   value={editForm.harvestDate}
                   onChange={(e) =>
                     setEditForm((prev) => ({ ...prev, harvestDate: e.target.value }))
                   }
                 />
+                {editDateInvalid ? (
+                  <div className="date-error-text">{tx.harvestInvalid}</div>
+                ) : null}
               </div>
 
               <div className="form-field">
@@ -956,7 +1088,8 @@ export default function YieldPage() {
                   disabled={
                     saving ||
                     !String(editForm.species || "").trim() ||
-                    !editForm.startDate
+                    !editForm.startDate ||
+                    editDateInvalid
                   }
                   onClick={requestSaveEdit}
                 >
@@ -1085,6 +1218,25 @@ export default function YieldPage() {
             line-height: 1.45;
             word-break: break-word;
             overflow-wrap: break-word;
+          }
+
+          .date-error-text {
+            margin-top: 6px;
+            color: #c62828;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.4;
+          }
+
+          .export-btn {
+            border: none;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #163d0b;
+            font-weight: 800;
+            padding: 10px 14px;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
           }
 
           .yield-table-card {
