@@ -849,15 +849,16 @@ export default function HistoryPage() {
 
         if (!nodeMatched) continue;
 
+        const rawValue = pickValueForSensorKey(raw, target.sensorKey);
+
         const sensorMatched =
           sameText(readingKey, target.sensorKey) ||
           (target.sensorId && sameText(readingSensorId, target.sensorId)) ||
           (target.sensorUid && sameText(readingSensorUid, target.sensorUid)) ||
-          sameText(readingSensorType, target.rawSensorType);
+          sameText(readingSensorType, target.rawSensorType) ||
+          rawValue !== null;
 
         if (!sensorMatched) continue;
-
-        const rawValue = pickValueForSensorKey(raw, target.sensorKey);
         const value = safeDisplayValue(target.sensorKey, rawValue);
         if (value === null) continue;
 
@@ -1000,12 +1001,15 @@ export default function HistoryPage() {
         )
         .forEach((row) => {
           const bucketTimestamp = chartBucket.bucketMap.get(row.timestamp) || row.timestamp;
-          valuesByTimestamp.set(bucketTimestamp, row.value);
+          const prev = valuesByTimestamp.get(bucketTimestamp) || [];
+          prev.push(row.value);
+          valuesByTimestamp.set(bucketTimestamp, prev);
         });
 
       const values = chartTimestamps.map((ts) => {
-        const value = valuesByTimestamp.get(ts);
-        return Number.isFinite(value) ? value : null;
+        const bucketValues = valuesByTimestamp.get(ts) || [];
+        const avg = average(bucketValues);
+        return Number.isFinite(avg) ? avg : null;
       });
 
       return {
@@ -1188,8 +1192,12 @@ export default function HistoryPage() {
       key: item.key,
       color: colorOfSensorKey(item.sensorKey),
       label: item.label,
+      sensorLabel: item.sensorLabel,
+      plotName: item.plotName,
+      nodeName: item.nodeName,
       unit: item.unit,
       dash: dashedByIndex(idx),
+      points: item.values.filter((v) => Number.isFinite(v)).length,
     }));
   }, [visibleChartSeries]);
 
@@ -1766,32 +1774,43 @@ export default function HistoryPage() {
               </div>
             </div>
 
-            {chartSeriesLegend.length ? (
-              <div className="chart-series-legend">
-                {chartSeriesLegend.map((item) => (
-                  <div key={item.key} className="chart-series-chip" title={`${item.label} (${item.unit})`}>
-                    <span
-                      className="chart-series-line"
-                      style={{
-                        background: item.color,
-                        borderTopStyle: item.dash ? "dashed" : "solid",
-                      }}
-                    />
-                    <span className="chart-series-label">
-                      {item.label} <span className="chart-series-unit">({item.unit})</span>
-                    </span>
-                  </div>
-                ))}
+            <div className="chart-main-row">
+              <div className="chart-main-col">
+                <div className="chart-wrap chart-wrap-apex">
+                  <ReactApexChart
+                    type={chartType}
+                    height={420}
+                    series={apexSeries}
+                    options={mainChartOptions}
+                  />
+                </div>
               </div>
-            ) : null}
 
-            <div className="chart-wrap chart-wrap-apex">
-              <ReactApexChart
-                type={chartType}
-                height={420}
-                series={apexSeries}
-                options={mainChartOptions}
-              />
+              {chartSeriesLegend.length ? (
+                <aside className="chart-right-legend">
+                  <div className="chart-right-legend-title">
+                    📚 {lang === "en" ? "Legend" : "คำอธิบายเส้นกราฟ"}
+                  </div>
+                  <div className="chart-right-legend-list">
+                    {chartSeriesLegend.map((item) => (
+                      <div key={item.key} className="chart-right-legend-item" title={`${item.label} (${item.unit})`}>
+                        <span
+                          className="chart-series-line"
+                          style={{
+                            background: item.color,
+                            borderTopStyle: item.dash ? "dashed" : "solid",
+                          }}
+                        />
+                        <div className="chart-right-legend-texts">
+                          <div className="chart-right-legend-main">{item.sensorLabel}</div>
+                          <div className="chart-right-legend-sub">{item.plotName} · {item.nodeName}</div>
+                          <div className="chart-right-legend-meta">{item.unit} · {item.points} pts</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </aside>
+              ) : null}
             </div>
 
             <div className="h2-brush-label">
@@ -2254,6 +2273,73 @@ export default function HistoryPage() {
             cursor: pointer;
           }
 
+          .chart-main-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 300px;
+            gap: 14px;
+            align-items: start;
+          }
+
+          .chart-main-col {
+            min-width: 0;
+          }
+
+          .chart-right-legend {
+            border: 1px solid #e4ede0;
+            background: #f8fbf7;
+            border-radius: 18px;
+            padding: 12px;
+            max-height: 448px;
+            overflow: auto;
+          }
+
+          .chart-right-legend-title {
+            font-size: 15px;
+            font-weight: 900;
+            color: #244f15;
+            margin-bottom: 10px;
+          }
+
+          .chart-right-legend-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+          }
+
+          .chart-right-legend-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            min-width: 0;
+            background: #ffffff;
+            border: 1px solid #e4ede0;
+            border-radius: 14px;
+            padding: 10px 12px;
+          }
+
+          .chart-right-legend-texts {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+
+          .chart-right-legend-main {
+            font-size: 13px;
+            font-weight: 900;
+            color: #0f172a;
+            line-height: 1.2;
+          }
+
+          .chart-right-legend-sub,
+          .chart-right-legend-meta {
+            font-size: 12px;
+            font-weight: 700;
+            color: #64748b;
+            line-height: 1.25;
+            word-break: break-word;
+          }
+
           .chart-series-legend {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2425,6 +2511,14 @@ export default function HistoryPage() {
           }
 
           @media (max-width: 1180px) {
+            .chart-main-row {
+              grid-template-columns: 1fr;
+            }
+
+            .chart-right-legend {
+              max-height: none;
+            }
+
             .chart-series-legend {
               grid-template-columns: 1fr;
             }

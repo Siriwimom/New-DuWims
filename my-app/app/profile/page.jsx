@@ -6,7 +6,7 @@ import TopBar from "../components/TopBar";
 
 const AUTH_KEYS = ["AUTH_TOKEN_V1", "token", "authToken", "pmtool_token", "duwims_token"];
 const DIRTY_KEY = "DUWIMS_UNSAVED_PROFILE";
-const PROFILE_NAME_KEY = "DUWIMS_PROFILE_NAME_LOCAL";
+const LEGACY_PROFILE_NAME_KEY = "DUWIMS_PROFILE_NAME_LOCAL";
 
 function readToken() {
   if (typeof window === "undefined") return "";
@@ -57,26 +57,48 @@ async function requestJson(url, options = {}) {
   return data;
 }
 
-function readLocalName() {
+function getUserIdentity(user = {}) {
+  return String(
+    user?._id ||
+      user?.id ||
+      user?.uid ||
+      user?.userId ||
+      user?.email ||
+      user?.ownerUid ||
+      ""
+  ).trim();
+}
+
+function getProfileNameKeyByIdentity(identity) {
+  return identity
+    ? `DUWIMS_PROFILE_NAME_LOCAL_${identity}`
+    : LEGACY_PROFILE_NAME_KEY;
+}
+
+function readLegacyLocalName() {
   if (typeof window === "undefined") return "";
   try {
-    return window.localStorage.getItem(PROFILE_NAME_KEY) || "";
+    return window.localStorage.getItem(LEGACY_PROFILE_NAME_KEY) || "";
   } catch {
     return "";
   }
 }
 
-function writeLocalName(name) {
-  if (typeof window === "undefined") return;
+function readScopedLocalName(identity) {
+  if (typeof window === "undefined") return "";
   try {
-    window.localStorage.setItem(PROFILE_NAME_KEY, String(name || "").trim());
-  } catch {}
+    const key = getProfileNameKeyByIdentity(identity);
+    return window.localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
 }
 
-function clearLocalName() {
+function writeScopedLocalName(identity, name) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(PROFILE_NAME_KEY);
+    const key = getProfileNameKeyByIdentity(identity);
+    window.localStorage.setItem(key, String(name || "").trim());
   } catch {}
 }
 
@@ -90,6 +112,7 @@ export default function AccountProfilePage() {
 
   const [savedName, setSavedName] = useState("");
   const [draftName, setDraftName] = useState("");
+  const [profileIdentity, setProfileIdentity] = useState("");
 
   const [popupOpen, setPopupOpen] = useState(false);
   const [popupType, setPopupType] = useState("success");
@@ -126,8 +149,6 @@ export default function AccountProfilePage() {
     let active = true;
 
     async function loadMe() {
-      const localName = readLocalName();
-
       try {
         const me = await requestJson(`${apiBase}/auth/me`, {
           headers: {
@@ -138,6 +159,10 @@ export default function AccountProfilePage() {
         if (!active) return;
 
         const user = me?.user || {};
+        const identity = getUserIdentity(user);
+        const scopedLocalName = readScopedLocalName(identity);
+        const legacyLocalName = readLegacyLocalName();
+
         const backendName =
           user?.nickname ||
           user?.displayName ||
@@ -146,13 +171,19 @@ export default function AccountProfilePage() {
           user?.username ||
           "";
 
-        // ให้ local มาก่อน backend
-        const nextName = String(localName || backendName || "").trim();
+        // ใช้ backend ก่อน แล้วค่อย fallback ไป local ของ user คนนี้
+        // ถ้ายังไม่มี local แบบแยก user ให้ลองดึงจาก key เก่าเพื่อ migrate
+        const nextName = String(
+          backendName || scopedLocalName || legacyLocalName || ""
+        ).trim();
 
+        setProfileIdentity(identity);
         setSavedName(nextName);
         setDraftName(nextName);
 
-        if (nextName) writeLocalName(nextName);
+        if (nextName) {
+          writeScopedLocalName(identity, nextName);
+        }
 
         if (!nextName) {
           setEditMode(true);
@@ -160,10 +191,13 @@ export default function AccountProfilePage() {
       } catch {
         if (!active) return;
 
-        setSavedName(localName);
-        setDraftName(localName);
+        const legacyLocalName = readLegacyLocalName();
 
-        if (!localName) {
+        setProfileIdentity("");
+        setSavedName(legacyLocalName);
+        setDraftName(legacyLocalName);
+
+        if (!legacyLocalName) {
           setEditMode(true);
         }
       } finally {
@@ -225,10 +259,6 @@ export default function AccountProfilePage() {
     if (href) router.push(href);
   };
 
-  const clearDraft = () => {
-    setDraftName("");
-  };
-
   const cancelEdit = () => {
     if (dirty) {
       setConfirmTitle("ยกเลิกการแก้ไข");
@@ -275,7 +305,8 @@ export default function AccountProfilePage() {
     setSaving(true);
 
     try {
-      writeLocalName(nextName);
+      // บันทึกเฉพาะของ account ที่ล็อกอินอยู่
+      writeScopedLocalName(profileIdentity, nextName);
 
       setSavedName(nextName);
       setDraftName(nextName);
@@ -392,7 +423,6 @@ export default function AccountProfilePage() {
                 <div className="view-card">
                   <div className="view-label">ชื่อ</div>
                   <div className="view-value">{savedName || "-"}</div>
-                 
                 </div>
               </div>
             </div>
@@ -423,8 +453,6 @@ export default function AccountProfilePage() {
                 >
                   {saving ? "กำลังบันทึก..." : "บันทึก"}
                 </button>
-
-                
 
                 <button
                   type="button"

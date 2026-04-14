@@ -248,18 +248,20 @@ function getSensorThresholdProfile(sensorName = "", lang = "th") {
   if (key.includes("temp") || key.includes("อุณหภูมิ")) {
     return {
       label: lang === "en" ? "Temperature" : "อุณหภูมิ",
-      min: 20,
-      max: 35,
+      greenMin: 20,
+      greenMax: 35,
+      redLowMax: 19.999999,
+      redHighMin: 35.000001,
       displayMin: "20 °C",
       displayMax: "35 °C",
       lowReason:
         lang === "en"
-          ? "Below 20: Plant water uptake slows and photosynthesis is disrupted."
-          : "ต่ำกว่า 20: ต้นชะงักการดึงน้ำ ปากใบปิดทำให้สังเคราะห์แสงหยุดชะงัก",
+          ? "To prevent stomatal closure and leaf burn before reaching a critical temperature, which affects photosynthesis and fruit set."
+          : "เพื่อป้องกันปากใบปิดและอาการใบไหม้ก่อนอุณหภูมิจะถึงจุดวิกฤตจริง ซึ่งส่งผลต่อการสังเคราะห์แสงและการติดผล",
       highReason:
         lang === "en"
-          ? "Above 35: Severe heat stress may burn leaves and cause flower drop."
-          : "สูงกว่า 35: พืชเครียดจากความร้อนจัด ใบไหม้และดอกร่วงก่อนกำหนด",
+          ? "To prevent stomatal closure and leaf burn before reaching a critical temperature, which affects photosynthesis and fruit set."
+          : "เพื่อป้องกันปากใบปิดและอาการใบไหม้ก่อนอุณหภูมิจะถึงจุดวิกฤตจริง ซึ่งส่งผลต่อการสังเคราะห์แสงและการติดผล",
     };
   }
 
@@ -270,72 +272,71 @@ function getSensorThresholdProfile(sensorName = "", lang = "th") {
   ) {
     return {
       label: lang === "en" ? "Relative Humidity" : "ความชื้นสัมพัทธ์",
-      min: 75,
-      max: 85,
+      greenMin: 75,
+      greenMax: 85,
+      redLowMax: 74.999999,
+      redHighMin: 85.000001,
       displayMin: "75 %",
       displayMax: "85 %",
       lowReason:
         lang === "en"
-          ? "Below 75: Air is too dry and flowers lose moisture."
-          : "ต่ำกว่า 75: อากาศแห้งเกินไป ดอกและหางแย้สูญเสียน้ำจนแห้งร่วง",
+          ? "To prevent flowers and young floral structures from drying and falling in overly dry air, and to reduce fungal problems or failed pollination in overly humid air."
+          : "ป้องกันดอกและหางแย้แห้งร่วงหากอากาศแห้งเกินไป และป้องกันโรคราใบติดหรือการผสมเกสรไม่ติดหากอากาศชื้นเกินไป",
       highReason:
         lang === "en"
-          ? "Above 85: Humidity is too high and fungal risk rises."
-          : "สูงกว่า 85: อากาศอิ่มตัว เกสรจับก้อนผสมไม่ติด และเสี่ยงโรคเชื้อรา",
+          ? "To prevent flowers and young floral structures from drying and falling in overly dry air, and to reduce fungal problems or failed pollination in overly humid air."
+          : "ป้องกันดอกและหางแย้แห้งร่วงหากอากาศแห้งเกินไป และป้องกันโรคราใบติดหรือการผสมเกสรไม่ติดหากอากาศชื้นเกินไป",
     };
   }
 
   if (key.includes("wind") || key.includes("ลม")) {
     return {
       label: lang === "en" ? "Wind Speed" : "ความเร็วลม",
-      min: 2,
-      max: 5,
+      greenMin: 2,
+      greenMax: 5,
+      redLowMax: null,
+      redHighMin: 6,
       displayMin: lang === "en" ? "2 km/h" : "2 กม./ชม.",
       displayMax: lang === "en" ? "5 km/h" : "5 กม./ชม.",
-      lowReason:
-        lang === "en"
-          ? "Below 2: Poor air circulation causes heat accumulation."
-          : "ต่ำกว่า 2: อากาศไม่ไหลเวียน ความร้อนสะสมในทรงพุ่มสูงเกินเกณฑ์",
+      lowReason: "",
       highReason:
         lang === "en"
-          ? "Above 5: Plants lose water too quickly."
-          : "สูงกว่า 5: กิ่งฉีกขาดง่าย และใบสูญเสียน้ำเร็วเกินไปจนต้นเหี่ยวเฉา",
+          ? "Strong wind at this level can tear durian branches and accelerate water loss from leaves until the tree wilts."
+          : "ลมที่แรงระดับนี้ทำให้กิ่งทุเรียนฉีกขาดได้ง่ายและกระตุ้นให้ต้นคายน้ำที่ใบเร็วเกินไปจนต้นเหี่ยวเฉา",
     };
   }
 
   if (key.includes("light") || key.includes("แสง")) {
     return {
       label: lang === "en" ? "Light Intensity" : "ความเข้มแสง",
-      min: 40000,
-      max: 60000,
+      greenMin: 40000,
+      greenMax: 60000,
+      redLowMax: null,
+      redHighMin: 70000,
       displayMin: "40,000 Lux",
       displayMax: "60,000 Lux",
-      lowReason:
-        lang === "en"
-          ? "Below 40,000: Light may be insufficient for growth."
-          : "ต่ำกว่า 40,000: พลังงานแสงไม่พอต่อการสร้างตาดอกและเลี้ยงผลอ่อน",
+      lowReason: "",
       highReason:
         lang === "en"
-          ? "Above 60,000: Excess heat may damage leaves and fruit."
-          : "สูงกว่า 60,000: รังสีความร้อนแรงเกินไป ทำลายเนื้อเยื่อผิวใบและผล (Sunburn)",
+          ? "Excessive light often comes with heat radiation that damages durian leaf and fruit surfaces, causing sunburn."
+          : "แสงที่แรงเกินไปมักมาพร้อมรังสีความร้อนที่ทำลายเนื้อเยื่อผิวใบและผลทุเรียนทำให้เกิดอาการซันเบิร์น",
     };
   }
 
   if (key.includes("rain") || key.includes("ฝน")) {
     return {
       label: lang === "en" ? "Rainfall" : "ปริมาณน้ำฝน",
-      min: 4,
-      max: 10,
+      greenMin: 4,
+      greenMax: 8,
+      redLowMax: null,
+      redHighMin: 10,
       displayMin: lang === "en" ? "4 mm/day" : "4 มม./วัน",
       displayMax: lang === "en" ? "8 mm/day" : "8 มม./วัน",
-      lowReason:
-        lang === "en"
-          ? "Below 4: Soil may become too dry."
-          : "ต่ำกว่า 4: ดินแห้งเกินไป กระทบต่อการละลายและการดูดซึมธาตุอาหาร",
+      lowReason: "",
       highReason:
         lang === "en"
-          ? "Above 10: Excess rain may increase fruit drop."
-          : "สูงกว่า 10: กระตุ้นการแตกใบอ่อนแทนการออกดอก และน้ำเกินจนผลร่วง",
+          ? "About 10 mm of rain is enough to trigger flushing instead of flowering, or cause young fruit to drop due to sudden water intake."
+          : "ปริมาณฝน 10 มม. เพียงพอที่จะกระตุ้นให้ทุเรียนแตกใบอ่อนแทนการออกดอก หรือทำให้ผลอ่อนร่วงจากการได้รับน้ำกะทันหัน",
     };
   }
 
@@ -347,72 +348,80 @@ function getSensorThresholdProfile(sensorName = "", lang = "th") {
   ) {
     return {
       label: lang === "en" ? "Soil Moisture" : "ความชื้นดิน",
-      min: 65,
-      max: 80,
+      greenMin: 65,
+      greenMax: 80,
+      redLowMax: 64.999999,
+      redHighMin: 80.000001,
       displayMin: "65 %",
       displayMax: "80 %",
       lowReason:
         lang === "en"
-          ? "Below 65: Soil is too dry and roots are stressed."
-          : "ต่ำกว่า 65: ดินแห้งจนรากฝอยตาย ส่งน้ำไปเลี้ยงผลไม่ต่อเนื่อง",
+          ? "To maintain the balance of air and water in the soil so roots do not die from drought or rot from oxygen deficiency."
+          : "เพื่อรักษาความสมดุลของอากาศและน้ำในดิน ไม่ให้รากฝอยขาดน้ำจนตายหรือเน่าตายจากสภาวะขาดออกซิเจน",
       highReason:
         lang === "en"
-          ? "Above 80: Roots may lack oxygen and rot."
-          : "สูงกว่า 80: ดินขาดอากาศ รากหายใจไม่ได้และเน่าตายจากเชื้อราในดิน",
+          ? "To maintain the balance of air and water in the soil so roots do not die from drought or rot from oxygen deficiency."
+          : "เพื่อรักษาความสมดุลของอากาศและน้ำในดิน ไม่ให้รากฝอยขาดน้ำจนตายหรือเน่าตายจากสภาวะขาดออกซิเจน",
     };
   }
 
   if (key === "n" || key.includes("ไนโตรเจน")) {
     return {
       label: lang === "en" ? "Nitrogen (N)" : "ไนโตรเจน (N)",
-      min: 0.1,
-      max: 1.0,
-      displayMin: "0.1",
-      displayMax: "1.0",
+      greenMin: 0.1,
+      greenMax: 1.0,
+      redLowMax: 0.099999,
+      redHighMin: 1.000001,
+      displayMin: "0.1 %",
+      displayMax: "1.0 %",
       lowReason:
         lang === "en"
-          ? "Below 0.1: Growth energy is insufficient."
-          : "ต่ำกว่า 0.1: ต้นแคระแกร็น ใบเหลืองซีด ขาดพลังงานเจริญเติบโต",
+          ? "If nitrogen is too high during fruiting, the tree may shed fruit to push new leaf flush instead."
+          : "หาก N สูงเกินไปในช่วงติดผลจะทำให้ต้นสลัดลูกทิ้งเพื่อไปแตกใบอ่อนแทน",
       highReason:
         lang === "en"
-          ? "Above 1.0: Excess nitrogen may over-promote leaves."
-          : "สูงกว่า 1.0: ต้นบ้าใบ จะสลัดลูกทิ้งเพื่อไปเลี้ยงใบอ่อนแทน",
+          ? "If nitrogen is too high during fruiting, the tree may shed fruit to push new leaf flush instead."
+          : "หาก N สูงเกินไปในช่วงติดผลจะทำให้ต้นสลัดลูกทิ้งเพื่อไปแตกใบอ่อนแทน",
     };
   }
 
   if (key === "p" || key.includes("ฟอสฟอรัส")) {
     return {
       label: lang === "en" ? "Phosphorus (P)" : "ฟอสฟอรัส (P)",
-      min: 25,
-      max: 45,
+      greenMin: 25,
+      greenMax: 45,
+      redLowMax: 24.999999,
+      redHighMin: 45.000001,
       displayMin: "25 ppm",
       displayMax: "45 ppm",
       lowReason:
         lang === "en"
-          ? "Below 25: Stored energy may be insufficient."
-          : "ต่ำกว่า 25: พลังงานสะสมไม่พอสร้างตาดอก และระบบรากไม่เดิน",
+          ? "If phosphorus is too low, the tree lacks energy to form flower buds and root development becomes poor."
+          : "หาก P ต่ำเกินไปต้นจะขาดพลังงานในการสร้างตาดอกและระบบรากจะไม่สมบูรณ์",
       highReason:
         lang === "en"
-          ? "Above 45: Excess phosphorus may interfere with other nutrients."
-          : "สูงกว่า 45: ธาตุเกินจนไปขัดขวางการดูดซึมธาตุอาหารรองชนิดอื่น",
+          ? "If phosphorus is too low, the tree lacks energy to form flower buds and root development becomes poor."
+          : "หาก P ต่ำเกินไปต้นจะขาดพลังงานในการสร้างตาดอกและระบบรากจะไม่สมบูรณ์",
     };
   }
 
   if (key === "k" || key.includes("โพแทสเซียม")) {
     return {
       label: lang === "en" ? "Potassium (K)" : "โพแทสเซียม (K)",
-      min: 0.8,
-      max: 1.4,
+      greenMin: 0.8,
+      greenMax: 1.4,
+      redLowMax: 0.799999,
+      redHighMin: 1.400001,
       displayMin: "0.8 cmol/kg",
       displayMax: "1.4 cmol/kg",
       lowReason:
         lang === "en"
-          ? "Below 0.8: Sugar transport may become abnormal."
-          : "ต่ำกว่า 0.8: การเคลื่อนย้ายน้ำตาลผิดปกติ ผลบิดเบี้ยว เนื้อไม่หวาน",
+          ? "If potassium moves out of range, durian lobes become incomplete, fruit shape becomes distorted, and flesh quality declines."
+          : "หาก K หลุดช่วงจะทำให้พูทุเรียนไม่สมบูรณ์ ทรงผลบิดเบี้ยว และเนื้อทุเรียนไม่มีคุณภาพ",
       highReason:
         lang === "en"
-          ? "Above 1.4: Excess potassium may disturb calcium uptake."
-          : "สูงกว่า 1.4: ดินเค็มและขัดขวางการดูดซึมแคลเซียม ทำให้เปลือกแตก",
+          ? "If potassium moves out of range, durian lobes become incomplete, fruit shape becomes distorted, and flesh quality declines."
+          : "หาก K หลุดช่วงจะทำให้พูทุเรียนไม่สมบูรณ์ ทรงผลบิดเบี้ยว และเนื้อทุเรียนไม่มีคุณภาพ",
     };
   }
 
@@ -424,25 +433,26 @@ function getSensorThresholdProfile(sensorName = "", lang = "th") {
   ) {
     return {
       label: lang === "en" ? "Water Availability" : "ความพร้อมใช้น้ำ",
-      min: 80,
-      max: 150,
-      displayMin: lang === "en" ? "80 L/day/tree" : "80 ลิตร/วัน/ต้น",
-      displayMax: lang === "en" ? "150 L/day/tree" : "150 ลิตร/วัน/ต้น",
-      lowReason:
-        lang === "en"
-          ? "Below 80: Water may be insufficient for fruit development."
-          : "ต่ำกว่า 80: ปริมาณน้ำไม่พอเลี้ยงผล ทำให้ลูกฝ่อและชะงักการโต",
+      greenMin: 10,
+      greenMax: 25,
+      redLowMax: null,
+      redHighMin: 40,
+      displayMin: "8 kPa",
+      displayMax: "25 kPa",
+      lowReason: "",
       highReason:
         lang === "en"
-          ? "Above 150: Water may be wasted and rot risk rises."
-          : "สูงกว่า 150: สิ้นเปลืองน้ำโดยเปล่าประโยชน์ และเสี่ยงเกิดโรครากเน่า",
+          ? "To keep water supply matched to the tree’s need during fruit development, avoiding water stress that shrivels fruit or excess water that causes root rot."
+          : "เพื่อควบคุมปริมาณน้ำให้พอดีกับความต้องการของต้นโตในช่วงติดผล ไม่ให้ต้นขาดน้ำจนลูกฝ่อหรือได้น้ำมากจนรากเน่า",
     };
   }
 
   return {
     label: sensorName || "Sensor",
-    min: null,
-    max: null,
+    greenMin: null,
+    greenMax: null,
+    redLowMax: null,
+    redHighMin: null,
     displayMin: "-",
     displayMax: "-",
     lowReason: "",
@@ -466,25 +476,35 @@ function getSensorStatusInfo(sensor = {}, sensorName = "", t, lang = "th") {
     };
   }
 
-  if (profile.min != null && latest < profile.min) {
+  const hasLowRed =
+    profile.redLowMax !== null &&
+    profile.redLowMax !== undefined &&
+    latest <= profile.redLowMax;
+
+  const hasHighRed =
+    profile.redHighMin !== null &&
+    profile.redHighMin !== undefined &&
+    latest >= profile.redHighMin;
+
+  if (hasLowRed) {
     return {
       latest,
       unit,
       profile,
       isOut: true,
       statusText: t.tooLow,
-      reasonText: profile.lowReason,
+      reasonText: profile.lowReason || t.outOfRange,
     };
   }
 
-  if (profile.max != null && latest > profile.max) {
+  if (hasHighRed) {
     return {
       latest,
       unit,
       profile,
       isOut: true,
       statusText: t.tooHigh,
-      reasonText: profile.highReason,
+      reasonText: profile.highReason || t.outOfRange,
     };
   }
 

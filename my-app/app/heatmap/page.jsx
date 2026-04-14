@@ -35,6 +35,10 @@ const Tooltip = dynamic(
   () => import("react-leaflet").then((m) => m.Tooltip),
   { ssr: false }
 );
+const SVGOverlay = dynamic(
+  () => import("react-leaflet").then((m) => m.SVGOverlay),
+  { ssr: false }
+);
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001";
 
@@ -1399,6 +1403,120 @@ function buildGlobalClimateCells(points, sensorKey, step = GLOBAL_GRID_STEP, cli
     .filter(Boolean);
 }
 
+function getPlotBounds(plot) {
+  return getBoundsFromCoords(Array.isArray(plot?.coords) ? plot.coords : []);
+}
+
+function normalizePointInBounds(lat, lng, bounds) {
+  if (!bounds) return { x: 0.5, y: 0.5 };
+
+  const width = Math.max(1e-9, bounds.maxLng - bounds.minLng);
+  const height = Math.max(1e-9, bounds.maxLat - bounds.minLat);
+
+  const x = clamp((Number(lng) - bounds.minLng) / width, 0, 1);
+  const y = clamp((bounds.maxLat - Number(lat)) / height, 0, 1);
+
+  return { x, y };
+}
+
+function getDistanceNormalized(a, b) {
+  const dx = Number(a?.x || 0) - Number(b?.x || 0);
+  const dy = Number(a?.y || 0) - Number(b?.y || 0);
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function buildPlotSvgOverlay(plot, points, sensorKey) {
+  const coords = Array.isArray(plot?.coords) ? plot.coords : [];
+  if (coords.length < 3) return null;
+
+  const plotBounds = getPlotBounds(plot);
+  if (!plotBounds) return null;
+
+  const insidePoints = (Array.isArray(points) ? points : []).filter((point) => {
+    if (point?.value == null || Number.isNaN(Number(point.value))) return false;
+    if (point?.lat == null || point?.lng == null) return false;
+    return pointInPolygon({ lat: point.lat, lng: point.lng }, coords);
+  });
+
+  if (!insidePoints.length) return null;
+
+  const polygonNorm = coords.map((coord) => normalizePointInBounds(coord.lat, coord.lng, plotBounds));
+  const avgValue = insidePoints.reduce((sum, point) => sum + Number(point.value || 0), 0) / insidePoints.length;
+  const baseColor = getHeatColor(sensorKey, avgValue);
+  const polygonPointsAttr = polygonNorm
+    .map((point) => `${(point.x * 1000).toFixed(2)},${(point.y * 1000).toFixed(2)}`)
+    .join(" ");
+
+  const gradients = [];
+  const circles = [];
+
+  insidePoints.forEach((point, index) => {
+    const center = normalizePointInBounds(point.lat, point.lng, plotBounds);
+    const farthestCorner = Math.max(
+      getDistanceNormalized(center, { x: 0, y: 0 }),
+      getDistanceNormalized(center, { x: 1, y: 0 }),
+      getDistanceNormalized(center, { x: 1, y: 1 }),
+      getDistanceNormalized(center, { x: 0, y: 1 })
+    );
+
+    const nearestEdge = Math.max(getDistanceToPolygonEdge({ lat: point.lat, lng: point.lng }, coords), 1e-6);
+    const boundsWidth = Math.max(1e-9, plotBounds.maxLng - plotBounds.minLng);
+    const boundsHeight = Math.max(1e-9, plotBounds.maxLat - plotBounds.minLat);
+    const nearestEdgeNorm = Math.max(nearestEdge / Math.max(boundsWidth, boundsHeight), 0.025);
+
+    const radius = clamp(Math.max(farthestCorner * 1.15, nearestEdgeNorm * 2.8, 0.42), 0.42, 1.35);
+    const valueRatio = getSensorRatio(sensorKey, point.value);
+    const nodeColor = getHeatColor(sensorKey, point.value);
+    const gradientId = `grad-${plot.id}-${index}`;
+    const cx = center.x.toFixed(4);
+    const cy = center.y.toFixed(4);
+    const r = radius.toFixed(4);
+    const coreOpacity = (0.82 + valueRatio * 0.16).toFixed(3);
+    const midOpacity = (0.36 + valueRatio * 0.14).toFixed(3);
+    const tailOpacity = (0.12 + valueRatio * 0.06).toFixed(3);
+
+    gradients.push(`
+      <radialGradient id="${gradientId}" cx="${cx}" cy="${cy}" r="${r}" fx="${cx}" fy="${cy}">
+        <stop offset="0%" stop-color="${nodeColor}" stop-opacity="${coreOpacity}" />
+        <stop offset="14%" stop-color="${nodeColor}" stop-opacity="${coreOpacity}" />
+        <stop offset="38%" stop-color="${nodeColor}" stop-opacity="${midOpacity}" />
+        <stop offset="72%" stop-color="${nodeColor}" stop-opacity="${tailOpacity}" />
+        <stop offset="100%" stop-color="${nodeColor}" stop-opacity="0.05" />
+      </radialGradient>`);
+
+    circles.push(`<rect x="0" y="0" width="1000" height="1000" fill="url(#${gradientId})" />`);
+  });
+
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" preserveAspectRatio="none">
+      <defs>
+        <clipPath id="clip-${plot.id}">
+          <polygon points="${polygonPointsAttr}" />
+        </clipPath>
+        <filter id="blur-${plot.id}" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="16" />
+        </filter>
+        ${gradients.join("\n")}
+      </defs>
+
+      <g clip-path="url(#clip-${plot.id})">
+        <rect x="0" y="0" width="1000" height="1000" fill="${baseColor}" opacity="0.12" />
+        <g filter="url(#blur-${plot.id})">
+          ${circles.join("\n")}
+        </g>
+      </g>
+    </svg>
+  `;
+
+  return {
+    bounds: [
+      [plotBounds.minLat, plotBounds.minLng],
+      [plotBounds.maxLat, plotBounds.maxLng],
+    ],
+    svg,
+  };
+}
+
 function FitToSelection({ polygons, selectedPlotId, lockToWorld }) {
   const map = useMap();
 
@@ -1925,8 +2043,17 @@ const plotHeatFills = useMemo(() => {
   return map;
 }, [visiblePlots, renderedPoints, selectedSensor]);
 
+const plotSvgOverlays = useMemo(() => {
+  return visiblePlots
+    .filter((plot) => Array.isArray(plot?.coords) && plot.coords.length >= 3)
+    .map((plot) => ({
+      plotId: plot.id,
+      overlay: buildPlotSvgOverlay(plot, renderedPoints, selectedSensor),
+    }))
+    .filter((item) => item.overlay);
+}, [visiblePlots, renderedPoints, selectedSensor]);
 
-  
+
 const stats = useMemo(() => {
   const values = renderedPoints
     .map((point) => point.value)
@@ -2226,6 +2353,16 @@ const stats = useMemo(() => {
                     lockToWorld={false}
                   />
 
+                  {plotSvgOverlays.map(({ plotId, overlay }) => (
+                    <SVGOverlay
+                      key={`plot-svg-${plotId}-${frameIndex}`}
+                      bounds={overlay.bounds}
+                      attributes={{ opacity: 1, pointerEvents: "none" }}
+                    >
+                      <g dangerouslySetInnerHTML={{ __html: overlay.svg.replace(/^<svg[^>]*>|<\/svg>$/g, "") }} />
+                    </SVGOverlay>
+                  ))}
+
                   {visiblePlots.filter((plot) => plot.coords.length >= 3).map((plot) => {
                     const fillStat = plotHeatFills[plot.id] || null;
                     const hasFill = !!fillStat?.hasData;
@@ -2239,7 +2376,7 @@ const stats = useMemo(() => {
                           weight: plot.id === selectedPlotId ? 4 : 3,
                           fill: true,
                           fillColor: hasFill ? fillStat.color : "#d1d5db",
-                          fillOpacity: hasFill ? fillStat.opacity : 0.08,
+                          fillOpacity: hasFill ? 0.03 : 0.04,
                         }}
                       >
                         <Tooltip sticky>

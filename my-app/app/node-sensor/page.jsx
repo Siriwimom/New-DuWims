@@ -89,6 +89,9 @@ function normalizeSensor(sensor = {}) {
   const uid = safeText(sensor.uid || sensor._id || "");
   const rawName = safeText(sensor.name || sensor.sensorType || uid || "Sensor");
   const sensorKey = canonicalizeSensorName(rawName, uid);
+  const defaultLimits = getDefaultSensorLimits(sensorKey, uid);
+  const rawMinValue = toNum(sensor.minValue);
+  const rawMaxValue = toNum(sensor.maxValue);
 
   return {
     _id: safeText(sensor._id || ""),
@@ -97,8 +100,14 @@ function normalizeSensor(sensor = {}) {
     rawName,
     sensorKey,
     status: safeText(sensor.status || "NO_DATA"),
-    minValue: toNum(sensor.minValue),
-    maxValue: toNum(sensor.maxValue),
+    minValue:
+      rawMinValue !== null && rawMinValue !== 0
+        ? rawMinValue
+        : defaultLimits.minValue,
+    maxValue:
+      rawMaxValue !== null && rawMaxValue !== 0
+        ? rawMaxValue
+        : defaultLimits.maxValue,
     latestValue: toNum(sensor.latestValue),
     latestTimestamp: safeText(sensor.latestTimestamp || ""),
   };
@@ -263,6 +272,32 @@ function formatStatus(status) {
   return String(status).toUpperCase() === "ACTIVE" ? "ON" : "OFF";
 }
 
+function getDefaultSensorLimits(name = "", uid = "") {
+  const key = canonicalizeSensorName(name, uid);
+
+  if (key === "temperature") return { minValue: 20, maxValue: 35 };
+  if (key === "humidity") return { minValue: 75, maxValue: 85 };
+  if (key === "wind_speed") return { minValue: 2, maxValue: 5 };
+  if (key === "light") return { minValue: 40000, maxValue: 60000 };
+  if (key === "rainfall") return { minValue: 4, maxValue: 8 };
+  if (key === "soil_moisture") return { minValue: 65, maxValue: 80 };
+  if (key === "n") return { minValue: 0.1, maxValue: 1.0 };
+  if (key === "p") return { minValue: 25, maxValue: 45 };
+  if (key === "k") return { minValue: 0.8, maxValue: 1.4 };
+  if (key === "water_availability") return { minValue: 8, maxValue: 25 };
+
+  return { minValue: null, maxValue: null };
+}
+
+function resolveDisplayLimitValue(sensor = {}, limitType = "min") {
+  const rawValue = limitType === "max" ? toNum(sensor?.maxValue) : toNum(sensor?.minValue);
+
+  if (rawValue !== null && rawValue !== 0) return rawValue;
+
+  const defaults = getDefaultSensorLimits(sensor?.sensorKey || sensor?.name || "", sensor?.uid || "");
+  return limitType === "max" ? defaults.maxValue : defaults.minValue;
+}
+
 function sensorPresetsByType(type) {
   if (type === "soil") {
     return [
@@ -311,8 +346,8 @@ function sensorPresetsByType(type) {
         rawName: "water_availability",
         sensorKey: "water_availability",
         uid: "soil-water",
-        minValue: 50,
-        maxValue: 90,
+        minValue: 8,
+        maxValue: 25,
         latestValue: 72,
         status: "OK",
       },
@@ -345,8 +380,8 @@ function sensorPresetsByType(type) {
       rawName: "wind_speed",
       sensorKey: "wind_speed",
       uid: "air-wind",
-      minValue: 1,
-      maxValue: 6,
+      minValue: 2,
+      maxValue: 5,
       latestValue: 3,
       status: "OK",
     },
@@ -355,8 +390,8 @@ function sensorPresetsByType(type) {
       rawName: "light",
       sensorKey: "light",
       uid: "air-light",
-      minValue: 15000,
-      maxValue: 70000,
+      minValue: 40000,
+      maxValue: 60000,
       latestValue: 50000,
       status: "OK",
     },
@@ -365,8 +400,8 @@ function sensorPresetsByType(type) {
       rawName: "rainfall",
       sensorKey: "rainfall",
       uid: "air-rain",
-      minValue: 3,
-      maxValue: 10,
+      minValue: 4,
+      maxValue: 8,
       latestValue: 5,
       status: "OK",
     },
@@ -384,7 +419,7 @@ function sensorUnit(name = "", uid = "") {
   if (key === "wind_speed") return "km/hr";
   if (key === "light") return "lux";
   if (key === "rainfall") return "mm";
-  if (key === "water_availability") return "%";
+  if (key === "water_availability") return "kPa";
   return "";
 }
 
@@ -814,8 +849,8 @@ function SensorTable({ sensors, t, lang, showLimits = false }) {
       <tbody>
         {sensors.map((sensor) => {
           const latest = sensor.latestValue;
-          const min = sensor.minValue;
-          const max = sensor.maxValue;
+          const min = resolveDisplayLimitValue(sensor, "min");
+          const max = resolveDisplayLimitValue(sensor, "max");
           const bad =
             Number.isFinite(latest) &&
             ((Number.isFinite(min) && latest < min) ||
@@ -2209,19 +2244,16 @@ export default function NodeSensorPage() {
                       </label>
 
                       {showSensorLimits ? (
-                        <button
-                          className="btn-sm btn-edit"
-                          type="button"
-                          onClick={() => setCanEditSensorLimit((v) => !v)}
-                        >
-                          {canEditSensorLimit
-                            ? lang === "en"
-                              ? "Close Max/Min edit"
-                              : "ปิดแก้ไข Max/Min"
-                            : lang === "en"
-                              ? "Edit Max/Min"
-                              : "แก้ไข Max/Min"}
-                        </button>
+                        <label className="limits-toggle-label">
+                          <input
+                            type="checkbox"
+                            checked={canEditSensorLimit}
+                            onChange={(e) => setCanEditSensorLimit(e.target.checked)}
+                          />
+                          <span>
+                            {lang === "en" ? "Edit Max/Min" : "แก้ไข Max/Min"}
+                          </span>
+                        </label>
                       ) : null}
                     </div>
                   </div>
@@ -2539,19 +2571,16 @@ export default function NodeSensorPage() {
                       </label>
 
                       {showSensorLimits ? (
-                        <button
-                          className="btn-sm btn-edit"
-                          type="button"
-                          onClick={() => setCanEditSensorLimit((v) => !v)}
-                        >
-                          {canEditSensorLimit
-                            ? lang === "en"
-                              ? "Close Max/Min edit"
-                              : "ปิดแก้ไข Max/Min"
-                            : lang === "en"
-                              ? "Edit Max/Min"
-                              : "แก้ไข Max/Min"}
-                        </button>
+                        <label className="limits-toggle-label">
+                          <input
+                            type="checkbox"
+                            checked={canEditSensorLimit}
+                            onChange={(e) => setCanEditSensorLimit(e.target.checked)}
+                          />
+                          <span>
+                            {lang === "en" ? "Edit Max/Min" : "แก้ไข Max/Min"}
+                          </span>
+                        </label>
                       ) : null}
                     </div>
                   </div>
@@ -2769,7 +2798,7 @@ export default function NodeSensorPage() {
     color: #33422d;
     padding: 0 12px;
     outline: none;
-    font-size: 15px;
+    font-size: 18px;
     transition: 0.18s ease;
   }
 
@@ -2808,7 +2837,7 @@ export default function NodeSensorPage() {
 
   .field-error-text {
     margin-top: 6px;
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 700;
     color: #d84343;
   }
@@ -2822,7 +2851,7 @@ export default function NodeSensorPage() {
     cursor: pointer;
     border-radius: 12px;
     font-weight: 800;
-    font-size: 15px;
+    font-size: 18px;
   }
 
   .create-btn {
@@ -2870,7 +2899,7 @@ export default function NodeSensorPage() {
     color: #4a5f43;
     cursor: pointer;
     border-radius: 14px;
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 800;
     line-height: 1.15;
     padding: 7px 13px;
@@ -2923,7 +2952,7 @@ export default function NodeSensorPage() {
     align-items: center;
     justify-content: center;
     color: #64715d;
-    font-size: 15px;
+    font-size: 18px;
   }
 
   .node-card {
@@ -3015,7 +3044,7 @@ export default function NodeSensorPage() {
   }
 
   .node-summary-value {
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 800;
     color: #ffffff;
     white-space: normal;
@@ -3070,7 +3099,7 @@ export default function NodeSensorPage() {
   }
 
   .accordion-arrow {
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 800;
     line-height: 1;
     color: #fff;
@@ -3105,7 +3134,7 @@ export default function NodeSensorPage() {
   .node-sensor-table .sensor-name-cell,
   .node-sensor-table .sensor-value-cell,
   .node-sensor-table .sensor-unit-text {
-    font-size: 16px !important;
+    font-size: 18px !important;
     line-height: 1.45 !important;
     font-family: inherit !important;
   }
@@ -3136,15 +3165,15 @@ export default function NodeSensorPage() {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    font-size: 15px;
+    font-size: 18px;
     font-weight: 800;
     color: #355e2d;
     cursor: pointer;
   }
 
   .limits-toggle-label input {
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     accent-color: #2e7d32;
     cursor: pointer;
   }
@@ -3158,15 +3187,15 @@ export default function NodeSensorPage() {
   }
 
   .limit-input {
-    width: 120px;
-    height: 42px;
+    width: 132px;
+    height: 46px;
     border-radius: 12px;
     border: 1px solid #cfe0c8;
     background: #fbfef9;
     color: #33422d;
     padding: 0 12px;
     outline: none;
-    font-size: 16px !important;
+    font-size: 18px !important;
     line-height: 1.35 !important;
     font-family: inherit !important;
   }
@@ -3214,7 +3243,7 @@ export default function NodeSensorPage() {
   }
 
   .confirm-sub {
-    font-size: 15px;
+    font-size: 18px;
     line-height: 1.75;
     color: #5d6e54;
     white-space: pre-line;
@@ -3300,14 +3329,14 @@ export default function NodeSensorPage() {
     }
 
     .confirm-sub {
-      font-size: 15px;
+      font-size: 18px;
       max-width: 320px;
     }
 
     .confirm-btn {
       min-width: 138px;
       min-height: 48px;
-      font-size: 15px;
+      font-size: 18px;
       border-radius: 14px;
     }
   }

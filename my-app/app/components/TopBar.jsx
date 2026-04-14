@@ -7,7 +7,7 @@ import { useDuwimsT } from "./language-context";
 
 const AUTH_KEYS = ["AUTH_TOKEN_V1", "token", "authToken", "pmtool_token", "duwims_token"];
 const UNSAVED_KEYS = ["DUWIMS_UNSAVED_PROFILE", "DUWIMS_UNSAVED_PASSWORD"];
-const PROFILE_NAME_KEY = "DUWIMS_PROFILE_NAME_LOCAL";
+const LEGACY_PROFILE_NAME_KEY = "DUWIMS_PROFILE_NAME_LOCAL";
 const PROFILE_UPDATED_EVENT = "duwims-profile-updated";
 
 function readToken() {
@@ -96,10 +96,38 @@ function clearUnsavedAccountChanges() {
   UNSAVED_KEYS.forEach((key) => window.sessionStorage.removeItem(key));
 }
 
-function readLocalName() {
+function getUserIdentity(user = {}) {
+  return String(
+    user?._id ||
+      user?.id ||
+      user?.uid ||
+      user?.userId ||
+      user?.email ||
+      user?.ownerUid ||
+      ""
+  ).trim();
+}
+
+function getProfileNameKeyByIdentity(identity) {
+  return identity
+    ? `DUWIMS_PROFILE_NAME_LOCAL_${identity}`
+    : LEGACY_PROFILE_NAME_KEY;
+}
+
+function readLegacyLocalName() {
   if (typeof window === "undefined") return "";
   try {
-    return window.localStorage.getItem(PROFILE_NAME_KEY) || "";
+    return window.localStorage.getItem(LEGACY_PROFILE_NAME_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function readScopedLocalName(identity) {
+  if (typeof window === "undefined") return "";
+  try {
+    const key = getProfileNameKeyByIdentity(identity);
+    return window.localStorage.getItem(key) || "";
   } catch {
     return "";
   }
@@ -143,8 +171,6 @@ export default function TopBar() {
   const syncAuth = async () => {
     try {
       const token = readToken();
-      const localName = readLocalName();
-
       setHasToken(!!token);
 
       if (token) {
@@ -161,8 +187,16 @@ export default function TopBar() {
           });
 
           const user = me?.user || {};
+          const identity = getUserIdentity(user);
+          const scopedLocalName = readScopedLocalName(identity);
+          const legacyLocalName = readLegacyLocalName();
+
           const backendName =
             user?.nickname ||
+            user?.displayName ||
+            user?.name ||
+            user?.fullName ||
+            user?.username ||
             payload?.nickname ||
             payload?.displayName ||
             payload?.name ||
@@ -170,7 +204,7 @@ export default function TopBar() {
             payload?.username ||
             "ผู้ใช้งาน";
 
-          const nextName = localName || backendName || "ผู้ใช้งาน";
+          const nextName = scopedLocalName || backendName || legacyLocalName || "ผู้ใช้งาน";
 
           setDisplayName(nextName);
           setEmail(user?.email || payload?.email || "user@example.com");
@@ -178,6 +212,19 @@ export default function TopBar() {
           setRole(String(user?.role || nextRole || "").toLowerCase());
           setOwnerUid(user?.ownerUid || payload?.ownerUid || "");
         } catch {
+          const payloadIdentity = String(
+            payload?._id ||
+              payload?.id ||
+              payload?.uid ||
+              payload?.userId ||
+              payload?.email ||
+              payload?.ownerUid ||
+              ""
+          ).trim();
+
+          const scopedLocalName = readScopedLocalName(payloadIdentity);
+          const legacyLocalName = readLegacyLocalName();
+
           const fallbackName =
             payload?.nickname ||
             payload?.displayName ||
@@ -186,7 +233,7 @@ export default function TopBar() {
             payload?.username ||
             "ผู้ใช้งาน";
 
-          const nextName = localName || fallbackName || "ผู้ใช้งาน";
+          const nextName = scopedLocalName || fallbackName || legacyLocalName || "ผู้ใช้งาน";
 
           setDisplayName(nextName);
           setEmail(payload?.email || "user@example.com");
@@ -203,7 +250,7 @@ export default function TopBar() {
     } catch {
       setHasToken(false);
       setRole("");
-      setDisplayName(readLocalName() || "ผู้ใช้งาน");
+      setDisplayName("ผู้ใช้งาน");
       setEmail("user@example.com");
       setProvider("local");
       setOwnerUid("");
