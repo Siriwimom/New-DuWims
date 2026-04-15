@@ -171,8 +171,6 @@ export default function AccountProfilePage() {
           user?.username ||
           "";
 
-        // ใช้ backend ก่อน แล้วค่อย fallback ไป local ของ user คนนี้
-        // ถ้ายังไม่มี local แบบแยก user ให้ลองดึงจาก key เก่าเพื่อ migrate
         const nextName = String(
           backendName || scopedLocalName || legacyLocalName || ""
         ).trim();
@@ -305,7 +303,6 @@ export default function AccountProfilePage() {
     setSaving(true);
 
     try {
-      // บันทึกเฉพาะของ account ที่ล็อกอินอยู่
       writeScopedLocalName(profileIdentity, nextName);
 
       setSavedName(nextName);
@@ -397,7 +394,7 @@ export default function AccountProfilePage() {
                 </div>
               </div>
 
-              <div className="action-row">
+              <div className="action-row centered-actions">
                 <button
                   type="button"
                   className="save-btn"
@@ -444,7 +441,7 @@ export default function AccountProfilePage() {
                 </div>
               </div>
 
-              <div className="action-row">
+              <div className="action-row centered-actions">
                 <button
                   type="button"
                   className="save-btn"
@@ -526,7 +523,7 @@ export default function AccountProfilePage() {
           background: #fff;
           border: 1px solid #d9e2d7;
           border-radius: 26px;
-          padding: 28px 30px 30px;
+          padding: 28px 42px 34px;
           box-shadow: 0 10px 28px rgba(0, 0, 0, 0.06);
         }
 
@@ -597,7 +594,8 @@ export default function AccountProfilePage() {
         .content-wrap {
           display: flex;
           flex-direction: column;
-          gap: 20px;
+          gap: 24px;
+          width: 100%;
         }
 
         .empty-note-card,
@@ -629,6 +627,7 @@ export default function AccountProfilePage() {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 18px;
+          width: 100%;
         }
 
         .one-col {
@@ -638,7 +637,9 @@ export default function AccountProfilePage() {
         .field {
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 10px;
+          width: 100%;
+          max-width: 100%;
         }
 
         .label {
@@ -653,31 +654,45 @@ export default function AccountProfilePage() {
 
         .input {
           width: 100%;
-          height: 54px;
-          border-radius: 14px;
+          min-width: 0;
+          height: 76px;
+          border-radius: 20px;
           border: 1px solid #cdd9ca;
-          padding: 0 16px;
-          font-size: 16px;
-          font-weight: 600;
+          padding: 0 22px;
+          font-size: 20px;
+          font-weight: 700;
           outline: none;
           background: #fff;
+          box-sizing: border-box;
+        }
+
+        .input::placeholder {
+          color: #8a9688;
+          font-weight: 600;
         }
 
         .action-row {
           display: flex;
-          gap: 12px;
+          gap: 16px;
           flex-wrap: wrap;
+        }
+
+        .centered-actions {
+          justify-content: center;
+          align-items: center;
+          width: 100%;
+          margin-top: 4px;
         }
 
         .save-btn,
         .delete-btn,
         .cancel-btn {
           border: 0;
-          min-width: 120px;
-          height: 50px;
-          border-radius: 14px;
-          padding: 0 18px;
-          font-size: 16px;
+          min-width: 168px;
+          height: 58px;
+          border-radius: 18px;
+          padding: 0 24px;
+          font-size: 18px;
           font-weight: 800;
           cursor: pointer;
         }
@@ -801,6 +816,20 @@ export default function AccountProfilePage() {
 
           .page-card {
             padding: 22px 18px 24px;
+          }
+
+          .input {
+            height: 64px;
+            font-size: 18px;
+            border-radius: 16px;
+            padding: 0 18px;
+          }
+
+          .save-btn,
+          .cancel-btn,
+          .delete-btn {
+            min-width: 140px;
+            height: 54px;
           }
         }
       `}</style>

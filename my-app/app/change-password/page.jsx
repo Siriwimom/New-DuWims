@@ -76,8 +76,8 @@ export default function ChangePasswordPage() {
   const dirty = useMemo(() => {
     return Boolean(
       currentPassword.trim() ||
-      newPassword.trim() ||
-      confirmPassword.trim()
+        newPassword.trim() ||
+        confirmPassword.trim()
     );
   }, [currentPassword, newPassword, confirmPassword]);
 
@@ -291,7 +291,7 @@ export default function ChangePasswordPage() {
                   <label className="label">รหัสผ่านปัจจุบัน</label>
                   <div className="password-wrap">
                     <input
-                      className="input password-input"
+                      className="input"
                       type={showCurrentPassword ? "text" : "password"}
                       value={currentPassword}
                       onChange={(e) => setCurrentPassword(e.target.value)}
@@ -313,7 +313,7 @@ export default function ChangePasswordPage() {
                   <label className="label">รหัสผ่านใหม่</label>
                   <div className="password-wrap">
                     <input
-                      className="input password-input"
+                      className="input"
                       type={showNewPassword ? "text" : "password"}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
@@ -335,7 +335,7 @@ export default function ChangePasswordPage() {
                   <label className="label">ยืนยันรหัสผ่านใหม่</label>
                   <div className="password-wrap">
                     <input
-                      className="input password-input"
+                      className="input"
                       type={showConfirmPassword ? "text" : "password"}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
@@ -370,7 +370,7 @@ export default function ChangePasswordPage() {
                   onClick={resetForm}
                   disabled={saving}
                 >
-                  ล้างค่า
+                  ยกเลิก
                 </button>
               </div>
             </div>
@@ -429,12 +429,12 @@ export default function ChangePasswordPage() {
         }
 
         .page-card {
-          max-width: 980px;
+          max-width: 1420px;
           margin: 0 auto;
           background: #fff;
           border: 1px solid #d9e2d7;
           border-radius: 26px;
-          padding: 28px 30px 30px;
+          padding: 28px 40px 30px;
           box-shadow: 0 10px 28px rgba(0, 0, 0, 0.06);
         }
 
@@ -491,12 +491,12 @@ export default function ChangePasswordPage() {
         }
 
         .content-wrap {
-          max-width: 760px;
+          width: 100%;
         }
 
         .form-grid {
           display: grid;
-          gap: 22px;
+          gap: 28px;
         }
 
         .field {
@@ -511,24 +511,25 @@ export default function ChangePasswordPage() {
         }
 
         .password-wrap {
-          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          width: 100%;
         }
 
         .input {
+          flex: 1;
           width: 100%;
           height: 66px;
           border: 1px solid #cdd7ca;
           border-radius: 18px;
-          padding: 0 18px;
+          padding: 0 22px;
           font-size: 18px;
           color: #111;
           outline: none;
           background: #fff;
           transition: border-color 0.15s ease, box-shadow 0.15s ease;
-        }
-
-        .password-input {
-          padding-right: 108px;
+          min-width: 0;
         }
 
         .input::placeholder {
@@ -546,19 +547,20 @@ export default function ChangePasswordPage() {
         }
 
         .show-btn {
-          position: absolute;
-          top: 50%;
-          right: 10px;
-          transform: translateY(-50%);
+          flex: 0 0 124px;
+          width: 124px;
+          height: 56px;
           border: 0;
-          height: 42px;
-          min-width: 88px;
-          border-radius: 12px;
+          border-radius: 16px;
           background: #edf4ed;
           color: #6f8d6e;
-          font-size: 16px;
+          font-size: 17px;
           font-weight: 800;
           cursor: pointer;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          margin-left: auto;
         }
 
         .show-btn:disabled {
@@ -568,21 +570,23 @@ export default function ChangePasswordPage() {
 
         .action-row {
           display: flex;
-          gap: 12px;
+          gap: 16px;
           flex-wrap: wrap;
-          margin-top: 30px;
+          justify-content: center;
+          align-items: center;
+          margin-top: 40px;
         }
 
         .save-btn,
         .cancel-btn {
           border: 0;
-          min-width: 140px;
-          height: 54px;
-          border-radius: 16px;
-          font-size: 18px;
+          min-width: 196px;
+          height: 58px;
+          border-radius: 18px;
+          font-size: 20px;
           font-weight: 800;
           cursor: pointer;
-          padding: 0 22px;
+          padding: 0 26px;
         }
 
         .save-btn {
@@ -729,29 +733,30 @@ export default function ChangePasswordPage() {
             font-size: 16px;
           }
 
+          .password-wrap {
+            gap: 10px;
+          }
+
           .input {
             height: 58px;
             font-size: 17px;
             border-radius: 14px;
-          }
-
-          .password-input {
-            padding-right: 92px;
+            padding: 0 16px;
           }
 
           .show-btn {
-            min-width: 76px;
-            height: 38px;
+            flex: 0 0 88px;
+            width: 88px;
+            height: 46px;
             font-size: 15px;
-            border-radius: 10px;
+            border-radius: 12px;
           }
 
           .save-btn,
           .cancel-btn {
-            width: 100%;
-            min-width: 0;
-            height: 48px;
-            font-size: 16px;
+            min-width: 140px;
+            height: 50px;
+            font-size: 17px;
           }
         }
       `}</style>

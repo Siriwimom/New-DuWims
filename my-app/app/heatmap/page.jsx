@@ -189,6 +189,8 @@ const SENSOR_META = {
     unit: "°C",
     min: 20,
     max: 35,
+    normalMin: 20,
+    normalMax: 35,
   },
   humidity: {
     labelTh: "ความชื้นสัมพัทธ์",
@@ -196,27 +198,38 @@ const SENSOR_META = {
     unit: "%",
     min: 75,
     max: 85,
+    normalMin: 75,
+    normalMax: 85,
   },
   wind_speed: {
     labelTh: "ความเร็วลม",
     labelEn: "Wind Speed",
-    unit: "m/s",
-    min: 0.56,
-    max: 1.39,
+    unit: "km/h",
+    min: 2,
+    max: 5,
+    normalMin: 2,
+    normalMax: 5,
+    abnormalHigh: 6,
   },
   light: {
     labelTh: "ความเข้มแสง",
     labelEn: "Light Intensity",
-    unit: "lux",
+    unit: "Lux",
     min: 40000,
     max: 60000,
+    normalMin: 40000,
+    normalMax: 60000,
+    abnormalHigh: 70000,
   },
   rain: {
-    labelTh: "ปริมาณน้ำฝน",
-    labelEn: "Rainfall",
-    unit: "mm",
+    labelTh: "ปริมาณน้ำฝนรายวัน",
+    labelEn: "Daily Rainfall",
+    unit: "mm/day",
     min: 4,
     max: 8,
+    normalMin: 4,
+    normalMax: 8,
+    abnormalHigh: 10,
   },
   soil_moisture: {
     labelTh: "ความชื้นดิน",
@@ -224,6 +237,8 @@ const SENSOR_META = {
     unit: "%",
     min: 65,
     max: 80,
+    normalMin: 65,
+    normalMax: 80,
   },
   n: {
     labelTh: "N",
@@ -231,6 +246,8 @@ const SENSOR_META = {
     unit: "%",
     min: 0.1,
     max: 1.0,
+    normalMin: 0.1,
+    normalMax: 1.0,
   },
   p: {
     labelTh: "P",
@@ -238,6 +255,8 @@ const SENSOR_META = {
     unit: "ppm",
     min: 25,
     max: 45,
+    normalMin: 25,
+    normalMax: 45,
   },
   k: {
     labelTh: "K",
@@ -245,13 +264,19 @@ const SENSOR_META = {
     unit: "cmol/kg",
     min: 0.8,
     max: 1.4,
+    normalMin: 0.8,
+    normalMax: 1.4,
   },
   water_level: {
-    labelTh: "ความพร้อมใช้น้ำ",
-    labelEn: "Water Availability",
-    unit: "%",
-    min: 50,
-    max: 90,
+    labelTh: "การให้น้ำ / ความพร้อมใช้น้ำ",
+    labelEn: "Irrigation / Water Availability",
+    unit: "kPa",
+    min: 10,
+    max: 25,
+    normalMin: 10,
+    normalMax: 25,
+    abnormalLow: 8,
+    abnormalHigh: 40,
   },
 };
 
@@ -493,7 +518,10 @@ function normalizeSensorName(name) {
     "ความชื้นดิน": "soil_moisture",
 
     water_level: "water_level",
+    water_availability: "water_level",
     "water availability": "water_level",
+    "water potential": "water_level",
+    "water level": "water_level",
     "ความพร้อมใช้น้ำ": "water_level",
     "การให้น้ำ / ความพร้อมใช้น้ำ": "water_level",
 
@@ -524,10 +552,31 @@ function lerpColor(hexA, hexB, t) {
   return `rgb(${rr}, ${rg}, ${rb})`;
 }
 
-function getSensorRatio(sensorKey, value) {
+function getSensorThresholds(sensorKey) {
   const meta = SENSOR_META[sensorKey] || {};
-  const min = toNum(meta.min);
-  const max = toNum(meta.max);
+
+  const scaleMin = toNum(meta.min);
+  const scaleMax = toNum(meta.max);
+  const normalMin = toNum(meta.normalMin ?? meta.min);
+  const normalMax = toNum(meta.normalMax ?? meta.max);
+  const abnormalLow = toNum(meta.abnormalLow);
+  const abnormalHigh = toNum(meta.abnormalHigh);
+
+  return {
+    ...meta,
+    scaleMin,
+    scaleMax,
+    normalMin,
+    normalMax,
+    abnormalLow,
+    abnormalHigh,
+  };
+}
+
+function getSensorRatio(sensorKey, value) {
+  const meta = getSensorThresholds(sensorKey);
+  const min = meta.scaleMin;
+  const max = meta.scaleMax;
 
   if (value == null || min == null || max == null || max <= min) return 0.5;
   return clamp((value - min) / (max - min), 0, 1);
@@ -543,6 +592,30 @@ function getHeatColorByRatio(ratio) {
 }
 
 function getHeatColor(sensorKey, value) {
+  if (value == null || Number.isNaN(Number(value))) return "#9ca3af";
+
+  const meta = getSensorThresholds(sensorKey);
+  const normalMin = meta.normalMin;
+  const normalMax = meta.normalMax;
+  const abnormalLow = meta.abnormalLow;
+  const abnormalHigh = meta.abnormalHigh;
+
+  if (normalMin != null && value < normalMin) {
+    if (abnormalLow != null && abnormalLow < normalMin) {
+      const lowRatio = clamp((value - abnormalLow) / (normalMin - abnormalLow), 0, 1);
+      return lerpColor("#1e3a8a", "#2563eb", lowRatio);
+    }
+    return getHeatColorByRatio(0);
+  }
+
+  if (normalMax != null && value > normalMax) {
+    if (abnormalHigh != null && abnormalHigh > normalMax) {
+      const highRatio = clamp((value - normalMax) / (abnormalHigh - normalMax), 0, 1);
+      return lerpColor("#f97316", "#7f1d1d", highRatio);
+    }
+    return getHeatColorByRatio(1);
+  }
+
   return getHeatColorByRatio(getSensorRatio(sensorKey, value));
 }
 
@@ -574,22 +647,33 @@ function getContrastText(color) {
 }
 
 function getSensorStatus(sensorKey, value) {
-  const meta = SENSOR_META[sensorKey] || {};
-  const min = toNum(meta.min);
-  const max = toNum(meta.max);
+  const meta = getSensorThresholds(sensorKey);
+  const lowThreshold = meta.abnormalLow ?? meta.normalMin;
+  const highThreshold = meta.abnormalHigh ?? meta.normalMax;
 
   if (value == null || Number.isNaN(value)) {
     return { type: "none", label: "ไม่มีข้อมูล" };
   }
-  if (min != null && value < min) {
+  if (lowThreshold != null && value < lowThreshold) {
     return { type: "low", label: "ต่ำกว่าช่วง" };
   }
-  if (max != null && value > max) {
+  if (meta.abnormalHigh != null) {
+    if (value >= meta.abnormalHigh) {
+      return { type: "high", label: "สูงกว่าช่วง" };
+    }
+  } else if (highThreshold != null && value > highThreshold) {
     return { type: "high", label: "สูงกว่าช่วง" };
   }
   return { type: "normal", label: "อยู่ในช่วง" };
 }
 
+function getReferenceRange(sensorKey) {
+  const meta = getSensorThresholds(sensorKey);
+  return {
+    min: meta.normalMin,
+    max: meta.normalMax,
+  };
+}
 
 function formatLegendValue(value) {
   if (value == null || Number.isNaN(Number(value))) return "-";
@@ -601,9 +685,9 @@ function formatLegendValue(value) {
 }
 
 function getLegendStops(sensorKey) {
-  const meta = SENSOR_META[sensorKey] || {};
-  const min = toNum(meta.min);
-  const max = toNum(meta.max);
+  const meta = getSensorThresholds(sensorKey);
+  const min = meta.scaleMin;
+  const max = meta.scaleMax;
   if (min == null || max == null || max <= min) return [];
   const segments = 4;
   return Array.from({ length: segments + 1 }, (_, i) => {
@@ -2127,7 +2211,8 @@ const stats = useMemo(() => {
     };
   }, [playing, framesKey, frameCount, isGlobalSensor, selectedSensor, selectedPlotId, tt]);
 
-  const sensorMeta = SENSOR_META[selectedSensor] || SENSOR_META.soil_moisture;
+  const sensorMeta = getSensorThresholds(selectedSensor) || getSensorThresholds("soil_moisture");
+  const referenceRange = getReferenceRange(selectedSensor);
 
   const legendStops = useMemo(() => getLegendStops(selectedSensor), [selectedSensor]);
 
@@ -2469,7 +2554,7 @@ const stats = useMemo(() => {
                     ))}
                   </div>
                   <div className="map-scale-range-note map-scale-range-note-overlay">
-                    ช่วงอ้างอิง: {formatLegendValue(sensorMeta.min)} - {formatLegendValue(sensorMeta.max)} {sensorMeta.unit || ""}
+                    ช่วงอ้างอิง: {formatLegendValue(referenceRange.min)} - {formatLegendValue(referenceRange.max)} {sensorMeta.unit || ""}
                   </div>
                 </div>
               )}

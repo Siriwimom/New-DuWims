@@ -2734,7 +2734,7 @@ export default function NodeSensorPage() {
           <div className="locate-global-status">{locateStatus}</div>
         ) : null}
 
-<style jsx>{`
+<style jsx global>{`
   :root {
     --soil: #254f17;
     --card: #ffffff;
@@ -3129,36 +3129,55 @@ export default function NodeSensorPage() {
     table-layout: auto;
   }
 
-  .node-sensor-table th,
-  .node-sensor-table td,
-  .node-sensor-table .sensor-name-cell,
-  .node-sensor-table .sensor-value-cell,
-  .node-sensor-table .sensor-unit-text {
-    font-size: 18px !important;
-    line-height: 1.45 !important;
-    font-family: inherit !important;
+  .node-sensor-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
   }
 
   .node-sensor-table th {
     text-align: left;
     background: #eef5ea;
     color: #667a60;
-    font-weight: 800;
-    padding: 12px 12px;
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    line-height: 1.4 !important;
+    padding: 8px 10px !important;
     white-space: nowrap;
+    font-family: inherit !important;
   }
 
   .node-sensor-table td {
     border-top: 1px solid #edf3ea;
-    padding: 12px 12px;
+    font-size: 16px !important;
+    line-height: 1.4 !important;
+    padding: 9px 10px !important;
     vertical-align: middle;
     white-space: nowrap;
+    font-family: inherit !important;
   }
 
-  .sensor-name-cell,
-  .sensor-value-cell,
-  .sensor-unit-text {
+  .node-sensor-table .sensor-name-cell {
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    line-height: 1.4 !important;
     white-space: nowrap;
+    font-family: inherit !important;
+  }
+
+  .node-sensor-table .sensor-value-cell {
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    line-height: 1.4 !important;
+    white-space: nowrap;
+    font-family: inherit !important;
+  }
+
+  .node-sensor-table .sensor-unit-text {
+    font-size: 14px !important;
+    line-height: 1.3 !important;
+    white-space: nowrap;
+    font-family: inherit !important;
   }
 
   .limits-toggle-label {

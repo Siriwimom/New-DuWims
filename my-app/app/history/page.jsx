@@ -15,6 +15,17 @@ const AUTH_KEYS = [
   "duwims_token",
 ];
 
+const PLOT_COLORS = [
+  "#3b82f6",
+  "#22c55e",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#06b6d4",
+  "#84cc16",
+  "#f97316",
+];
+
 const SENSOR_OPTIONS = [
   { key: "temp", labelKey: "temperature", unit: "°C", nodeType: "air" },
   { key: "rh", labelKey: "relativeHumidity", unit: "%", nodeType: "air" },
@@ -182,11 +193,18 @@ function canonicalSensorKey(name = "") {
   }
 
   if (
+    key.includes("water_availability") ||
+    key.includes("water availability") ||
+    key.includes("water_potential") ||
+    key.includes("water potential") ||
     key.includes("water_level") ||
     key.includes("water level") ||
+    key.includes("waterlevel") ||
+    key.includes("wateravailability") ||
     key.includes("irrigation") ||
     key.includes("ให้น้ำ") ||
-    key.includes("ความพร้อมใช้น้ำ")
+    key.includes("ความพร้อมใช้น้ำ") ||
+    key.includes("water")
   ) {
     return "water";
   }
@@ -265,7 +283,16 @@ function pickValueForSensorKey(item, sensorKey) {
     light: ["light", "lux", "lightIntensity", "light_intensity"],
     rain: ["rain", "rainfall"],
     soil: ["soil", "soilMoisture", "soil_moisture", "moisture"],
-    water: ["water", "waterLevel", "water_level", "irrigation"],
+    water: [
+      "water",
+      "waterLevel",
+      "water_level",
+      "waterAvailability",
+      "water_availability",
+      "waterPotential",
+      "water_potential",
+      "irrigation",
+    ],
     n: ["n", "N", "nitrogen"],
     p: ["p", "P", "phosphorus"],
     k: ["k", "K", "potassium"],
@@ -328,7 +355,16 @@ function pickValueForSensorKey(item, sensorKey) {
     }
 
     if (sensorKey === "water") {
-      const v = getObjectValueByAliases(source, ["water", "waterLevel", "water_level", "irrigation"]);
+      const v = getObjectValueByAliases(source, [
+        "water",
+        "waterLevel",
+        "water_level",
+        "waterAvailability",
+        "water_availability",
+        "waterPotential",
+        "water_potential",
+        "irrigation",
+      ]);
       if (v !== null) return v;
     }
 
@@ -1175,18 +1211,6 @@ export default function HistoryPage() {
     });
   }, [activeSensorKeys, axisSensorOrder, sensorMinMax, t]);
 
-  const sensorColorLegend = useMemo(() => {
-    return selectedSensors.map((key) => {
-      const item = sensorOptionsI18n.find((s) => s.key === key);
-      return {
-        key,
-        label: item?.label || key,
-        unit: item?.unit || sensorUnitFromKey(key),
-        color: colorOfSensorKey(key),
-      };
-    });
-  }, [selectedSensors, sensorOptionsI18n]);
-
   const chartSeriesLegend = useMemo(() => {
     return visibleChartSeries.map((item, idx) => ({
       key: item.key,
@@ -1198,8 +1222,9 @@ export default function HistoryPage() {
       unit: item.unit,
       dash: dashedByIndex(idx),
       points: item.values.filter((v) => Number.isFinite(v)).length,
+      plotColor: (PLOT_COLORS[((selectedPlotIds.indexOf(item.plotId) >= 0 ? selectedPlotIds.indexOf(item.plotId) : idx) % PLOT_COLORS.length)] || "#94a3b8"),
     }));
-  }, [visibleChartSeries]);
+  }, [visibleChartSeries, selectedPlotIds]);
 
   const selectedSensorCount = selectedSensors.length;
   const visibleSensorCount = useMemo(
@@ -1365,7 +1390,7 @@ export default function HistoryPage() {
       chart: {
         id: "h2MainHistoryChart",
         type: chartType,
-        height: 355,
+        height: 400,
         fontFamily: "Sarabun, sans-serif",
         toolbar: {
           show: true,
@@ -1385,7 +1410,8 @@ export default function HistoryPage() {
       },
       stroke: {
         curve: "smooth",
-        width: chartType === "bar" ? 0 : 2.8,
+        lineCap: "round",
+        width: chartType === "bar" ? 0 : 3.5,
         dashArray: apexSeries.map((s) => s.dashArray || 0),
       },
       fill: {
@@ -1449,8 +1475,9 @@ export default function HistoryPage() {
       },
       markers: {
         size: chartType === "bar" ? 0 : 0,
+        strokeWidth: chartType === "bar" ? 0 : 2,
         hover: {
-          sizeOffset: 3,
+          sizeOffset: 4,
         },
       },
       plotOptions: {
@@ -1779,7 +1806,7 @@ export default function HistoryPage() {
                 <div className="chart-wrap chart-wrap-apex">
                   <ReactApexChart
                     type={chartType}
-                    height={420}
+                    height={440}
                     series={apexSeries}
                     options={mainChartOptions}
                   />
@@ -1794,13 +1821,19 @@ export default function HistoryPage() {
                   <div className="chart-right-legend-list">
                     {chartSeriesLegend.map((item) => (
                       <div key={item.key} className="chart-right-legend-item" title={`${item.label} (${item.unit})`}>
-                        <span
-                          className="chart-series-line"
-                          style={{
-                            background: item.color,
-                            borderTopStyle: item.dash ? "dashed" : "solid",
-                          }}
-                        />
+                        <div className="chart-right-legend-visual">
+                          <span
+                            className="chart-series-line"
+                            style={{
+                              color: item.color,
+                              borderTopStyle: item.dash ? "dashed" : "solid",
+                            }}
+                          />
+                          <span
+                            className="chart-series-dot"
+                            style={{ background: item.color, boxShadow: `0 0 0 3px ${item.plotColor}22` }}
+                          />
+                        </div>
                         <div className="chart-right-legend-texts">
                           <div className="chart-right-legend-main">{item.sensorLabel}</div>
                           <div className="chart-right-legend-sub">{item.plotName} · {item.nodeName}</div>
@@ -1826,30 +1859,7 @@ export default function HistoryPage() {
               />
             </div>
 
-            {sensorColorLegend.length ? (
-              <div className="sensor-color-legend-card">
-                <div className="sensor-color-legend-title">
-                  🎨 {lang === "en" ? "Color mapping" : "สีของแต่ละเซนเซอร์"}
-                </div>
 
-                <div className="sensor-color-legend-grid">
-                  {sensorColorLegend.map((item) => (
-                    <div key={item.key} className="sensor-color-chip">
-                      <span className="sensor-color-dot" style={{ background: item.color }} />
-                      <span className="sensor-color-text">
-                        {item.label} <span className="sensor-color-unit">({item.unit})</span>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="sensor-color-legend-note">
-                  {lang === "en"
-                    ? "Each sensor type uses one fixed color. Different nodes/plots are separated by label and line pattern."
-                    : "เซนเซอร์ชนิดเดียวกันจะใช้สีเดียวกัน ส่วนแต่ละ node/แปลง จะแยกด้วยชื่อและลายเส้น"}
-                </div>
-              </div>
-            ) : null}
           </div>
         ) : (
           !loadingPlots &&
@@ -2309,12 +2319,21 @@ export default function HistoryPage() {
           .chart-right-legend-item {
             display: flex;
             align-items: flex-start;
-            gap: 10px;
+            gap: 12px;
             min-width: 0;
             background: #ffffff;
             border: 1px solid #e4ede0;
             border-radius: 14px;
             padding: 10px 12px;
+          }
+
+          .chart-right-legend-visual {
+            position: relative;
+            width: 34px;
+            min-width: 34px;
+            height: 16px;
+            display: flex;
+            align-items: center;
           }
 
           .chart-right-legend-texts {
@@ -2359,12 +2378,24 @@ export default function HistoryPage() {
           }
 
           .chart-series-line {
-            width: 28px;
-            min-width: 28px;
+            width: 30px;
+            min-width: 30px;
             height: 0;
-            border-top-width: 4px;
+            border-top-width: 3.5px;
             border-top-color: currentColor;
             border-top-style: solid;
+            border-radius: 999px;
+          }
+
+          .chart-series-dot {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            border: 2px solid #ffffff;
           }
 
           .chart-series-label {
@@ -2407,64 +2438,6 @@ export default function HistoryPage() {
             margin-bottom: 8px;
             font-size: 13px;
             font-weight: 800;
-            color: #64748b;
-          }
-
-          .sensor-color-legend-card {
-            margin-top: 14px;
-            background: #f8fbf7;
-            border: 1px solid #e4ede0;
-            border-radius: 18px;
-            padding: 14px;
-          }
-
-          .sensor-color-legend-title {
-            font-size: 15px;
-            font-weight: 900;
-            color: #244f15;
-            margin-bottom: 10px;
-          }
-
-          .sensor-color-legend-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
-          }
-
-          .sensor-color-chip {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            border: 1px solid #edf2f7;
-            background: #fff;
-            border-radius: 12px;
-            padding: 10px 12px;
-          }
-
-          .sensor-color-dot {
-            width: 14px;
-            height: 14px;
-            border-radius: 999px;
-            flex: 0 0 auto;
-            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9) inset;
-          }
-
-          .sensor-color-text {
-            font-size: 13px;
-            font-weight: 800;
-            color: #0f172a;
-            line-height: 1.2;
-          }
-
-          .sensor-color-unit {
-            color: #64748b;
-            font-weight: 900;
-          }
-
-          .sensor-color-legend-note {
-            margin-top: 10px;
-            font-size: 12px;
-            font-weight: 700;
             color: #64748b;
           }
 
@@ -2533,10 +2506,6 @@ export default function HistoryPage() {
             .sensor-dd-grid {
               grid-template-columns: 1fr;
             }
-
-            .sensor-color-legend-grid {
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
           }
 
           @media (max-width: 640px) {
@@ -2550,10 +2519,6 @@ export default function HistoryPage() {
 
             .h2-chart-topbar {
               gap: 10px;
-            }
-
-            .sensor-color-legend-grid {
-              grid-template-columns: 1fr;
             }
           }
         `}</style>

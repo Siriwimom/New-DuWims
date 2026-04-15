@@ -508,6 +508,11 @@ export default function App() {
       <style>{css}</style>
 
       <div className="panel">
+        <div className="brandWrap">
+          <div className="brandText">DOEMS</div>
+          <div className="brandSub">(Durian Orchard Environmental Monitoring System)</div>
+        </div>
+
         <h1>{title}</h1>
 
         {err && <div className="err">{err}</div>}
@@ -903,7 +908,30 @@ html,body{ height:100%; margin:0; font-family: system-ui, -apple-system, Segoe U
   padding:28px 16px;
   background: linear-gradient(135deg, var(--bg1), var(--bg2));
 }
-.panel{ width:min(720px, 94vw); text-align:center; }
+.panel{
+  width:min(720px, 94vw);
+  text-align:center;
+}
+
+.brandWrap{
+  margin:0 0 20px;
+  text-align:center;
+}
+.brandText{
+  color:#fff;
+  font-size:64px;
+  line-height:1;
+  font-weight:900;
+  letter-spacing:8px;
+  text-shadow:0 2px 12px rgba(0,0,0,.15);
+}
+.brandSub{
+  margin-top:12px;
+  color:rgba(255,255,255,.82);
+  font-size:15px;
+  font-weight:800;
+  letter-spacing:2px;
+}
 
 .checkboxRow{ width:min(540px, 94vw); margin:8px auto 10px; text-align:left; }
 .check{ display:flex; align-items:center; gap:10px; color:rgba(255,255,255,.85); font-size:13px; font-weight:700; }
@@ -911,7 +939,7 @@ html,body{ height:100%; margin:0; font-family: system-ui, -apple-system, Segoe U
 
 h1{
   color:#fff;
-  font-size:56px;
+  font-size:38px;
   margin:0 0 18px;
   text-shadow:0 2px 12px rgba(0,0,0,.15);
 }
@@ -978,7 +1006,7 @@ h1{
   color:#ffffff;
 }
 .btn{
-  width:min(400px, 94vw);
+  width:min(540px, 94vw);
   height:46px;
   border-radius:22px;
   border:2px solid rgba(0,0,0,.25);
@@ -1141,6 +1169,8 @@ h1{
 .modalDesc{ margin-top:6px; opacity:.7; font-size:12px; }
 
 @media (max-width: 640px){
+  .brandText{ font-size:42px; letter-spacing:4px; }
+  .brandSub{ font-size:11px; letter-spacing:1px; }
   h1{ font-size:36px; }
   .row{ flex-wrap:wrap; justify-content:center; }
 }
