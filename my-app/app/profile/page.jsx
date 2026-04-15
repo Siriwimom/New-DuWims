@@ -303,32 +303,55 @@ export default function AccountProfilePage() {
     setSaving(true);
 
     try {
-      writeScopedLocalName(profileIdentity, nextName);
+      const result = await requestJson(`${apiBase}/auth/update-profile`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          nickname: nextName,
+        }),
+      });
 
-      setSavedName(nextName);
-      setDraftName(nextName);
+      const updatedUser = result?.user || {};
+      const confirmedName = String(
+        updatedUser?.nickname ||
+          updatedUser?.displayName ||
+          updatedUser?.name ||
+          nextName
+      ).trim();
+      const nextIdentity = getUserIdentity(updatedUser) || profileIdentity;
+
+      if (result?.token) {
+        writeTokenToAllKeys(result.token);
+      }
+
+      writeScopedLocalName(nextIdentity, confirmedName);
+      if (
+        typeof window !== "undefined" &&
+        profileIdentity &&
+        nextIdentity &&
+        profileIdentity !== nextIdentity
+      ) {
+        try {
+          window.localStorage.removeItem(getProfileNameKeyByIdentity(profileIdentity));
+        } catch {}
+      }
+
+      setProfileIdentity(nextIdentity);
+      setSavedName(confirmedName);
+      setDraftName(confirmedName);
       setEditMode(false);
 
       if (typeof window !== "undefined") {
         sessionStorage.removeItem(DIRTY_KEY);
+        window.dispatchEvent(
+          new CustomEvent("duwims-profile-updated", {
+            detail: { name: confirmedName, identity: nextIdentity },
+          })
+        );
       }
-
-      try {
-        const result = await requestJson(`${apiBase}/auth/update-profile`, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            nickname: nextName,
-          }),
-        });
-
-        if (result?.token) {
-          writeTokenToAllKeys(result.token);
-        }
-      } catch {}
 
       openPopup("success", "บันทึกสำเร็จ", "บันทึกชื่อเรียบร้อยแล้ว");
     } catch (err) {

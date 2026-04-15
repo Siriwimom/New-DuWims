@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 function GoogleIcon() {
   return (
@@ -32,6 +33,8 @@ function GoogleIcon() {
 }
 
 export default function App() {
+  const router = useRouter();
+
   const [screen, setScreen] = useState("login");
 
   const [email, setEmail] = useState("");
@@ -47,12 +50,17 @@ export default function App() {
   const [err, setErr] = useState("");
   const [info, setInfo] = useState("");
   const [loading, setLoading] = useState(false);
+  const [sessionChecking, setSessionChecking] = useState(true);
 
   const [modal, setModal] = useState(null);
   const [resetAllowed, setResetAllowed] = useState(false);
 
   const [showPassword, setShowPassword] = useState(false);
   const [showPassword2, setShowPassword2] = useState(false);
+
+  const [sessionUser, setSessionUser] = useState(null);
+  const [signupIsOwner, setSignupIsOwner] = useState(false);
+  const [ownerUidInput, setOwnerUidInput] = useState("");
 
   const TOKEN_KEYS_TO_SAVE = ["AUTH_TOKEN_V1", "token", "authToken", "duwims_token"];
 
@@ -61,18 +69,13 @@ export default function App() {
     process.env.NEXT_PUBLIC_API_BASE ||
     "http://localhost:3001";
 
-  const [sessionUser, setSessionUser] = useState(null);
-  const [sessionChecking, setSessionChecking] = useState(true);
-
-  const [signupIsOwner, setSignupIsOwner] = useState(false);
-
   function getToken() {
     if (typeof window === "undefined") return null;
     for (const k of TOKEN_KEYS_TO_SAVE) {
-      const fromLocal = window.localStorage.getItem(k);
-      if (fromLocal) return fromLocal;
-      const fromSession = window.sessionStorage.getItem(k);
-      if (fromSession) return fromSession;
+      const localValue = window.localStorage.getItem(k);
+      if (localValue) return localValue;
+      const sessionValue = window.sessionStorage.getItem(k);
+      if (sessionValue) return sessionValue;
     }
     return null;
   }
@@ -106,6 +109,58 @@ export default function App() {
         window.sessionStorage.removeItem(k);
       } catch {}
     }
+  }
+
+  function decodeJwtPayload(token) {
+    try {
+      const base64Url = String(token || "").split(".")[1] || "";
+      if (!base64Url) return null;
+      const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
+      const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+      const json = window.atob(padded);
+      return JSON.parse(json);
+    } catch {
+      return null;
+    }
+  }
+
+  function buildSessionUser(user, token) {
+    const payload = decodeJwtPayload(token) || {};
+    return {
+      id: user?.id || payload?.id || "",
+      email: user?.email || payload?.email || "",
+      nickname: user?.nickname || payload?.nickname || "",
+      role: user?.role || payload?.role || "",
+      provider: user?.provider || payload?.provider || "local",
+      ownerUid: user?.ownerUid ?? payload?.ownerUid ?? "",
+      ownerRef: user?.ownerRef ?? payload?.ownerRef ?? "",
+      isEmailVerified:
+        user?.isEmailVerified !== undefined ? !!user.isEmailVerified : true,
+    };
+  }
+
+  function isEmployeeWithoutOwner(user) {
+    return (
+      String(user?.role || "").toLowerCase() === "employee" &&
+      !String(user?.ownerRef || "").trim()
+    );
+  }
+
+  function goToDashboard() {
+    router.replace("/dashboard");
+  }
+
+  function finishLoginFlow(user) {
+    setSessionUser(user || null);
+
+    if (isEmployeeWithoutOwner(user)) {
+      setOwnerUidInput("");
+      setScreen("linkOwner");
+      setInfo("กรอก Owner UID ก่อนเข้าใช้งานระบบ");
+      return;
+    }
+
+    goToDashboard();
   }
 
   function isValidEmail(v) {
@@ -144,6 +199,7 @@ export default function App() {
     if (screen === "forgot") return "Reset Your Password";
     if (screen === "otp") return "Verify OTP";
     if (screen === "reset") return "Set a New Password";
+    if (screen === "linkOwner") return "Link Owner UID";
     return "";
   }, [screen]);
 
@@ -178,10 +234,10 @@ export default function App() {
       const msg = data?.error
         ? `${data.message || "Error"}: ${data.error}`
         : data?.message || `HTTP ${res.status}`;
-      const err = new Error(msg);
-      err.status = res.status;
-      err.payload = data;
-      throw err;
+      const error = new Error(msg);
+      error.status = res.status;
+      error.payload = data;
+      throw error;
     }
 
     return data;
@@ -215,16 +271,12 @@ export default function App() {
         throw new Error("Login success but token is missing");
       }
 
-      const saved = saveToken(token);
-      const storedToken = getToken();
-
-      if (!saved || !storedToken) {
+      if (!saveToken(token) || !getToken()) {
         throw new Error("Login success but token could not be saved");
       }
 
-      setSessionUser(data.user || null);
-
-      window.location.replace("/dashboard");
+      const nextUser = buildSessionUser(data?.user || null, token);
+      finishLoginFlow(nextUser);
     });
   }
 
@@ -307,20 +359,17 @@ export default function App() {
   }
 
   function logout() {
-    clearToken();
-    setSessionUser(null);
-    setEmail("");
-    setPw("");
-    setPw2("");
-    setScreen("login");
+  clearToken();
+  setSessionUser(null);
+  setEmail("");
+  setPw("");
+  setPw2("");
+  setScreen("login");
 
-    if (typeof window !== "undefined") {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("token");
-      url.searchParams.delete("error");
-      window.history.replaceState({}, "", url.pathname);
-    }
+  if (typeof window !== "undefined") {
+    window.location.replace("http://localhost:3000/");
   }
+}
 
   function handleGoogleSignIn(roleOverride = null) {
     setErr("");
@@ -331,6 +380,35 @@ export default function App() {
     params.set("role", finalRole);
 
     window.location.href = `${API_BASE}/auth/google/start?${params.toString()}`;
+  }
+
+  async function handleLinkOwner() {
+    await run(async () => {
+      const token = getToken();
+      if (!token) throw new Error("Session expired. Please login again.");
+
+      const safeOwnerUid = ownerUidInput.trim();
+      if (!safeOwnerUid) throw new Error("กรุณากรอก Owner UID");
+
+      const data = await api("/auth/link-owner", {
+        method: "POST",
+        token,
+        body: { ownerUid: safeOwnerUid },
+      });
+
+      const nextToken =
+        data?.token ||
+        data?.accessToken ||
+        data?.jwt ||
+        data?.data?.token ||
+        token;
+
+      saveToken(nextToken);
+
+      const nextUser = buildSessionUser(data?.user || sessionUser || null, nextToken);
+      setInfo("เชื่อม Owner UID สำเร็จ");
+      finishLoginFlow(nextUser);
+    });
   }
 
   async function handleSendOtp() {
@@ -449,49 +527,35 @@ export default function App() {
           url.searchParams.delete("token");
           url.searchParams.delete("error");
           window.history.replaceState({}, "", url.pathname);
-
-          try {
-            const me = await api("/auth/me", { token: tokenFromUrl });
-
-            if (!mounted) return;
-            setSessionUser(me.user || null);
-            setSessionChecking(false);
-
-            window.location.replace("/dashboard");
-            return;
-          } catch (e) {
-            clearToken();
-            if (!mounted) return;
-            setSessionUser(null);
-            setErr(e?.message || "Google login failed");
-            setSessionChecking(false);
-            return;
-          }
         }
 
-        const savedToken = getToken();
-        if (!savedToken) {
+        const activeToken = tokenFromUrl || getToken();
+
+        if (!activeToken) {
           if (!mounted) return;
           setSessionUser(null);
           setSessionChecking(false);
           return;
         }
 
-        try {
-          const me = await api("/auth/me", { token: savedToken });
-          if (!mounted) return;
-          setSessionUser(me.user || null);
-        } catch (e) {
+        const decodedUser = buildSessionUser(null, activeToken);
+
+        if (!decodedUser?.id) {
           clearToken();
           if (!mounted) return;
           setSessionUser(null);
-        } finally {
-          if (mounted) setSessionChecking(false);
+          setSessionChecking(false);
+          return;
         }
+
+        if (!mounted) return;
+        setSessionChecking(false);
+        finishLoginFlow(decodedUser);
       } catch (e) {
         clearToken();
         if (!mounted) return;
         setSessionUser(null);
+        setErr(e?.message || "Session restore failed");
         setSessionChecking(false);
       }
     }
@@ -501,7 +565,7 @@ export default function App() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [router]);
 
   return (
     <div className="page">
@@ -517,6 +581,7 @@ export default function App() {
 
         {err && <div className="err">{err}</div>}
         {info && <div className="info">{info}</div>}
+        {sessionChecking && <div className="info">กำลังตรวจสอบ session...</div>}
 
         {screen === "login" && (
           <>
@@ -548,7 +613,7 @@ export default function App() {
               </button>
             </div>
 
-            <button className="btn blue" onClick={handleLogin} disabled={loading}>
+            <button className="btn blue" onClick={handleLogin} disabled={loading || sessionChecking}>
               {loading ? "Loading..." : "Login"}
             </button>
 
@@ -568,15 +633,13 @@ export default function App() {
             <button
               className="btn googleBtn"
               onClick={() => handleGoogleSignIn()}
-              disabled={loading}
+              disabled={loading || sessionChecking}
             >
               <span className="gIcon"><GoogleIcon /></span>
               <span>Sign in with Google</span>
             </button>
 
-            <div className="small">
-              Use your verified email address to continue.
-            </div>
+            <div className="small">Use your verified email address to continue.</div>
           </>
         )}
 
@@ -611,18 +674,10 @@ export default function App() {
             </div>
 
             <div className="passwordHelp">
-              <div className={passwordChecks.length ? "ok" : ""}>
-                • อย่างน้อย 8 ตัวอักษร
-              </div>
-              <div className={passwordChecks.upper ? "ok" : ""}>
-                • มีตัวพิมพ์ใหญ่ (A-Z)
-              </div>
-              <div className={passwordChecks.lower ? "ok" : ""}>
-                • มีตัวพิมพ์เล็ก (a-z)
-              </div>
-              <div className={passwordChecks.number ? "ok" : ""}>
-                • มีตัวเลข (0-9)
-              </div>
+              <div className={passwordChecks.length ? "ok" : ""}>• อย่างน้อย 8 ตัวอักษร</div>
+              <div className={passwordChecks.upper ? "ok" : ""}>• มีตัวพิมพ์ใหญ่ (A-Z)</div>
+              <div className={passwordChecks.lower ? "ok" : ""}>• มีตัวพิมพ์เล็ก (a-z)</div>
+              <div className={passwordChecks.number ? "ok" : ""}>• มีตัวเลข (0-9)</div>
             </div>
 
             <div className="label">Confirm Password</div>
@@ -649,9 +704,7 @@ export default function App() {
                 <input
                   type="checkbox"
                   checked={signupIsOwner}
-                  onChange={(e) => {
-                    setSignupIsOwner(e.target.checked);
-                  }}
+                  onChange={(e) => setSignupIsOwner(e.target.checked)}
                 />
                 <span>สมัครเป็น Owner (ถ้าไม่ติ๊กจะเป็นพนักงาน)</span>
               </label>
@@ -665,18 +718,12 @@ export default function App() {
               <span>OR</span>
             </div>
 
-            <button
-              className="btn googleBtn"
-              onClick={() => handleGoogleSignIn()}
-              disabled={loading}
-            >
+            <button className="btn googleBtn" onClick={() => handleGoogleSignIn()} disabled={loading}>
               <span className="gIcon"><GoogleIcon /></span>
               <span>Sign up with Google</span>
             </button>
 
-            <div className="small">
-              หลังสมัคร ระบบจะส่งอีเมลให้ยืนยันก่อนเข้าใช้งาน
-            </div>
+            <div className="small">หลังสมัคร ระบบจะส่งอีเมลให้ยืนยันก่อนเข้าใช้งาน</div>
 
             <div className="row" style={{ justifyContent: "center" }}>
               <button className="linkBtn" onClick={() => onGo("login")}>
@@ -701,27 +748,21 @@ export default function App() {
                   className="otpBox"
                   value={d}
                   onChange={(e) => setOtpAt(i, e.target.value)}
-                  ref={(el) => (otpRefs.current[i] = el)}
+                  ref={(el) => {
+                    otpRefs.current[i] = el;
+                  }}
                   inputMode="numeric"
                   maxLength={1}
                 />
               ))}
             </div>
 
-            <button
-              className="btn blue"
-              onClick={handleVerifySignupEmail}
-              disabled={loading}
-            >
+            <button className="btn blue" onClick={handleVerifySignupEmail} disabled={loading}>
               {loading ? "Verifying..." : "Verify Email"}
             </button>
 
             <div className="row" style={{ marginTop: 10 }}>
-              <button
-                className="linkBtn"
-                onClick={handleResendSignupVerification}
-                disabled={loading}
-              >
+              <button className="linkBtn" onClick={handleResendSignupVerification} disabled={loading}>
                 Resend code
               </button>
               <button className="linkBtn" onClick={() => onGo("login")}>
@@ -742,11 +783,7 @@ export default function App() {
               autoComplete="email"
             />
 
-            <button
-              className="btn blue"
-              onClick={handleSendOtp}
-              disabled={loading}
-            >
+            <button className="btn blue" onClick={handleSendOtp} disabled={loading}>
               {loading ? "Sending..." : "Reset Password"}
             </button>
 
@@ -759,11 +796,40 @@ export default function App() {
           </>
         )}
 
-        {screen === "otp" && (
+        {screen === "linkOwner" && (
           <>
             <div className="otpHint">
-              Enter your 6 digit OTP code in order to reset password.
+              บัญชีพนักงานต้องเชื่อมกับ Owner ก่อนเข้าใช้งาน
+              <br />
+              <strong>กรอก Owner UID ของเจ้าของสวน</strong>
             </div>
+
+            <div className="label">Owner UID</div>
+            <input
+              className="input"
+              value={ownerUidInput}
+              onChange={(e) => setOwnerUidInput(e.target.value.toUpperCase())}
+              placeholder="เช่น DW-AB12CD34"
+              autoComplete="off"
+            />
+
+            <button className="btn blue" onClick={handleLinkOwner} disabled={loading}>
+              {loading ? "กำลังเชื่อม..." : "ยืนยัน Owner UID"}
+            </button>
+
+            <div className="small">เมื่อเชื่อมสำเร็จ ระบบจะพาไปหน้า dashboard อัตโนมัติ</div>
+
+            <div className="row" style={{ justifyContent: "center", marginTop: 12 }}>
+              <button className="linkBtn" onClick={logout}>
+                Logout
+              </button>
+            </div>
+          </>
+        )}
+
+        {screen === "otp" && (
+          <>
+            <div className="otpHint">Enter your 6 digit OTP code in order to reset password.</div>
 
             <div className="otpRow">
               {otp.map((d, i) => (
@@ -772,18 +838,16 @@ export default function App() {
                   className="otpBox"
                   value={d}
                   onChange={(e) => setOtpAt(i, e.target.value)}
-                  ref={(el) => (otpRefs.current[i] = el)}
+                  ref={(el) => {
+                    otpRefs.current[i] = el;
+                  }}
                   inputMode="numeric"
                   maxLength={1}
                 />
               ))}
             </div>
 
-            <button
-              className="btn blue"
-              onClick={handleVerifyOtp}
-              disabled={loading}
-            >
+            <button className="btn blue" onClick={handleVerifyOtp} disabled={loading}>
               {loading ? "Verifying..." : "Verify OTP"}
             </button>
 
@@ -822,18 +886,10 @@ export default function App() {
             </div>
 
             <div className="passwordHelp">
-              <div className={passwordChecks.length ? "ok" : ""}>
-                • อย่างน้อย 8 ตัวอักษร
-              </div>
-              <div className={passwordChecks.upper ? "ok" : ""}>
-                • มีตัวพิมพ์ใหญ่ (A-Z)
-              </div>
-              <div className={passwordChecks.lower ? "ok" : ""}>
-                • มีตัวพิมพ์เล็ก (a-z)
-              </div>
-              <div className={passwordChecks.number ? "ok" : ""}>
-                • มีตัวเลข (0-9)
-              </div>
+              <div className={passwordChecks.length ? "ok" : ""}>• อย่างน้อย 8 ตัวอักษร</div>
+              <div className={passwordChecks.upper ? "ok" : ""}>• มีตัวพิมพ์ใหญ่ (A-Z)</div>
+              <div className={passwordChecks.lower ? "ok" : ""}>• มีตัวพิมพ์เล็ก (a-z)</div>
+              <div className={passwordChecks.number ? "ok" : ""}>• มีตัวเลข (0-9)</div>
             </div>
 
             <div className="label">Confirm Password</div>
@@ -855,11 +911,7 @@ export default function App() {
               </button>
             </div>
 
-            <button
-              className="btn blue"
-              onClick={handleResetPassword}
-              disabled={loading}
-            >
+            <button className="btn blue" onClick={handleResetPassword} disabled={loading}>
               {loading ? "Updating..." : "Update Password"}
             </button>
           </>
@@ -875,11 +927,7 @@ export default function App() {
               <div className="modalTitle">{modal.title}</div>
               <div className="modalDesc">{modal.desc}</div>
 
-              <button
-                className="btn solid"
-                style={{ marginTop: 16 }}
-                onClick={modal.onClose}
-              >
+              <button className="btn solid" style={{ marginTop: 16 }} onClick={modal.onClose}>
                 {modal.buttonText}
               </button>
             </div>
@@ -889,6 +937,7 @@ export default function App() {
     </div>
   );
 }
+
 
 const css = `
 :root{

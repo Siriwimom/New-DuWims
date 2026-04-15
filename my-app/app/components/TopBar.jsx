@@ -353,18 +353,24 @@ export default function TopBar() {
   }, []);
 
   const logout = () => {
-    runGuardedAction(() => {
-      try {
-        AUTH_KEYS.forEach((k) => window.localStorage.removeItem(k));
-        clearUnsavedAccountChanges();
-        setHasToken(false);
-        setRole("");
-        setOwnerUid("");
-        setProfileOpen(false);
-      } catch {}
-      router.push("/");
-    });
-  };
+  runGuardedAction(() => {
+    try {
+      AUTH_KEYS.forEach((k) => {
+        window.localStorage.removeItem(k);
+        window.sessionStorage.removeItem(k);
+      });
+      clearUnsavedAccountChanges();
+      setHasToken(false);
+      setRole("");
+      setOwnerUid("");
+      setProfileOpen(false);
+    } catch {}
+
+    if (typeof window !== "undefined") {
+      window.location.href = "/";
+    }
+  });
+};
 
   const handleLinkOwner = async (e) => {
     e.preventDefault();
