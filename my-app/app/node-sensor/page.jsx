@@ -1030,7 +1030,7 @@ export default function NodeSensorPage() {
     const token = getToken();
 
     if (!token) {
-      router.replace("/login");
+      router.replace("/");
       return;
     }
 
@@ -1184,6 +1184,57 @@ export default function NodeSensorPage() {
     alive = false;
   };
 }, [formUid, lang]);
+
+  useEffect(() => {
+    if (!hasPendingLeaveGuard || busy) return;
+
+    const onRequestedNavigation = (event) => {
+      const detail = event?.detail || {};
+      const href = typeof detail.href === "string" ? detail.href : "";
+      const action =
+        typeof detail.action === "function"
+          ? detail.action
+          : href
+            ? () => router.push(href)
+            : null;
+
+      if (!action) return;
+
+      event.preventDefault?.();
+      pendingLeaveUrlRef.current = href || "";
+      openConfirm({
+        type: "unsaved",
+        icon: "⚠️",
+        title:
+          lang === "en"
+            ? "You have unsaved changes"
+            : "มีการแก้ไขที่ยังไม่บันทึก",
+        sub:
+          lang === "en"
+            ? "You are currently adding or editing data.\nDo you want to discard the current changes and switch pages, or stay on this page?"
+            : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
+        secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
+        confirmText: lang === "en" ? "Discard changes" : "ยกเลิกการแก้ไข",
+        confirmClassName: "confirm-warn",
+        onSecondary: async () => {
+          pendingLeaveUrlRef.current = "";
+          closeConfirm();
+        },
+        onConfirm: async () => {
+          const nextAction = action;
+          pendingLeaveUrlRef.current = "";
+          performCancelForm();
+          closeConfirm();
+          if (typeof nextAction === "function") nextAction();
+        },
+      });
+    };
+
+    window.addEventListener("duwims:request-navigation", onRequestedNavigation);
+    return () => {
+      window.removeEventListener("duwims:request-navigation", onRequestedNavigation);
+    };
+  }, [hasPendingLeaveGuard, busy, lang, router]);
 
   useEffect(() => {
     const onBeforeUnload = (event) => {
@@ -1401,12 +1452,7 @@ export default function NodeSensorPage() {
     });
   }
 
-  function openCreate() {
-    if (hasUnsavedChanges) {
-      requestDiscardChanges(() => openCreate());
-      return;
-    }
-
+  function doOpenCreate() {
     resetForm();
     setView("create");
     setInitialFormSnapshot(
@@ -1422,11 +1468,16 @@ export default function NodeSensorPage() {
     setSuccess("");
   }
 
-  function openEdit(node) {
+  function openCreate() {
     if (hasUnsavedChanges) {
-      requestDiscardChanges(() => openEdit(node));
+      requestDiscardChanges(() => doOpenCreate());
       return;
     }
+
+    doOpenCreate();
+  }
+
+  function doOpenEdit(node) {
     setEditNodeId(node._id);
     setEditPlotId(node.plotId);
     setFormPlotId(node.plotId);
@@ -1469,13 +1520,38 @@ export default function NodeSensorPage() {
     setSuccess("");
   }
 
-  function cancelForm() {
+  function openEdit(node) {
     if (hasUnsavedChanges) {
-      requestDiscardChanges(() => performCancelForm());
+      requestDiscardChanges(() => doOpenEdit(node));
       return;
     }
 
-    performCancelForm();
+    doOpenEdit(node);
+  }
+
+  function cancelForm() {
+    openConfirm({
+      type: "back",
+      icon: "⚠️",
+      title:
+        lang === "en"
+          ? "Confirm going back"
+          : "ยืนยันการย้อนกลับ",
+      sub:
+        lang === "en"
+          ? "You are currently adding or editing node data. Do you want to go back and leave this form?"
+          : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล ต้องการย้อนกลับและออกจากฟอร์มนี้ใช่หรือไม่?",
+      secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
+      confirmText: lang === "en" ? "Go back" : "ย้อนกลับ",
+      confirmClassName: "confirm-warn",
+      onSecondary: async () => {
+        closeConfirm();
+      },
+      onConfirm: async () => {
+        performCancelForm();
+        closeConfirm();
+      },
+    });
   }
 
   function validateForm() {

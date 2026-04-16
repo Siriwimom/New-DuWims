@@ -6,7 +6,14 @@ import dynamic from "next/dynamic";
 import { useMap } from "react-leaflet";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
 import { useDuwimsT } from "../components/language-context";
-
+import { useRouter } from "next/navigation";
+const AUTH_KEYS = [
+  "AUTH_TOKEN_V1",
+  "token",
+  "authToken",
+  "pmtool_token",
+  "duwims_token",
+];
 const MapContainer = dynamic(
   () => import("react-leaflet").then((m) => m.MapContainer),
   { ssr: false }
@@ -1677,8 +1684,31 @@ function buildPriorityFrameIndexes(frameTimestamps, selectedTs) {
 
   return out;
 }
+function getToken() {
+  if (typeof window === "undefined") return "";
+  for (const key of AUTH_KEYS) {
+    const value = window.localStorage.getItem(key);
+    if (value) return value;
+  }
+  return "";
+}
 
 export default function Page() {
+  const router = useRouter();
+  //const apiBase = getApiBase();
+
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const token = getToken();
+
+    if (!token) {
+      router.replace("/");
+      return;
+    }
+
+    setAuthChecked(true);
+  }, [router]);
   const { t, lang } = useDuwimsT();
   const uiLang = lang === "en" ? "en" : "th";
   const tt = useCallback((key, fallback, params = {}) => {

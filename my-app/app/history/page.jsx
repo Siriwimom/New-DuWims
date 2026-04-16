@@ -4,9 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState } from "react";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
 import { useDuwimsT } from "../components/language-context";
-
-const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
-
+import { useRouter } from "next/navigation";
 const AUTH_KEYS = [
   "AUTH_TOKEN_V1",
   "token",
@@ -14,6 +12,18 @@ const AUTH_KEYS = [
   "pmtool_token",
   "duwims_token",
 ];
+function getToken() {
+  if (typeof window === "undefined") return "";
+  for (const key of AUTH_KEYS) {
+    const value = window.localStorage.getItem(key);
+    if (value) return value;
+  }
+  return "";
+}
+
+const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
+
+
 
 const PLOT_COLORS = [
   "#3b82f6",
@@ -43,14 +53,7 @@ function getApiBase() {
   return (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3001").replace(/\/+$/, "");
 }
 
-function getToken() {
-  if (typeof window === "undefined") return "";
-  for (const key of AUTH_KEYS) {
-    const value = window.localStorage.getItem(key);
-    if (value) return value;
-  }
-  return "";
-}
+
 
 async function apiGet(path) {
   const token = getToken();
@@ -561,6 +564,21 @@ function makeSeriesLabel(row) {
 
 export default function HistoryPage() {
   const { t, lang } = useDuwimsT();
+  const router = useRouter();
+  const apiBase = getApiBase();
+
+  const [authChecked, setAuthChecked] = useState(false);
+
+  useEffect(() => {
+    const token = getToken();
+
+    if (!token) {
+      router.replace("/");
+      return;
+    }
+
+    setAuthChecked(true);
+  }, [router]);
 
   const txt = {
     historyFilterTitle: t?.historyFilterTitle || "ตัวกรองประวัติ",

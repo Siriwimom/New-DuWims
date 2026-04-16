@@ -10,12 +10,22 @@ const UNSAVED_KEYS = ["DUWIMS_UNSAVED_PROFILE", "DUWIMS_UNSAVED_PASSWORD"];
 const LEGACY_PROFILE_NAME_KEY = "DUWIMS_PROFILE_NAME_LOCAL";
 const PROFILE_UPDATED_EVENT = "duwims-profile-updated";
 
+
 function readToken() {
   if (typeof window === "undefined") return "";
+
   for (const k of AUTH_KEYS) {
-    const v = window.localStorage.getItem(k);
-    if (v) return v;
+    try {
+      const localValue = window.localStorage.getItem(k);
+      if (localValue) return localValue;
+    } catch {}
+
+    try {
+      const sessionValue = window.sessionStorage.getItem(k);
+      if (sessionValue) return sessionValue;
+    } catch {}
   }
+
   return "";
 }
 
@@ -132,6 +142,22 @@ function readScopedLocalName(identity) {
     return "";
   }
 }
+
+function requestPageNavigationGuard({ href = "", action } = {}) {
+  if (typeof window === "undefined") return false;
+
+  const navEvent = new CustomEvent("duwims:request-navigation", {
+    cancelable: true,
+    detail: {
+      href,
+      action,
+    },
+  });
+
+  window.dispatchEvent(navEvent);
+  return navEvent.defaultPrevented;
+}
+
 
 export default function TopBar() {
   const pathname = usePathname();
@@ -266,7 +292,11 @@ export default function TopBar() {
     setPopupOpen(true);
   };
 
-  const runGuardedAction = (action) => {
+  const runGuardedAction = (action, options = {}) => {
+    const href = typeof options?.href === "string" ? options.href : "";
+    const interceptedByPage = requestPageNavigationGuard({ href, action });
+    if (interceptedByPage) return;
+
     if (hasUnsavedAccountChanges()) {
       setConfirmTitle("มีการแก้ไขที่ยังไม่บันทึก");
       setConfirmMessage(
@@ -276,6 +306,7 @@ export default function TopBar() {
       setConfirmOpen(true);
       return;
     }
+
     action();
   };
 
@@ -293,19 +324,19 @@ export default function TopBar() {
   };
 
   useEffect(() => {
-    setMounted(true);
+  setMounted(true);
 
-    syncAuth();
-    window.addEventListener("storage", syncAuth);
-    window.addEventListener("focus", syncAuth);
-    window.addEventListener(PROFILE_UPDATED_EVENT, syncAuth);
+  syncAuth();
+  window.addEventListener("storage", syncAuth);
+  window.addEventListener("focus", syncAuth);
+  window.addEventListener(PROFILE_UPDATED_EVENT, syncAuth);
 
-    return () => {
-      window.removeEventListener("storage", syncAuth);
-      window.removeEventListener("focus", syncAuth);
-      window.removeEventListener(PROFILE_UPDATED_EVENT, syncAuth);
-    };
-  }, []);
+  return () => {
+    window.removeEventListener("storage", syncAuth);
+    window.removeEventListener("focus", syncAuth);
+    window.removeEventListener(PROFILE_UPDATED_EVENT, syncAuth);
+  };
+}, []);
 
   useEffect(() => {
     if (!mounted) return;
@@ -359,15 +390,21 @@ export default function TopBar() {
         window.localStorage.removeItem(k);
         window.sessionStorage.removeItem(k);
       });
+
       clearUnsavedAccountChanges();
       setHasToken(false);
       setRole("");
       setOwnerUid("");
       setProfileOpen(false);
+      setDisplayName("ผู้ใช้งาน");
+      setEmail("user@example.com");
+      setProvider("local");
+
+      window.history.replaceState({}, "", "/");
     } catch {}
 
     if (typeof window !== "undefined") {
-      window.location.href = "/";
+      window.location.replace("/");
     }
   });
 };
@@ -439,11 +476,14 @@ export default function TopBar() {
   };
 
   const goTo = (href) => {
-    runGuardedAction(() => {
-      setProfileOpen(false);
-      setMenuOpen(false);
-      router.push(href);
-    });
+    runGuardedAction(
+      () => {
+        setProfileOpen(false);
+        setMenuOpen(false);
+        router.push(href);
+      },
+      { href }
+    );
   };
 
   return (
@@ -489,7 +529,7 @@ export default function TopBar() {
             </button>
           </div>
 
-          {!authReady ? null : !hasToken ? (
+          {!authReady ? null : !readToken() ? (
             <div className="topbar-auth">
               <Link href="/" className="auth-btn auth-btn-ghost">
                 {t.login || "เข้าสู่ระบบ"}

@@ -2,7 +2,7 @@
 
 import "leaflet/dist/leaflet.css";
 import "leaflet-draw/dist/leaflet.draw.css";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import DuwimsStaticPage from "../components/DuwimsStaticPage";
 import { useDuwimsT } from "../components/language-context";
@@ -345,8 +345,35 @@ export default function Page() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [hasUnsavedWork]);
 
+  const requestLeave = useCallback((action) => {
+    if (hasUnsavedWork) {
+      setPendingAction(() => action);
+      setShowLeavePopup(true);
+      return false;
+    }
+
+    if (typeof action === "function") {
+      action();
+    }
+    return true;
+  }, [hasUnsavedWork]);
+
   useEffect(() => {
     if (!mounted) return;
+
+    const handleNavigationRequest = (event) => {
+      if (!hasUnsavedWork) return;
+
+      const detail = event?.detail || {};
+      const action = typeof detail.action === "function" ? detail.action : null;
+      const href = typeof detail.href === "string" ? detail.href : "";
+
+      if (!action && !href) return;
+
+      event.preventDefault?.();
+      setPendingAction(() => (action || (() => router.push(href))));
+      setShowLeavePopup(true);
+    };
 
     const onDocumentClick = (e) => {
       if (!hasUnsavedWork) return;
@@ -368,9 +395,14 @@ export default function Page() {
       requestLeave(() => router.push(href));
     };
 
+    window.addEventListener("duwims:request-navigation", handleNavigationRequest);
     document.addEventListener("click", onDocumentClick, true);
-    return () => document.removeEventListener("click", onDocumentClick, true);
-  }, [mounted, hasUnsavedWork, router]);
+
+    return () => {
+      window.removeEventListener("duwims:request-navigation", handleNavigationRequest);
+      document.removeEventListener("click", onDocumentClick, true);
+    };
+  }, [mounted, hasUnsavedWork, requestLeave, router]);
 
   async function loadEmployees() {
     try {
@@ -479,17 +511,6 @@ export default function Page() {
     goBackToView();
   }
 
-  function requestLeave(action) {
-    if (hasUnsavedWork) {
-      setPendingAction(() => action);
-      setShowLeavePopup(true);
-      return;
-    }
-
-    if (typeof action === "function") {
-      action();
-    }
-  }
 
   function confirmLeaveAndProceed() {
     const action = pendingAction;

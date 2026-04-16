@@ -4,8 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import TopBar from "../components/TopBar";
 
-const AUTH_KEYS = ["AUTH_TOKEN_V1", "token", "authToken", "pmtool_token", "duwims_token"];
 const DIRTY_KEY = "DUWIMS_UNSAVED_PASSWORD";
+const AUTH_KEYS = [
+  "AUTH_TOKEN_V1",
+  "token",
+  "authToken",
+  "pmtool_token",
+  "duwims_token",
+];
+function getToken() {
+  if (typeof window === "undefined") return "";
+  for (const key of AUTH_KEYS) {
+    const value = window.localStorage.getItem(key);
+    if (value) return value;
+  }
+  return "";
+}
 
 function readToken() {
   if (typeof window === "undefined") return "";
@@ -50,6 +64,16 @@ async function requestJson(url, options = {}) {
 export default function ChangePasswordPage() {
   const router = useRouter();
   const apiBase = getApiBase();
+  useEffect(() => {
+      const token = getToken();
+  
+      if (!token) {
+        router.replace("/");
+        return;
+      }
+  
+      setAuthChecked(true);
+    }, [router]);
 
   const [loading, setLoading] = useState(true);
   const [provider, setProvider] = useState("local");

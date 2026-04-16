@@ -311,7 +311,7 @@ export default function YieldPage() {
   function redirectToLogin() {
     if (typeof window === "undefined") return;
     try {
-      window.location.replace("/login");
+      window.location.replace("/");
     } catch {
       window.location.replace("/");
     }
