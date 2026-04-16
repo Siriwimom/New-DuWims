@@ -1595,24 +1595,28 @@ export default function HistoryPage() {
           <div className="history-grid" style={{ marginBottom: 14 }}>
             <div>
               <label className="history-label">{txt.startDate}</label>
-              <input
-                className="history-input"
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-              <div className="date-preview-text">{formatDisplayDateDMY(startDate)}</div>
+              <div className="date-input-wrap">
+                <input
+                  className="history-input history-date-input"
+                  type="date"
+                  value={startDate}
+                  data-display={formatDisplayDateDMY(startDate) || "วัน/เดือน/ปี"}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </div>
             </div>
 
             <div>
               <label className="history-label">{txt.endDate}</label>
-              <input
-                className="history-input"
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
-              <div className="date-preview-text">{formatDisplayDateDMY(endDate)}</div>
+              <div className="date-input-wrap">
+                <input
+                  className="history-input history-date-input"
+                  type="date"
+                  value={endDate}
+                  data-display={formatDisplayDateDMY(endDate) || "วัน/เดือน/ปี"}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
             </div>
 
             <div className="plot-wrap-block">
@@ -2062,11 +2066,46 @@ export default function HistoryPage() {
             background: #fff;
           }
 
-          .date-preview-text {
-            margin-top: 6px;
-            font-size: 12px;
-            font-weight: 800;
-            color: #64748b;
+          .date-input-wrap {
+            position: relative;
+          }
+
+          .history-date-input {
+            position: relative;
+            color: transparent;
+            caret-color: transparent;
+          }
+
+          .history-date-input::-webkit-datetime-edit,
+          .history-date-input::-webkit-datetime-edit-text,
+          .history-date-input::-webkit-datetime-edit-month-field,
+          .history-date-input::-webkit-datetime-edit-day-field,
+          .history-date-input::-webkit-datetime-edit-year-field {
+            color: transparent;
+          }
+
+          .history-date-input::before {
+            content: attr(data-display);
+            position: absolute;
+            left: 14px;
+            right: 42px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #0f172a;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1;
+            pointer-events: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          .history-date-input::-webkit-calendar-picker-indicator {
+            opacity: 1;
+            cursor: pointer;
+            position: relative;
+            z-index: 2;
           }
 
           .plot-dd-wrap,

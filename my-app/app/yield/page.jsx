@@ -56,6 +56,11 @@ function toDateInputValue(value) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function getDateDisplayText(value) {
+  const formatted = formatDisplayDate(value);
+  return formatted === "-" ? "dd/mm/yyyy" : formatted;
+}
+
 function formatVolume(value, lang = "th") {
   if (value === null || value === undefined || value === "") return "-";
   const n = Number(value);
@@ -96,8 +101,28 @@ function escapeCsvValue(value) {
   return text;
 }
 
+function toExcelTextValue(value) {
+  const text = value === null || value === undefined ? "" : String(value).trim();
+  if (!text) return "";
+  return `="${text.replace(/"/g, '""')}"`;
+}
+
+function toExcelDateValue(value) {
+  const formatted = formatDisplayDate(value);
+  if (formatted === "-") return "";
+  return toExcelTextValue(formatted);
+}
+
+function toExcelNumberValue(value) {
+  if (value === null || value === undefined || value === "") return "";
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "";
+  return toExcelTextValue(String(n));
+}
+
 export default function YieldPage() {
   const { lang, t } = useDuwimsT();
+
 
   const tx = useMemo(
     () => ({
@@ -582,12 +607,12 @@ export default function YieldPage() {
       const rows = filteredItems.map((item) => [
         getPlotLabelById(item?.plot),
         item?.species || "",
-        formatDisplayDate(item?.startDate),
-        formatDisplayDate(item?.harvestDate),
-        item?.volume ?? "",
+        toExcelDateValue(item?.startDate),
+        toExcelDateValue(item?.harvestDate),
+        toExcelNumberValue(item?.volume),
       ]);
 
-      const csv = [header, ...rows]
+      const csv = [["sep=,"], header, ...rows]
         .map((row) => row.map(escapeCsvValue).join(","))
         .join("\n");
 
@@ -758,7 +783,8 @@ export default function YieldPage() {
             <div className="filter-label">{tx.startDate}</div>
             <input
               type="date"
-              className="form-input"
+              className="form-input date-input-clean"
+              data-display={getDateDisplayText(filterStartDate)}
               style={{ width: 148 }}
               value={filterStartDate}
               onChange={(e) => setFilterStartDate(e.target.value)}
@@ -769,7 +795,8 @@ export default function YieldPage() {
             <div className="filter-label">{tx.endDate}</div>
             <input
               type="date"
-              className="form-input"
+              className="form-input date-input-clean"
+              data-display={getDateDisplayText(filterEndDate)}
               style={{ width: 148 }}
               value={filterEndDate}
               onChange={(e) => setFilterEndDate(e.target.value)}
@@ -873,7 +900,6 @@ export default function YieldPage() {
                     setCreateForm((prev) => ({ ...prev, plot: e.target.value }))
                   }
                 >
-                  <option value="">{tx.allPlots}</option>
                   {plotOptions.map((plot) => (
                     <option key={plot.id} value={plot.id}>
                       {plot.label}
@@ -897,8 +923,9 @@ export default function YieldPage() {
               <div className="form-field">
                 <div className="form-field-label">{tx.startPlantingDate}</div>
                 <input
-                  className="form-input"
+                  className="form-input date-input-clean"
                   type="date"
+                  data-display={getDateDisplayText(createForm.startDate)}
                   value={createForm.startDate}
                   onChange={(e) =>
                     setCreateForm((prev) => {
@@ -921,8 +948,9 @@ export default function YieldPage() {
               <div className="form-field">
                 <div className="form-field-label">{tx.harvestDateField}</div>
                 <input
-                  className="form-input"
+                  className="form-input date-input-clean"
                   type="date"
+                  data-display={getDateDisplayText(createForm.harvestDate)}
                   min={createForm.startDate || undefined}
                   value={createForm.harvestDate}
                   onChange={(e) =>
@@ -1025,8 +1053,9 @@ export default function YieldPage() {
               <div className="form-field">
                 <div className="form-field-label">{tx.startPlantingDate}</div>
                 <input
-                  className="form-input"
+                  className="form-input date-input-clean"
                   type="date"
+                  data-display={getDateDisplayText(editForm.startDate)}
                   value={editForm.startDate}
                   onChange={(e) =>
                     setEditForm((prev) => {
@@ -1049,8 +1078,9 @@ export default function YieldPage() {
               <div className="form-field">
                 <div className="form-field-label">{tx.harvestDateField}</div>
                 <input
-                  className="form-input"
+                  className="form-input date-input-clean"
                   type="date"
+                  data-display={getDateDisplayText(editForm.harvestDate)}
                   min={editForm.startDate || undefined}
                   value={editForm.harvestDate}
                   onChange={(e) =>
@@ -1226,6 +1256,46 @@ export default function YieldPage() {
             font-size: 12px;
             font-weight: 700;
             line-height: 1.4;
+          }
+
+          .date-input-clean {
+            position: relative;
+            color: transparent !important;
+            caret-color: transparent;
+          }
+
+          .date-input-clean::-webkit-datetime-edit,
+          .date-input-clean::-webkit-datetime-edit-text,
+          .date-input-clean::-webkit-datetime-edit-month-field,
+          .date-input-clean::-webkit-datetime-edit-day-field,
+          .date-input-clean::-webkit-datetime-edit-year-field {
+            color: transparent !important;
+          }
+
+          .date-input-clean::before {
+            content: attr(data-display);
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #111827;
+            pointer-events: none;
+            white-space: nowrap;
+          }
+
+          .date-input-clean:focus::before {
+            color: #111827;
+          }
+
+          .date-input-clean::-webkit-calendar-picker-indicator {
+            opacity: 1;
+            cursor: pointer;
+            position: relative;
+            z-index: 1;
+          }
+
+          .date-input-clean::-ms-value {
+            color: transparent;
           }
 
           .export-btn {
