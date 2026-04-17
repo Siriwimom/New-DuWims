@@ -117,6 +117,68 @@ function formatDisplayDateDMY(value) {
   return `${day}/${month}/${year}`;
 }
 
+function parseFlexibleDate(value) {
+  const raw =
+    value?.server_timestamp ||
+    value?.serverTimestamp ||
+    value?.timestamp ||
+    value?.ts ||
+    value?.time ||
+    value?.createdAt ||
+    value?.updatedAt ||
+    value;
+
+  if (!raw) return null;
+
+  if (raw instanceof Date) {
+    return Number.isNaN(raw.getTime()) ? null : raw;
+  }
+
+  if (typeof raw === "object") {
+    const sec = toNum(raw?.seconds ?? raw?._seconds);
+    const nano = toNum(raw?.nanoseconds ?? raw?._nanoseconds) || 0;
+    if (sec !== null) {
+      const d = new Date(sec * 1000 + nano / 1e6);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+    if (typeof raw?.toDate === "function") {
+      const d = raw.toDate();
+      return Number.isNaN(d?.getTime?.()) ? null : d;
+    }
+  }
+
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function startOfDayMs(value) {
+  const d = parseFlexibleDate(value);
+  if (!d) return null;
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+function buildDailyTimeline(startDate, endDate) {
+  const start = startOfDayMs(startDate);
+  const end = startOfDayMs(endDate);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end) return [];
+
+  const out = [];
+  for (let ts = start; ts <= end; ts += 24 * 60 * 60 * 1000) {
+    out.push(ts);
+  }
+  return out;
+}
+
+
+function bucketTimestampMs(value, bucketHours = 3) {
+  const d = parseFlexibleDate(value);
+  if (!d) return null;
+  const ts = d.getTime();
+  const bucketMs = Math.max(1, bucketHours) * 60 * 60 * 1000;
+  return Math.floor(ts / bucketMs) * bucketMs;
+}
+
 function formatDateTimeLabel(value, lang = "th") {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value || "-");
@@ -131,21 +193,20 @@ function formatDateTimeLabel(value, lang = "th") {
 }
 
 function normalizeDateKey(value) {
-  const raw =
-    value?.timestamp ||
-    value?.ts ||
-    value?.time ||
-    value?.createdAt ||
-    value?.updatedAt ||
-    value;
-
-  const d = new Date(raw);
-  if (Number.isNaN(d.getTime())) return null;
+  const d = parseFlexibleDate(value);
+  if (!d) return null;
   return formatDateInput(d);
 }
 
 function getTimestampFromReading(item) {
-  return item?.timestamp || item?.ts || item?.time || item?.createdAt || item?.updatedAt || "";
+  const d = parseFlexibleDate(item);
+  return d ? d.toISOString() : "";
+}
+
+function isAcceptedStatus(status) {
+  const s = String(status || "").trim().toLowerCase();
+  if (!s) return true;
+  return ["active", "on", "ok", "normal", "online", "running", "1", "true"].includes(s);
 }
 
 function colorOfSensorKey(sensorKey) {
@@ -530,22 +591,92 @@ function normalizePlot(plot, t) {
   };
 }
 
+function normalizeNodeItem(node) {
+  return {
+    ...node,
+    nodeId: getId(node),
+    nodeUid: node?.uid || "",
+    nodeName: node?.nodeName || node?.name || node?.uid || "Node",
+    nodeType: node?.nodeType || inferNodeType(node),
+    plotId: node?.plotId || node?.plot_id || node?.plot?.id || node?.plot?._id || "",
+    ownerRef: node?.ownerRef || node?.ownerUid || "",
+    sensors: safeArray(node?.sensors).map((sensor) => ({
+      ...sensor,
+      sensorId: getId(sensor),
+      sensorUid: sensor?.uid || "",
+      sensorName: sensor?.name || sensor?.sensorType || sensor?.uid || "",
+      _frontendSensorKeys: expandSensorKeys(sensor),
+    })),
+  };
+}
+
+function attachNodesToPlots(plotItems, nodeItems, t) {
+  const normalizedNodes = safeArray(nodeItems).map(normalizeNodeItem).filter((node) => node.nodeId || node.nodeUid);
+
+  return safeArray(plotItems)
+    .map((item) => normalizePlot(item, t))
+    .filter((p) => p.id)
+    .map((plot) => {
+      const inlineNodes = safeArray(plot.nodes);
+      const externalNodes = normalizedNodes.filter((node) => sameText(node.plotId, plot.id));
+      const seen = new Set();
+      const merged = [...inlineNodes, ...externalNodes].filter((node) => {
+        const key = node?.nodeId || node?.nodeUid || "";
+        if (!key) return false;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return { ...plot, nodes: merged };
+    });
+}
+
 function normalizeReading(item) {
   const sensorType =
-    item?.sensorType || item?.sensorName || item?.sensor?.sensorType || item?.sensor?.name || "";
+    item?.sensorType ||
+    item?.sensorName ||
+    item?.sensor?.sensorType ||
+    item?.sensor?.name ||
+    item?.name ||
+    "";
+
   const sensorKey = canonicalSensorKey(sensorType);
 
   return {
     id: getId(item),
-    plotId: item?.plotId || item?.plot_id || item?.plot?.id || item?.plot?._id || "",
-    nodeId: item?.nodeId || item?.node_id || item?.node?.id || item?.node?._id || "",
-    nodeUid: item?.nodeUid || item?.node_uid || item?.node?.uid || "",
-    sensorId: item?.sensorId || item?.sensor_id || item?.sensor?.id || item?.sensor?._id || "",
-    sensorUid: item?.sensorUid || item?.sensor_uid || item?.sensor?.uid || "",
+    plotId:
+      item?.plotId ||
+      item?.plot_id ||
+      item?.plot?.id ||
+      item?.plot?._id ||
+      "",
+    nodeId:
+      item?.nodeId ||
+      item?.node_id ||
+      item?.node?.id ||
+      item?.node?._id ||
+      "",
+    nodeUid:
+      item?.nodeUid ||
+      item?.node_uid ||
+      item?.node?.uid ||
+      item?.uid ||
+      "",
+    sensorId:
+      item?.sensorId ||
+      item?.sensor_id ||
+      item?.sensor?.id ||
+      item?.sensor?._id ||
+      "",
+    sensorUid:
+      item?.sensorUid ||
+      item?.sensor_uid ||
+      item?.sensor?.uid ||
+      "",
     sensorType,
     sensorKey,
     timestamp: getTimestampFromReading(item),
-    status: item?.status || item?.state || "",
+    status: String(item?.status || item?.state || "").trim().toLowerCase(),
     rawItem: item,
   };
 }
@@ -654,10 +785,14 @@ export default function HistoryPage() {
       setLoadingPlots(true);
       setError("");
       try {
-        const data = await apiGet("/api/plots");
+        const [plotsData, nodesData] = await Promise.all([
+          apiGet("/api/plots"),
+          apiGet("/api/nodes").catch(() => ({ items: [] })),
+        ]);
         if (!alive) return;
-        const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-        setPlots(items.map((item) => normalizePlot(item, txt)).filter((p) => p.id));
+        const plotItems = Array.isArray(plotsData?.items) ? plotsData.items : Array.isArray(plotsData) ? plotsData : [];
+        const nodeItems = Array.isArray(nodesData?.items) ? nodesData.items : Array.isArray(nodesData) ? nodesData : [];
+        setPlots(attachNodesToPlots(plotItems, nodeItems, txt));
       } catch (err) {
         if (!alive) return;
         setError(err?.message || txt.loadPlotsFailed);
@@ -769,15 +904,68 @@ export default function HistoryPage() {
         const results = await Promise.all(
           fetchTargets.map(async (target) => {
             const mapKey = `${target.plotId}|${target.nodeId || target.nodeUid || ""}`;
-            try {
-              const qs = new URLSearchParams();
-              qs.set("limit", "5000");
-              if (target.plotId) qs.set("plotId", String(target.plotId));
-              if (target.nodeId) qs.set("nodeId", String(target.nodeId));
 
-              const data = await apiGet(`/api/sensor-readings?${qs.toString()}`);
-              const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-              return [mapKey, items.map(normalizeReading)];
+            try {
+              const allItems = [];
+              const queryVariants = [];
+
+              if (target.plotId) {
+                queryVariants.push({ plotId: String(target.plotId) });
+              }
+              if (target.plotId && target.nodeId) {
+                queryVariants.push({ plotId: String(target.plotId), nodeId: String(target.nodeId) });
+              }
+              if (target.plotId && target.nodeUid) {
+                queryVariants.push({ plotId: String(target.plotId), nodeUid: String(target.nodeUid) });
+              }
+              if (target.nodeUid) {
+                queryVariants.push({ nodeUid: String(target.nodeUid) });
+              }
+              if (target.nodeId) {
+                queryVariants.push({ nodeId: String(target.nodeId) });
+              }
+
+              const seenReq = new Set();
+
+              for (const params of queryVariants) {
+                const reqKey = JSON.stringify(params);
+                if (seenReq.has(reqKey)) continue;
+                seenReq.add(reqKey);
+
+                const qs = new URLSearchParams();
+                qs.set("limit", "5000");
+
+                Object.entries(params).forEach(([k, v]) => {
+                  if (v) qs.set(k, v);
+                });
+
+                try {
+                  const data = await apiGet(`/api/sensor-readings?${qs.toString()}`);
+                  const items = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
+                  allItems.push(...items);
+                } catch {}
+              }
+
+              const seenItem = new Set();
+              const normalized = allItems
+                .map(normalizeReading)
+                .filter((item) => {
+                  const key =
+                    item.id ||
+                    [
+                      item.plotId,
+                      item.nodeId || item.nodeUid,
+                      item.sensorId || item.sensorUid || item.sensorKey,
+                      item.timestamp,
+                    ].join("|");
+
+                  if (!key) return false;
+                  if (seenItem.has(key)) return false;
+                  seenItem.add(key);
+                  return true;
+                });
+
+              return [mapKey, normalized];
             } catch {
               return [mapKey, []];
             }
@@ -863,23 +1051,33 @@ export default function HistoryPage() {
     const rows = [];
 
     for (const target of targetRows) {
-      const mapKey = `${target.plotId}|${target.nodeId || target.nodeUid || ""}`;
-      const nodeReadings = Array.isArray(readingMap[mapKey]) ? readingMap[mapKey] : [];
+      const directKey = `${target.plotId}|${target.nodeId || target.nodeUid || ""}`;
+      const plotOnlyPools = Object.entries(readingMap)
+        .filter(([k]) => k.startsWith(`${target.plotId}|`))
+        .flatMap(([, arr]) => (Array.isArray(arr) ? arr : []));
+      const nodeReadings = [
+        ...(Array.isArray(readingMap[directKey]) ? readingMap[directKey] : []),
+        ...plotOnlyPools,
+      ];
       const seenRowKeys = new Set();
 
       for (const item of nodeReadings) {
         const raw = item?.rawItem || item;
+
         const timestamp = getTimestampFromReading(raw);
         const dateKey = normalizeDateKey(timestamp);
         if (!dateKey) continue;
         if (dateKey < startDate || dateKey > endDate) continue;
+
+        const readingStatus = String(item?.status || raw?.status || raw?.state || "").trim().toLowerCase();
+        if (!isAcceptedStatus(readingStatus)) continue;
 
         const readingPlotId =
           item?.plotId || raw?.plotId || raw?.plot_id || raw?.plot?.id || raw?.plot?._id || "";
         const readingNodeId =
           item?.nodeId || raw?.nodeId || raw?.node_id || raw?.node?.id || raw?.node?._id || "";
         const readingNodeUid =
-          item?.nodeUid || raw?.nodeUid || raw?.node_uid || raw?.node?.uid || "";
+          item?.nodeUid || raw?.nodeUid || raw?.node_uid || raw?.node?.uid || raw?.uid || "";
         const readingSensorId =
           item?.sensorId || raw?.sensorId || raw?.sensor_id || raw?.sensor?.id || raw?.sensor?._id || "";
         const readingSensorUid =
@@ -890,38 +1088,39 @@ export default function HistoryPage() {
           raw?.sensorName ||
           raw?.sensor?.sensorType ||
           raw?.sensor?.name ||
+          raw?.name ||
           "";
 
         const readingKey = canonicalSensorKey(readingSensorType);
-
         if (readingPlotId && !sameText(readingPlotId, target.plotId)) continue;
 
-        const nodeMatched =
-          (!readingNodeId && !readingNodeUid) ||
-          sameText(readingNodeId, target.nodeId) ||
-          sameText(readingNodeUid, target.nodeUid);
-
-        if (!nodeMatched) continue;
-
         const rawValue = pickValueForSensorKey(raw, target.sensorKey);
-
         const sensorMatched =
           sameText(readingKey, target.sensorKey) ||
           (target.sensorId && sameText(readingSensorId, target.sensorId)) ||
           (target.sensorUid && sameText(readingSensorUid, target.sensorUid)) ||
           sameText(readingSensorType, target.rawSensorType) ||
           rawValue !== null;
-
         if (!sensorMatched) continue;
+
+        const nodeMatchedStrict =
+          sameText(readingNodeId, target.nodeId) ||
+          sameText(readingNodeUid, target.nodeUid) ||
+          sameText(readingNodeUid, target.nodeId) ||
+          sameText(readingNodeId, target.nodeUid);
+        const nodeMissingOnReading = !readingNodeId && !readingNodeUid;
+        const allowPlotLevelFallback = !nodeMatchedStrict && sensorMatched && (!target.nodeId && !target.nodeUid || nodeMissingOnReading);
+        if (!nodeMatchedStrict && !allowPlotLevelFallback && readingNodeId && readingNodeUid) continue;
+
         const value = safeDisplayValue(target.sensorKey, rawValue);
         if (value === null) continue;
 
+        const rowBucketTs = bucketTimestampMs(timestamp, 3) || timestamp;
         const rowKey = [
           target.plotId,
-          target.nodeId || target.nodeUid,
+          target.nodeId || target.nodeUid || "plot-fallback",
           target.sensorKey,
-          timestamp,
-          value,
+          rowBucketTs,
         ].join("|");
 
         if (seenRowKeys.has(rowKey)) continue;
@@ -941,13 +1140,13 @@ export default function HistoryPage() {
           unit: target.unit,
           value,
           timestamp,
-          status: raw?.status || item?.status || "",
+          status: readingStatus || "active",
           dateKey,
           source: "history",
         });
       }
 
-      const latestTimestamp = target.latestTimestamp || null;
+      const latestTimestamp = getTimestampFromReading({ timestamp: target.latestTimestamp });
       const latestDateKey = normalizeDateKey(latestTimestamp);
       const latestValue = safeDisplayValue(
         target.sensorKey,
@@ -983,7 +1182,7 @@ export default function HistoryPage() {
           unit: target.unit,
           value: latestValue,
           timestamp: latestTimestamp,
-          status: "",
+          status: "active",
           dateKey: latestDateKey,
           source: "latest",
         });
@@ -994,74 +1193,50 @@ export default function HistoryPage() {
     return rows;
   }, [targetRows, readingMap, startDate, endDate]);
 
-  const chartBucket = useMemo(() => {
-    const BUCKET_THRESHOLD_MS = 60 * 1000;
-
-    const uniq = Array.from(
-      new Set(
-        filteredReadingRows
-          .map((row) => row.timestamp)
-          .filter((value) => {
-            const time = new Date(value || "").getTime();
-            return Number.isFinite(time) && time > 0;
-          })
-      )
-    );
-
-    uniq.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-
-    const buckets = [];
-    const bucketMap = new Map();
-
-    for (const ts of uniq) {
-      const currentMs = new Date(ts).getTime();
-      const lastBucket = buckets[buckets.length - 1];
-
-      if (!lastBucket) {
-        buckets.push({ anchor: ts, anchorMs: currentMs, items: [ts] });
-        bucketMap.set(ts, ts);
-        continue;
-      }
-
-      if (Math.abs(currentMs - lastBucket.anchorMs) <= BUCKET_THRESHOLD_MS) {
-        lastBucket.items.push(ts);
-        bucketMap.set(ts, lastBucket.anchor);
-      } else {
-        buckets.push({ anchor: ts, anchorMs: currentMs, items: [ts] });
-        bucketMap.set(ts, ts);
-      }
-    }
-
-    return {
-      timestamps: buckets.map((b) => b.anchor),
-      bucketMap,
-    };
-  }, [filteredReadingRows]);
-
-  const chartTimestamps = chartBucket.timestamps;
-
   const combinedChart = useMemo(() => {
     if (!targetRows.length) return { series: [], timestamps: [] };
 
+    const bucketHours = 3;
+    const startMs = parseFlexibleDate(startDate)?.getTime?.() ?? null;
+    const endMs = parseFlexibleDate(endDate)?.getTime?.() ?? null;
+
+    const allBucketTimes = Array.from(
+      new Set(
+        filteredReadingRows
+          .map((row) => bucketTimestampMs(row.timestamp, bucketHours))
+          .filter((ts) => Number.isFinite(ts))
+          .filter((ts) => {
+            if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return true;
+            return ts >= startMs && ts <= endMs + 86399999;
+          })
+      )
+    ).sort((a, b) => a - b);
+
     const series = targetRows.map((target) => {
-      const valuesByTimestamp = new Map();
+      const valuesByBucket = new Map();
 
       filteredReadingRows
         .filter(
           (row) =>
             sameText(row.plotId, target.plotId) &&
-            (sameText(row.nodeId, target.nodeId) || sameText(row.nodeUid, target.nodeUid)) &&
-            sameText(row.sensorKey, target.sensorKey)
+            sameText(row.sensorKey, target.sensorKey) &&
+            (
+              sameText(row.nodeId, target.nodeId) ||
+              sameText(row.nodeUid, target.nodeUid) ||
+              (!row.nodeId && !row.nodeUid)
+            )
         )
         .forEach((row) => {
-          const bucketTimestamp = chartBucket.bucketMap.get(row.timestamp) || row.timestamp;
-          const prev = valuesByTimestamp.get(bucketTimestamp) || [];
+          const bucketTs = bucketTimestampMs(row.timestamp, bucketHours);
+          if (!Number.isFinite(bucketTs)) return;
+
+          const prev = valuesByBucket.get(bucketTs) || [];
           prev.push(row.value);
-          valuesByTimestamp.set(bucketTimestamp, prev);
+          valuesByBucket.set(bucketTs, prev);
         });
 
-      const values = chartTimestamps.map((ts) => {
-        const bucketValues = valuesByTimestamp.get(ts) || [];
+      const values = allBucketTimes.map((bucketTs) => {
+        const bucketValues = valuesByBucket.get(bucketTs) || [];
         const avg = average(bucketValues);
         return Number.isFinite(avg) ? avg : null;
       });
@@ -1080,7 +1255,7 @@ export default function HistoryPage() {
         sensorLabel: target.sensorLabel,
         unit: target.unit,
         label: `${target.plotName} · ${target.nodeName} · ${target.sensorLabel}`,
-        timestamps: chartTimestamps,
+        timestamps: allBucketTimes.map((ts) => new Date(ts).toISOString()),
         values,
         hasAnyValue: values.some((v) => Number.isFinite(v)),
       };
@@ -1088,9 +1263,9 @@ export default function HistoryPage() {
 
     return {
       series,
-      timestamps: chartTimestamps,
+      timestamps: allBucketTimes.map((ts) => new Date(ts).toISOString()),
     };
-  }, [targetRows, filteredReadingRows, chartTimestamps, chartBucket]);
+  }, [targetRows, filteredReadingRows, startDate, endDate]);
 
   const visibleChartSeries = useMemo(
     () => safeArray(combinedChart?.series).filter((s) => s.hasAnyValue),
@@ -1230,19 +1405,37 @@ export default function HistoryPage() {
   }, [activeSensorKeys, axisSensorOrder, sensorMinMax, t]);
 
   const chartSeriesLegend = useMemo(() => {
-    return visibleChartSeries.map((item, idx) => ({
-      key: item.key,
-      color: colorOfSensorKey(item.sensorKey),
-      label: item.label,
-      sensorLabel: item.sensorLabel,
-      plotName: item.plotName,
-      nodeName: item.nodeName,
-      unit: item.unit,
-      dash: dashedByIndex(idx),
-      points: item.values.filter((v) => Number.isFinite(v)).length,
-      plotColor: (PLOT_COLORS[((selectedPlotIds.indexOf(item.plotId) >= 0 ? selectedPlotIds.indexOf(item.plotId) : idx) % PLOT_COLORS.length)] || "#94a3b8"),
-    }));
-  }, [visibleChartSeries, selectedPlotIds]);
+    const grouped = activeSensorKeys.map((sensorKey) => {
+      const sensorItems = visibleChartSeries
+        .filter((item) => item.sensorKey === sensorKey)
+        .map((item, idx) => ({
+          key: item.key,
+          color: colorOfSensorKey(item.sensorKey),
+          label: item.label,
+          sensorLabel: item.sensorLabel,
+          plotName: item.plotName,
+          nodeName: item.nodeName,
+          unit: item.unit,
+          dash: dashedByIndex(idx),
+          points: item.values.filter((v) => Number.isFinite(v)).length,
+          plotColor:
+            PLOT_COLORS[
+              (selectedPlotIds.indexOf(item.plotId) >= 0 ? selectedPlotIds.indexOf(item.plotId) : idx) %
+                PLOT_COLORS.length
+            ] || "#94a3b8",
+        }));
+
+      return {
+        sensorKey,
+        sensorLabel: sensorLabelFromKey(sensorKey, t),
+        unit: sensorUnitFromKey(sensorKey),
+        color: colorOfSensorKey(sensorKey),
+        items: sensorItems,
+      };
+    });
+
+    return grouped.filter((group) => group.items.length > 0);
+  }, [activeSensorKeys, visibleChartSeries, selectedPlotIds, t]);
 
   const selectedSensorCount = selectedSensors.length;
   const visibleSensorCount = useMemo(
@@ -1429,7 +1622,7 @@ export default function HistoryPage() {
       stroke: {
         curve: "smooth",
         lineCap: "round",
-        width: chartType === "bar" ? 0 : 3.5,
+        width: chartType === "bar" ? 0 : 2.5,
         dashArray: apexSeries.map((s) => s.dashArray || 0),
       },
       fill: {
@@ -1455,6 +1648,17 @@ export default function HistoryPage() {
         type: "datetime",
         labels: {
           datetimeUTC: false,
+          formatter: (value) => {
+            const d = new Date(value);
+            if (Number.isNaN(d.getTime())) return "";
+            return d.toLocaleString(lang === "en" ? "en-US" : "th-TH", {
+              day: "2-digit",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            });
+          },
           style: {
             fontSize: "11px",
             fontWeight: 700,
@@ -1463,7 +1667,7 @@ export default function HistoryPage() {
       },
       yaxis: yAxes,
       tooltip: {
-        shared: false,
+        shared: true,
         intersect: false,
         x: {
           formatter: (value) => formatDateTimeLabel(value, lang),
@@ -1492,8 +1696,8 @@ export default function HistoryPage() {
         },
       },
       markers: {
-        size: chartType === "bar" ? 0 : 0,
-        strokeWidth: chartType === "bar" ? 0 : 2,
+        size: chartType === "bar" ? 0 : 1.5,
+        strokeWidth: chartType === "bar" ? 0 : 1.5,
         hover: {
           sizeOffset: 4,
         },
@@ -1841,25 +2045,44 @@ export default function HistoryPage() {
                     📚 {lang === "en" ? "Legend" : "คำอธิบายเส้นกราฟ"}
                   </div>
                   <div className="chart-right-legend-list">
-                    {chartSeriesLegend.map((item) => (
-                      <div key={item.key} className="chart-right-legend-item" title={`${item.label} (${item.unit})`}>
-                        <div className="chart-right-legend-visual">
-                          <span
-                            className="chart-series-line"
-                            style={{
-                              color: item.color,
-                              borderTopStyle: item.dash ? "dashed" : "solid",
-                            }}
-                          />
-                          <span
-                            className="chart-series-dot"
-                            style={{ background: item.color, boxShadow: `0 0 0 3px ${item.plotColor}22` }}
-                          />
+                    {chartSeriesLegend.map((group) => (
+                      <div key={group.sensorKey} className="chart-right-legend-group">
+                        <div
+                          className="chart-right-legend-group-title"
+                          style={{ borderLeftColor: group.color }}
+                        >
+                          {group.sensorLabel} ({group.unit})
                         </div>
-                        <div className="chart-right-legend-texts">
-                          <div className="chart-right-legend-main">{item.sensorLabel}</div>
-                          <div className="chart-right-legend-sub">{item.plotName} · {item.nodeName}</div>
-                          <div className="chart-right-legend-meta">{item.unit} · {item.points} pts</div>
+                        <div className="chart-right-legend-group-items">
+                          {group.items.map((item) => (
+                            <div
+                              key={item.key}
+                              className="chart-right-legend-item"
+                              title={`${item.label} (${item.unit})`}
+                            >
+                              <div className="chart-right-legend-visual">
+                                <span
+                                  className="chart-series-line"
+                                  style={{
+                                    color: item.plotColor,
+                                    borderTopStyle: item.dash ? "dashed" : "solid",
+                                  }}
+                                />
+                                <span
+                                  className="chart-series-dot"
+                                  style={{
+                                    background: group.color,
+                                    boxShadow: `0 0 0 3px ${item.plotColor}22`,
+                                  }}
+                                />
+                              </div>
+                              <div className="chart-right-legend-texts">
+                                <div className="chart-right-legend-main">{item.plotName}</div>
+                                <div className="chart-right-legend-sub">{item.nodeName}</div>
+                                <div className="chart-right-legend-meta">{item.points} pts</div>
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     ))}
@@ -2370,7 +2593,30 @@ export default function HistoryPage() {
           .chart-right-legend-list {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 12px;
+          }
+
+          .chart-right-legend-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+          }
+
+          .chart-right-legend-group-title {
+            font-size: 11px;
+            font-weight: 900;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            padding-left: 8px;
+            border-left: 3px solid #22c55e;
+            margin-left: 4px;
+          }
+
+          .chart-right-legend-group-items {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
           }
 
           .chart-right-legend-item {

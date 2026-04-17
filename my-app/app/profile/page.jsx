@@ -1,4 +1,4 @@
-"use client";
+ "use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -6,13 +6,15 @@ import TopBar from "../components/TopBar";
 
 const AUTH_KEYS = ["AUTH_TOKEN_V1", "token", "authToken", "pmtool_token", "duwims_token"];
 const DIRTY_KEY = "DUWIMS_UNSAVED_PROFILE";
-const LEGACY_PROFILE_NAME_KEY = "DUWIMS_PROFILE_NAME_LOCAL";
+const PROFILE_UPDATED_EVENT = "duwims-profile-updated";
 
 function readToken() {
   if (typeof window === "undefined") return "";
   for (const k of AUTH_KEYS) {
-    const v = window.localStorage.getItem(k);
-    if (v) return v;
+    try {
+      const v = window.localStorage.getItem(k);
+      if (v) return v;
+    } catch {}
   }
   return "";
 }
@@ -69,37 +71,15 @@ function getUserIdentity(user = {}) {
   ).trim();
 }
 
-function getProfileNameKeyByIdentity(identity) {
-  return identity
-    ? `DUWIMS_PROFILE_NAME_LOCAL_${identity}`
-    : LEGACY_PROFILE_NAME_KEY;
-}
-
-function readLegacyLocalName() {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.localStorage.getItem(LEGACY_PROFILE_NAME_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-function readScopedLocalName(identity) {
-  if (typeof window === "undefined") return "";
-  try {
-    const key = getProfileNameKeyByIdentity(identity);
-    return window.localStorage.getItem(key) || "";
-  } catch {
-    return "";
-  }
-}
-
-function writeScopedLocalName(identity, name) {
-  if (typeof window === "undefined") return;
-  try {
-    const key = getProfileNameKeyByIdentity(identity);
-    window.localStorage.setItem(key, String(name || "").trim());
-  } catch {}
+function getBackendDisplayName(user = {}) {
+  return String(
+    user?.nickname ||
+      user?.displayName ||
+      user?.name ||
+      user?.fullName ||
+      user?.username ||
+      ""
+  ).trim();
 }
 
 export default function AccountProfilePage() {
@@ -160,44 +140,26 @@ export default function AccountProfilePage() {
 
         const user = me?.user || {};
         const identity = getUserIdentity(user);
-        const scopedLocalName = readScopedLocalName(identity);
-        const legacyLocalName = readLegacyLocalName();
-
-        const backendName =
-          user?.nickname ||
-          user?.displayName ||
-          user?.name ||
-          user?.fullName ||
-          user?.username ||
-          "";
-
-        const nextName = String(
-          backendName || scopedLocalName || legacyLocalName || ""
-        ).trim();
+        const backendName = getBackendDisplayName(user);
 
         setProfileIdentity(identity);
-        setSavedName(nextName);
-        setDraftName(nextName);
 
-        if (nextName) {
-          writeScopedLocalName(identity, nextName);
-        }
-
-        if (!nextName) {
+        if (backendName) {
+          setSavedName(backendName);
+          setDraftName(backendName);
+          setEditMode(false);
+        } else {
+          setSavedName("");
+          setDraftName("");
           setEditMode(true);
         }
       } catch {
         if (!active) return;
 
-        const legacyLocalName = readLegacyLocalName();
-
         setProfileIdentity("");
-        setSavedName(legacyLocalName);
-        setDraftName(legacyLocalName);
-
-        if (!legacyLocalName) {
-          setEditMode(true);
-        }
+        setSavedName("");
+        setDraftName("");
+        setEditMode(true);
       } finally {
         if (active) setLoading(false);
       }
@@ -258,6 +220,11 @@ export default function AccountProfilePage() {
   };
 
   const cancelEdit = () => {
+    if (!hasProfileData) {
+      askBeforeLeave("/dashboard");
+      return;
+    }
+
     if (dirty) {
       setConfirmTitle("ยกเลิกการแก้ไข");
       setConfirmMessage("ต้องการยกเลิกการแก้ไขชื่อและกลับไปใช้ข้อมูลเดิมหรือไม่");
@@ -316,27 +283,12 @@ export default function AccountProfilePage() {
 
       const updatedUser = result?.user || {};
       const confirmedName = String(
-        updatedUser?.nickname ||
-          updatedUser?.displayName ||
-          updatedUser?.name ||
-          nextName
+        getBackendDisplayName(updatedUser) || nextName
       ).trim();
       const nextIdentity = getUserIdentity(updatedUser) || profileIdentity;
 
       if (result?.token) {
         writeTokenToAllKeys(result.token);
-      }
-
-      writeScopedLocalName(nextIdentity, confirmedName);
-      if (
-        typeof window !== "undefined" &&
-        profileIdentity &&
-        nextIdentity &&
-        profileIdentity !== nextIdentity
-      ) {
-        try {
-          window.localStorage.removeItem(getProfileNameKeyByIdentity(profileIdentity));
-        } catch {}
       }
 
       setProfileIdentity(nextIdentity);
@@ -347,7 +299,7 @@ export default function AccountProfilePage() {
       if (typeof window !== "undefined") {
         sessionStorage.removeItem(DIRTY_KEY);
         window.dispatchEvent(
-          new CustomEvent("duwims-profile-updated", {
+          new CustomEvent(PROFILE_UPDATED_EVENT, {
             detail: { name: confirmedName, identity: nextIdentity },
           })
         );

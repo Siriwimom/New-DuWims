@@ -1309,17 +1309,17 @@ export default function YieldPage() {
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
           }
 
-          .yield-table-card {
-            min-height: 200px;
-            background: #163d0b !important;
-            border: 2px solid #163d0b !important;
-            border-radius: 22px !important;
-            box-shadow: none !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            width: 100%;
-            min-width: 0;
-          }
+.yield-table-card {
+  min-height: auto;
+  background: #ffffff !important;
+  border: 1px solid #e5e7eb !important;
+  border-radius: 22px !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  width: 100%;
+  min-width: 0;
+}
 
           .yield-table-card > div {
             width: 100%;

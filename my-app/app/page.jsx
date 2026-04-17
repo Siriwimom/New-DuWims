@@ -927,7 +927,7 @@ export default function App() {
               <div className="modalTitle">{modal.title}</div>
               <div className="modalDesc">{modal.desc}</div>
 
-              <button className="btn solid" style={{ marginTop: 16 }} onClick={modal.onClose}>
+              <button className="btn solid" style={{ marginTop: 16 ,width: "min(320px, 78vw)"  }} onClick={modal.onClose}>
                 {modal.buttonText}
               </button>
             </div>
@@ -1202,6 +1202,13 @@ h1{
   align-items:center;
   justify-content:center;
 }
+
+.modalActionBtn{
+  width:min(320px, 78vw);
+  margin-left:auto;
+  margin-right:auto;
+}
+
 .checkInner{
   width:54px;
   height:54px;
