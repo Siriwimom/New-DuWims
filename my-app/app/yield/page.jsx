@@ -123,7 +123,6 @@ function toExcelNumberValue(value) {
 export default function YieldPage() {
   const { lang, t } = useDuwimsT();
 
-
   const tx = useMemo(
     () => ({
       title: lang === "en" ? "🌾 Management Planting" : "🌾 Management Planting",
@@ -713,16 +712,16 @@ export default function YieldPage() {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: 13,
+            marginBottom: 18,
             flexWrap: "wrap",
-            gap: 9,
+            gap: 14,
           }}
         >
-          <div className="card-title" style={{ fontSize: 15 }}>
+          <div className="card-title yield-page-title">
             {tx.title}
           </div>
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <button
               className="export-btn"
               style={{ marginBottom: 0 }}
@@ -732,7 +731,7 @@ export default function YieldPage() {
               {tx.exportCsv}
             </button>
             <button
-              className="create-btn"
+              className="create-btn yield-create-btn"
               style={{ marginBottom: 0 }}
               onClick={openCreatePopup}
               type="button"
@@ -746,10 +745,10 @@ export default function YieldPage() {
 
         <div className="yield-filters responsive-yield-filters">
           <div className="yield-filter-col">
-            <div className="filter-label">{tx.plot}</div>
+            <div className="filter-label yield-filter-label">{tx.plot}</div>
             <select
-              className="form-select"
-              style={{ width: 140 }}
+              className="form-select yield-filter-input"
+              style={{ width: 180 }}
               value={filterPlot}
               onChange={(e) => setFilterPlot(e.target.value)}
             >
@@ -763,10 +762,10 @@ export default function YieldPage() {
           </div>
 
           <div className="yield-filter-col">
-            <div className="filter-label">{tx.species}</div>
+            <div className="filter-label yield-filter-label">{tx.species}</div>
             <select
-              className="form-select"
-              style={{ width: 130 }}
+              className="form-select yield-filter-input"
+              style={{ width: 180 }}
               value={filterSpecies}
               onChange={(e) => setFilterSpecies(e.target.value)}
             >
@@ -780,24 +779,24 @@ export default function YieldPage() {
           </div>
 
           <div className="yield-filter-col">
-            <div className="filter-label">{tx.startDate}</div>
+            <div className="filter-label yield-filter-label">{tx.startDate}</div>
             <input
               type="date"
-              className="form-input date-input-clean"
+              className="form-input date-input-clean yield-filter-input"
               data-display={getDateDisplayText(filterStartDate)}
-              style={{ width: 148 }}
+              style={{ width: 188 }}
               value={filterStartDate}
               onChange={(e) => setFilterStartDate(e.target.value)}
             />
           </div>
 
           <div className="yield-filter-col">
-            <div className="filter-label">{tx.endDate}</div>
+            <div className="filter-label yield-filter-label">{tx.endDate}</div>
             <input
               type="date"
-              className="form-input date-input-clean"
+              className="form-input date-input-clean yield-filter-input"
               data-display={getDateDisplayText(filterEndDate)}
-              style={{ width: 148 }}
+              style={{ width: 188 }}
               value={filterEndDate}
               onChange={(e) => setFilterEndDate(e.target.value)}
             />
@@ -1237,25 +1236,46 @@ export default function YieldPage() {
         )}
 
         <style jsx>{`
+          .yield-page-title {
+            font-size: 19px !important;
+            font-weight: 800;
+            line-height: 1.35;
+          }
+
           .yield-error-banner {
-            margin-bottom: 10px;
+            margin-bottom: 12px;
             border-radius: 12px;
-            padding: 10px 12px;
+            padding: 12px 14px;
             background: #fff3f3;
             border: 1px solid #ffd1d1;
             color: #b42318;
-            font-size: 12px;
-            line-height: 1.45;
+            font-size: 14px;
+            line-height: 1.5;
             word-break: break-word;
             overflow-wrap: break-word;
+          }
+
+          .yield-filter-label {
+            font-size: 14px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            margin-bottom: 8px;
+          }
+
+          .yield-filter-input {
+            font-size: 15px;
+            min-height: 50px;
+            padding-left: 14px;
+            padding-right: 14px;
+            border-radius: 18px;
           }
 
           .date-error-text {
             margin-top: 6px;
             color: #c62828;
-            font-size: 12px;
+            font-size: 13px;
             font-weight: 700;
-            line-height: 1.4;
+            line-height: 1.45;
           }
 
           .date-input-clean {
@@ -1275,12 +1295,13 @@ export default function YieldPage() {
           .date-input-clean::before {
             content: attr(data-display);
             position: absolute;
-            left: 12px;
+            left: 14px;
             top: 50%;
             transform: translateY(-50%);
             color: #111827;
             pointer-events: none;
             white-space: nowrap;
+            font-size: 15px;
           }
 
           .date-input-clean:focus::before {
@@ -1298,28 +1319,34 @@ export default function YieldPage() {
             color: transparent;
           }
 
+          .export-btn,
+          .yield-create-btn {
+            font-size: 15px;
+            font-weight: 800;
+            min-height: 50px;
+            padding: 12px 20px;
+            border-radius: 18px;
+          }
+
           .export-btn {
             border: none;
-            border-radius: 999px;
             background: #ffffff;
             color: #163d0b;
-            font-weight: 800;
-            padding: 10px 14px;
             cursor: pointer;
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
           }
 
-.yield-table-card {
-  min-height: auto;
-  background: #ffffff !important;
-  border: 1px solid #e5e7eb !important;
-  border-radius: 22px !important;
-  box-shadow: none !important;
-  padding: 0 !important;
-  overflow: hidden !important;
-  width: 100%;
-  min-width: 0;
-}
+          .yield-table-card {
+            min-height: auto;
+            background: #ffffff !important;
+            border: 1px solid #e5e7eb !important;
+            border-radius: 22px !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+            width: 100%;
+            min-width: 0;
+          }
 
           .yield-table-card > div {
             width: 100%;
@@ -1330,7 +1357,7 @@ export default function YieldPage() {
 
           .yield-table {
             width: 100%;
-            min-width: 900px;
+            min-width: 980px;
             border-collapse: separate;
             border-spacing: 0;
             table-layout: fixed;
@@ -1341,7 +1368,9 @@ export default function YieldPage() {
             white-space: nowrap;
             text-align: center;
             vertical-align: middle;
-            padding: 16px 18px;
+            font-size: 16px;
+            line-height: 1.3;
+            padding: 22px 20px;
             background: #163d0b;
             color: #ffffff;
             font-weight: 800;
@@ -1358,14 +1387,21 @@ export default function YieldPage() {
           .yield-table tbody td {
             text-align: center;
             vertical-align: middle;
-            padding: 14px 18px;
+            font-size: 15px;
+            line-height: 1.45;
+            padding: 20px 18px;
             background: #ffffff !important;
             word-break: break-word;
             overflow-wrap: break-word;
           }
 
+          .yield-table tbody td strong {
+            font-size: 16px;
+            font-weight: 800;
+          }
+
           .yield-table tbody tr {
-            height: 76px;
+            height: 96px;
           }
 
           .yield-table tbody tr:last-child td:first-child {
@@ -1410,27 +1446,63 @@ export default function YieldPage() {
           .yield-table th:nth-child(6),
           .yield-table td:nth-child(6) {
             width: auto;
-            min-width: 140px;
+            min-width: 170px;
           }
 
           .yield-empty-cell {
             text-align: center !important;
             vertical-align: middle;
-            padding: 54px 18px !important;
+            padding: 58px 18px !important;
             color: #7b8794;
             font-weight: 600;
+            font-size: 15px;
             background: #ffffff !important;
           }
 
           .yield-actions-cell {
             display: flex;
-            gap: 8px;
+            gap: 10px;
             flex-wrap: nowrap;
             align-items: center;
             justify-content: center;
           }
 
+          .yield-actions-cell :global(.edit-row-btn),
+          .yield-actions-cell :global(.del-row-btn) {
+            font-size: 14px;
+            font-weight: 700;
+            min-height: 38px;
+            padding: 8px 14px;
+            border-radius: 12px;
+          }
+
           @media (max-width: 1200px) {
+            .yield-filters {
+              display: grid;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 12px;
+            }
+
+            .yield-filter-col {
+              min-width: 0;
+            }
+
+            .yield-filter-col .form-select,
+            .yield-filter-col .form-input {
+              width: 100% !important;
+              min-width: 0;
+            }
+
+            .yield-table {
+              min-width: 920px;
+            }
+          }
+
+          @media (max-width: 900px) {
+            .yield-page-title {
+              font-size: 18px !important;
+            }
+
             .yield-filters {
               display: grid;
               grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1450,32 +1522,19 @@ export default function YieldPage() {
             .yield-table {
               min-width: 860px;
             }
-          }
 
-          @media (max-width: 900px) {
-            .yield-filters {
-              display: grid;
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-              gap: 10px;
+            .yield-table thead th {
+              font-size: 15px;
+              padding: 18px 16px;
             }
 
-            .yield-filter-col {
-              min-width: 0;
-            }
-
-            .yield-filter-col .form-select,
-            .yield-filter-col .form-input {
-              width: 100% !important;
-              min-width: 0;
-            }
-
-            .yield-table {
-              min-width: 820px;
-            }
-
-            .yield-table thead th,
             .yield-table tbody td {
-              padding: 13px 14px;
+              font-size: 14px;
+              padding: 16px 14px;
+            }
+
+            .yield-table tbody tr {
+              height: 88px;
             }
           }
 
@@ -1497,13 +1556,17 @@ export default function YieldPage() {
             }
 
             .yield-table {
-              min-width: 760px;
+              min-width: 780px;
             }
 
-            .yield-table thead th,
+            .yield-table thead th {
+              padding: 14px 12px;
+              font-size: 13px;
+            }
+
             .yield-table tbody td {
-              padding: 12px 12px;
-              font-size: 12px;
+              padding: 14px 12px;
+              font-size: 13px;
             }
 
             .yield-actions-cell {
@@ -1518,13 +1581,13 @@ export default function YieldPage() {
 
           @media (max-width: 480px) {
             .yield-table {
-              min-width: 700px;
+              min-width: 720px;
             }
 
             .yield-table thead th,
             .yield-table tbody td {
-              padding: 10px 10px;
-              font-size: 11px;
+              padding: 12px 10px;
+              font-size: 12px;
             }
 
             .yield-empty-cell {

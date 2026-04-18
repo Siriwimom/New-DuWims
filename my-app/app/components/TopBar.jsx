@@ -416,12 +416,12 @@ export default function TopBar() {
     const nextOwnerUid = String(linkOwnerUid || "").trim();
 
     if (!token) {
-      openPopup("error", "เชื่อม Owner ไม่สำเร็จ", "ไม่พบ token การเข้าสู่ระบบ");
+      openPopup("error", lang === "en" ? "Unable to link orchard code" : "เชื่อมรหัสของสวนไม่สำเร็จ", lang === "en" ? "Login token was not found." : "ไม่พบ token การเข้าสู่ระบบ");
       return;
     }
 
     if (!nextOwnerUid) {
-      openPopup("error", "ข้อมูลไม่ครบ", "กรุณากรอก Owner UID");
+      openPopup("error", lang === "en" ? "Incomplete information" : "ข้อมูลไม่ครบ", lang === "en" ? "Please enter the orchard code." : "กรุณากรอก รหัสของสวน (Orchard Code)");
       return;
     }
 
@@ -446,9 +446,9 @@ export default function TopBar() {
       setLinkOwnerUid("");
       await syncAuth();
 
-      openPopup("success", "เชื่อมสำเร็จ", "เชื่อมบัญชีพนักงานเข้ากับ Owner UID เรียบร้อยแล้ว");
+      openPopup("success", lang === "en" ? "Linked successfully" : "เชื่อมสำเร็จ", lang === "en" ? "The employee account has been linked to the orchard code successfully." : "เชื่อมบัญชีพนักงานเข้ากับ รหัสของสวน (Orchard Code) เรียบร้อยแล้ว");
     } catch (err) {
-      openPopup("error", "เชื่อม Owner ไม่สำเร็จ", err?.message || "ไม่สามารถเชื่อม Owner UID ได้");
+      openPopup("error", lang === "en" ? "Unable to link orchard code" : "เชื่อมรหัสของสวนไม่สำเร็จ", err?.message || (lang === "en" ? "Unable to link the orchard code." : "ไม่สามารถเชื่อมรหัสของสวนได้"));
     } finally {
       setLinkingOwner(false);
     }
@@ -573,7 +573,8 @@ export default function TopBar() {
                         <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
                           <div className="profile-icon">#</div>
                           <div className="profile-row-text">
-                            <div className="profile-row-title">UID ของ Owner</div>
+                            <div className="profile-row-title">{lang === "en" ? "Orchard Code" : "รหัสของสวน"}</div>
+                            <div className="profile-row-sub">{lang === "en" ? "Code used to identify the orchard" : "Orchard Code"}</div>
                             <div className="profile-row-sub" style={{ wordBreak: "break-all" }}>
                               {ownerUid}
                             </div>
@@ -587,9 +588,9 @@ export default function TopBar() {
                           onClick={async () => {
                             try {
                               await navigator.clipboard.writeText(ownerUid);
-                              openPopup("success", "คัดลอกสำเร็จ", "คัดลอก UID เรียบร้อยแล้ว");
+                              openPopup("success", lang === "en" ? "Copied successfully" : "คัดลอกสำเร็จ", lang === "en" ? "The orchard code has been copied." : "คัดลอกรหัสของสวนเรียบร้อยแล้ว");
                             } catch {
-                              openPopup("error", "คัดลอกไม่สำเร็จ", "ไม่สามารถคัดลอก UID ได้");
+                              openPopup("error", lang === "en" ? "Copy failed" : "คัดลอกไม่สำเร็จ", lang === "en" ? "Unable to copy the orchard code." : "ไม่สามารถคัดลอกรหัสของสวนได้");
                             }
                           }}
                         >
@@ -609,9 +610,9 @@ export default function TopBar() {
                       >
                         <div className="profile-icon">#</div>
                         <div className="profile-row-text">
-                          <div className="profile-row-title">เชื่อม Owner UID</div>
+                          <div className="profile-row-title">{lang === "en" ? "Link Orchard Code" : "เชื่อมรหัสของสวน"}</div>
                           <div className="profile-row-sub">
-                            {ownerUid ? `UID ปัจจุบัน: ${ownerUid}` : "ยังไม่ได้เชื่อมกับ Owner"}
+                            {ownerUid ? (lang === "en" ? `Current orchard code: ${ownerUid}` : `รหัสของสวนปัจจุบัน: ${ownerUid}`) : (lang === "en" ? "Not linked to an orchard code yet" : "ยังไม่ได้เชื่อมกับรหัสของสวน")}
                           </div>
                         </div>
                       </button>
@@ -619,19 +620,19 @@ export default function TopBar() {
                       <div className="profile-expand" style={{ display: "block" }}>
                         <form onSubmit={handleLinkOwner} className="form-stack">
                           <div>
-                            <label className="form-label">Owner UID</label>
+                            <label className="form-label">{lang === "en" ? "Orchard Code" : "รหัสของสวน (Orchard Code)"}</label>
                             <input
                               type="text"
                               value={linkOwnerUid}
                               onChange={(e) => setLinkOwnerUid(e.target.value)}
                               className="form-input"
-                              placeholder="กรอก UID ของ Owner"
+                              placeholder={lang === "en" ? "Enter orchard code" : "กรอก รหัสของสวน"}
                             />
                           </div>
 
                           <div className="form-actions">
                             <button type="submit" className="save-btn" disabled={linkingOwner}>
-                              {linkingOwner ? "กำลังเชื่อม..." : "เชื่อม Owner"}
+                              {linkingOwner ? (lang === "en" ? "Linking..." : "กำลังเชื่อม...") : (lang === "en" ? "Link Orchard Code" : "เชื่อมรหัสของสวน")}
                             </button>
                           </div>
                         </form>
@@ -647,7 +648,8 @@ export default function TopBar() {
                     >
                       <div className="profile-icon">◌</div>
                       <div className="profile-row-text">
-                        <div className="profile-row-title">setting name</div>
+                        <div className="profile-row-title">{lang === "en" ? "Profile Settings" : "ตั้งค่าโปรไฟล์"}</div>
+                        <div className="profile-row-sub">{lang === "en" ? "Profile Settings" : "Profile Settings"}</div>
                       </div>
                     </button>
                   </div>
@@ -660,8 +662,8 @@ export default function TopBar() {
                     >
                       <div className="profile-icon">⟲</div>
                       <div className="profile-row-text">
-                        <div className="profile-row-title">เปลี่ยนรหัสผ่าน</div>
-                        <div className="profile-row-sub">ไปยังหน้าจัดการรหัสผ่าน</div>
+                        <div className="profile-row-title">{lang === "en" ? "Password Settings" : "ตั้งค่ารหัสผ่าน"}</div>
+                        <div className="profile-row-sub">{lang === "en" ? "Password Settings" : "Password Settings"}</div>
                       </div>
                     </button>
                   </div>

@@ -1,8 +1,9 @@
- "use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import TopBar from "../components/TopBar";
+import { useDuwimsT } from "../components/language-context";
 
 const AUTH_KEYS = ["AUTH_TOKEN_V1", "token", "authToken", "pmtool_token", "duwims_token"];
 const DIRTY_KEY = "DUWIMS_UNSAVED_PROFILE";
@@ -85,6 +86,48 @@ function getBackendDisplayName(user = {}) {
 export default function AccountProfilePage() {
   const router = useRouter();
   const apiBase = getApiBase();
+  const { lang } = useDuwimsT();
+
+  const txt = {
+    back: lang === "en" ? "← Back" : "← กลับ",
+    title: lang === "en" ? "Profile Settings" : "ตั้งค่าโปรไฟล์",
+    subtitle: lang === "en" ? "Manage your profile information" : "จัดการข้อมูลโปรไฟล์",
+    edit: lang === "en" ? "Edit" : "แก้ไข",
+    loading: lang === "en" ? "Loading..." : "กำลังโหลดข้อมูล...",
+    noNameTitle: lang === "en" ? "No profile name yet" : "ยังไม่มีชื่อผู้ใช้",
+    noNameText: lang === "en" ? "Please enter your name" : "กรุณากรอกชื่อ",
+    name: lang === "en" ? "Name" : "ชื่อ",
+    namePlaceholder: lang === "en" ? "Please enter your name" : "กรุณากรอกชื่อ",
+    save: lang === "en" ? "Save" : "บันทึก",
+    saving: lang === "en" ? "Saving..." : "กำลังบันทึก...",
+    cancel: lang === "en" ? "Cancel" : "ยกเลิก",
+    ok: lang === "en" ? "OK" : "ตกลง",
+    stayHere: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
+    discardEdit: lang === "en" ? "Discard changes" : "ยกเลิกการแก้ไข",
+
+    unsavedTitle: lang === "en" ? "You have unsaved changes" : "มีการแก้ไขที่ยังไม่บันทึก",
+    unsavedMessage:
+      lang === "en"
+        ? "You are currently editing your profile name.\nDo you want to discard your changes and leave this page, or stay here?"
+        : "คุณกำลังอยู่ระหว่างแก้ไขชื่อผู้ใช้\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
+
+    cancelEditTitle: lang === "en" ? "Cancel editing" : "ยกเลิกการแก้ไข",
+    cancelEditMessage:
+      lang === "en"
+        ? "Do you want to cancel editing and restore the previous name?"
+        : "ต้องการยกเลิกการแก้ไขชื่อและกลับไปใช้ข้อมูลเดิมหรือไม่",
+
+    saveFailedTitle: lang === "en" ? "Save failed" : "บันทึกไม่สำเร็จ",
+    saveSuccessTitle: lang === "en" ? "Saved successfully" : "บันทึกสำเร็จ",
+    saveSuccessMessage:
+      lang === "en" ? "Your profile name has been saved." : "บันทึกชื่อเรียบร้อยแล้ว",
+    tokenMissing:
+      lang === "en" ? "Login token not found." : "ไม่พบ token การเข้าสู่ระบบ",
+    nameRequired:
+      lang === "en" ? "Please enter your name." : "กรุณากรอกชื่อ",
+    saveFailedFallback:
+      lang === "en" ? "Unable to save your name." : "ไม่สามารถบันทึกชื่อได้",
+  };
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -100,8 +143,7 @@ export default function AccountProfilePage() {
   const [popupMessage, setPopupMessage] = useState("");
 
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmTitle, setConfirmTitle] = useState("");
-  const [confirmMessage, setConfirmMessage] = useState("");
+  const [confirmMode, setConfirmMode] = useState("");
   const [pendingHref, setPendingHref] = useState("");
 
   const dirty = useMemo(() => {
@@ -111,6 +153,20 @@ export default function AccountProfilePage() {
   const hasProfileData = useMemo(() => {
     return Boolean(String(savedName || "").trim());
   }, [savedName]);
+
+  const confirmContent = useMemo(() => {
+    if (confirmMode === "reset") {
+      return {
+        title: txt.cancelEditTitle,
+        message: txt.cancelEditMessage,
+      };
+    }
+
+    return {
+      title: txt.unsavedTitle,
+      message: txt.unsavedMessage,
+    };
+  }, [confirmMode, txt.cancelEditMessage, txt.cancelEditTitle, txt.unsavedMessage, txt.unsavedTitle]);
 
   const openPopup = (type, title, message) => {
     setPopupType(type);
@@ -199,10 +255,7 @@ export default function AccountProfilePage() {
     }
 
     setPendingHref(href);
-    setConfirmTitle("มีการแก้ไขที่ยังไม่บันทึก");
-    setConfirmMessage(
-      "คุณกำลังอยู่ระหว่างแก้ไขชื่อผู้ใช้\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ"
-    );
+    setConfirmMode("leave");
     setConfirmOpen(true);
   };
 
@@ -216,6 +269,7 @@ export default function AccountProfilePage() {
 
     const href = pendingHref;
     setPendingHref("");
+    setConfirmMode("");
     if (href) router.push(href);
   };
 
@@ -226,9 +280,8 @@ export default function AccountProfilePage() {
     }
 
     if (dirty) {
-      setConfirmTitle("ยกเลิกการแก้ไข");
-      setConfirmMessage("ต้องการยกเลิกการแก้ไขชื่อและกลับไปใช้ข้อมูลเดิมหรือไม่");
       setPendingHref("__RESET__");
+      setConfirmMode("reset");
       setConfirmOpen(true);
       return;
     }
@@ -238,7 +291,7 @@ export default function AccountProfilePage() {
   };
 
   const onConfirmPopup = () => {
-    if (pendingHref === "__RESET__") {
+    if (pendingHref === "__RESET__" || confirmMode === "reset") {
       setDraftName(savedName);
       setEditMode(false);
       if (typeof window !== "undefined") {
@@ -246,24 +299,31 @@ export default function AccountProfilePage() {
       }
       setConfirmOpen(false);
       setPendingHref("");
+      setConfirmMode("");
       return;
     }
 
     discardAndLeave();
   };
 
+  const closeConfirm = () => {
+    setConfirmOpen(false);
+    setPendingHref("");
+    setConfirmMode("");
+  };
+
   const handleSave = async () => {
     const token = readToken();
 
     if (!token) {
-      openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบ token การเข้าสู่ระบบ");
+      openPopup("error", txt.saveFailedTitle, txt.tokenMissing);
       return;
     }
 
     const nextName = String(draftName || "").trim();
 
     if (!nextName) {
-      openPopup("error", "บันทึกไม่สำเร็จ", "กรุณากรอกชื่อ");
+      openPopup("error", txt.saveFailedTitle, txt.nameRequired);
       return;
     }
 
@@ -305,9 +365,9 @@ export default function AccountProfilePage() {
         );
       }
 
-      openPopup("success", "บันทึกสำเร็จ", "บันทึกชื่อเรียบร้อยแล้ว");
+      openPopup("success", txt.saveSuccessTitle, txt.saveSuccessMessage);
     } catch (err) {
-      openPopup("error", "บันทึกไม่สำเร็จ", err?.message || "ไม่สามารถบันทึกชื่อได้");
+      openPopup("error", txt.saveFailedTitle, err?.message || txt.saveFailedFallback);
     } finally {
       setSaving(false);
     }
@@ -325,12 +385,12 @@ export default function AccountProfilePage() {
               className="back-btn"
               onClick={() => askBeforeLeave("/dashboard")}
             >
-              ← กลับ
+              {txt.back}
             </button>
 
             <div className="head-copy">
-              <div className="page-title">setting name</div>
-              <div className="page-subtitle">ตั้งค่าชื่อ</div>
+              <div className="page-title">{txt.title}</div>
+              <div className="page-subtitle">{txt.subtitle}</div>
             </div>
 
             {hasProfileData && !loading && !editMode ? (
@@ -339,24 +399,24 @@ export default function AccountProfilePage() {
                 className="top-edit-btn"
                 onClick={() => setEditMode(true)}
               >
-                แก้ไข
+                {txt.edit}
               </button>
             ) : null}
           </div>
 
           {loading ? (
-            <div className="loading-box">กำลังโหลดข้อมูล...</div>
+            <div className="loading-box">{txt.loading}</div>
           ) : !hasProfileData ? (
             <div className="content-wrap">
               <div className="empty-note-card">
-                <div className="empty-note-title">ยังไม่มีชื่อผู้ใช้</div>
-                <div className="empty-note-list">กรุณากรอกชื่อ</div>
+                <div className="empty-note-title">{txt.noNameTitle}</div>
+                <div className="empty-note-list">{txt.noNameText}</div>
               </div>
 
               <div className="form-grid one-col">
                 <div className="field">
                   <label className="label">
-                    ชื่อ <span className="required-star">*</span>
+                    {txt.name} <span className="required-star">*</span>
                   </label>
                   <input
                     className="input"
@@ -364,7 +424,7 @@ export default function AccountProfilePage() {
                     value={draftName}
                     onChange={(e) => setDraftName(e.target.value)}
                     disabled={saving}
-                    placeholder="กรุณากรอกชื่อ"
+                    placeholder={txt.namePlaceholder}
                   />
                 </div>
               </div>
@@ -376,7 +436,7 @@ export default function AccountProfilePage() {
                   onClick={handleSave}
                   disabled={saving}
                 >
-                  {saving ? "กำลังบันทึก..." : "บันทึก"}
+                  {saving ? txt.saving : txt.save}
                 </button>
 
                 <button
@@ -385,7 +445,7 @@ export default function AccountProfilePage() {
                   onClick={() => askBeforeLeave("/dashboard")}
                   disabled={saving}
                 >
-                  ยกเลิก
+                  {txt.cancel}
                 </button>
               </div>
             </div>
@@ -393,7 +453,7 @@ export default function AccountProfilePage() {
             <div className="content-wrap">
               <div className="view-grid one-col">
                 <div className="view-card">
-                  <div className="view-label">ชื่อ</div>
+                  <div className="view-label">{txt.name}</div>
                   <div className="view-value">{savedName || "-"}</div>
                 </div>
               </div>
@@ -403,7 +463,7 @@ export default function AccountProfilePage() {
               <div className="form-grid one-col">
                 <div className="field">
                   <label className="label">
-                    ชื่อ <span className="required-star">*</span>
+                    {txt.name} <span className="required-star">*</span>
                   </label>
                   <input
                     className="input"
@@ -411,7 +471,7 @@ export default function AccountProfilePage() {
                     value={draftName}
                     onChange={(e) => setDraftName(e.target.value)}
                     disabled={saving}
-                    placeholder="กรุณากรอกชื่อ"
+                    placeholder={txt.namePlaceholder}
                   />
                 </div>
               </div>
@@ -423,7 +483,7 @@ export default function AccountProfilePage() {
                   onClick={handleSave}
                   disabled={saving}
                 >
-                  {saving ? "กำลังบันทึก..." : "บันทึก"}
+                  {saving ? txt.saving : txt.save}
                 </button>
 
                 <button
@@ -432,7 +492,7 @@ export default function AccountProfilePage() {
                   onClick={cancelEdit}
                   disabled={saving}
                 >
-                  ยกเลิก
+                  {txt.cancel}
                 </button>
               </div>
             </div>
@@ -453,32 +513,32 @@ export default function AccountProfilePage() {
               className={`popup-btn ${popupType}`}
               onClick={() => setPopupOpen(false)}
             >
-              ตกลง
+              {txt.ok}
             </button>
           </div>
         </div>
       )}
 
       {confirmOpen && (
-        <div className="popup-overlay" onClick={() => setConfirmOpen(false)}>
+        <div className="popup-overlay" onClick={closeConfirm}>
           <div className="popup-card" onClick={(e) => e.stopPropagation()}>
             <div className="popup-icon warn">!</div>
-            <div className="popup-title">{confirmTitle}</div>
-            <div className="popup-message">{confirmMessage}</div>
+            <div className="popup-title">{confirmContent.title}</div>
+            <div className="popup-message">{confirmContent.message}</div>
             <div className="popup-actions">
               <button
                 type="button"
                 className="popup-btn ghost"
-                onClick={() => setConfirmOpen(false)}
+                onClick={closeConfirm}
               >
-                อยู่หน้าเดิม
+                {txt.stayHere}
               </button>
               <button
                 type="button"
                 className="popup-btn danger"
                 onClick={onConfirmPopup}
               >
-                ยกเลิกการแก้ไข
+                {txt.discardEdit}
               </button>
             </div>
           </div>
