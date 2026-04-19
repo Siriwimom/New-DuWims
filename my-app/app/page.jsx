@@ -147,8 +147,10 @@ export default function App() {
   }
 
   function goToDashboard() {
-    router.replace("/dashboard");
-  }
+  setTimeout(() => {
+    window.location.replace("/dashboard");
+  }, 250);
+}
 
   function finishLoginFlow(user) {
     setSessionUser(user || null);
@@ -498,74 +500,71 @@ export default function App() {
   }
 
   useEffect(() => {
-    let mounted = true;
+  let mounted = true;
 
-    async function bootstrapSession() {
-      try {
-        const url = new URL(window.location.href);
-        const tokenFromUrl = url.searchParams.get("token");
-        const errorFromUrl = url.searchParams.get("error");
+  async function bootstrapSession() {
+    try {
+      const url = new URL(window.location.href);
+      const tokenFromUrl = url.searchParams.get("token");
+      const errorFromUrl = url.searchParams.get("error");
 
-        if (errorFromUrl) {
-          if (!mounted) return;
-          setErr(errorFromUrl);
-
-          url.searchParams.delete("token");
-          url.searchParams.delete("error");
-          window.history.replaceState({}, "", url.pathname);
-
-          setSessionChecking(false);
-          return;
-        }
-
-        if (tokenFromUrl) {
-          const saved = saveToken(tokenFromUrl);
-          if (!saved) {
-            throw new Error("Google login success but token could not be saved");
-          }
-
-          url.searchParams.delete("token");
-          url.searchParams.delete("error");
-          window.history.replaceState({}, "", url.pathname);
-        }
-
-        const activeToken = tokenFromUrl || getToken();
-
-        if (!activeToken) {
-          if (!mounted) return;
-          setSessionUser(null);
-          setSessionChecking(false);
-          return;
-        }
-
-        const decodedUser = buildSessionUser(null, activeToken);
-
-        if (!decodedUser?.id) {
-          clearToken();
-          if (!mounted) return;
-          setSessionUser(null);
-          setSessionChecking(false);
-          return;
-        }
-
+      if (errorFromUrl) {
         if (!mounted) return;
+        setErr(errorFromUrl);
+        url.searchParams.delete("token");
+        url.searchParams.delete("error");
+        window.history.replaceState({}, "", url.pathname);
         setSessionChecking(false);
-        finishLoginFlow(decodedUser);
-      } catch (e) {
-        clearToken();
+        return;
+      }
+
+      if (tokenFromUrl) {
+        const saved = saveToken(tokenFromUrl);
+        if (!saved) throw new Error("Google login success but token could not be saved");
+
+        url.searchParams.delete("token");
+        url.searchParams.delete("error");
+        window.history.replaceState({}, "", url.pathname);
+      }
+
+      const activeToken = tokenFromUrl || getToken();
+
+      if (!activeToken) {
         if (!mounted) return;
         setSessionUser(null);
-        setErr(e?.message || "Session restore failed");
         setSessionChecking(false);
+        return;
       }
+
+      const me = await api("/auth/me", { token: activeToken });
+      const nextUser = buildSessionUser(me?.user || null, activeToken);
+
+      if (!mounted) return;
+      setSessionUser(nextUser);
+      setSessionChecking(false);
+
+      if (isEmployeeWithoutOwner(nextUser)) {
+        setOwnerUidInput("");
+        setScreen("linkOwner");
+        setInfo("กรอก Owner UID ก่อนเข้าใช้งานระบบ");
+        return;
+      }
+
+      window.location.replace("/dashboard");
+    } catch (e) {
+      clearToken();
+      if (!mounted) return;
+      setSessionUser(null);
+      setSessionChecking(false);
     }
+  }
 
-    bootstrapSession();
+  bootstrapSession();
 
-    return () => {
-      mounted = false;
-    };
-  }, [router]);
+  return () => {
+    mounted = false;
+  };
+}, []);
 
   return (
     <div className="page">
