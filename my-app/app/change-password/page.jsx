@@ -64,6 +64,7 @@ async function requestJson(url, options = {}) {
 export default function ChangePasswordPage() {
   const router = useRouter();
   const apiBase = getApiBase();
+  const [authChecked, setAuthChecked] = useState(false);
   useEffect(() => {
       const token = getToken();
   

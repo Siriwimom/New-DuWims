@@ -158,7 +158,7 @@ export default function App() {
     if (isEmployeeWithoutOwner(user)) {
       setOwnerUidInput("");
       setScreen("linkOwner");
-      setInfo("กรอก Owner UID ก่อนเข้าใช้งานระบบ");
+      setInfo("Please verify the orchard owner before accessing the system.");
       return;
     }
 
@@ -201,7 +201,7 @@ export default function App() {
     if (screen === "forgot") return "Reset Your Password";
     if (screen === "otp") return "Verify OTP";
     if (screen === "reset") return "Set a New Password";
-    if (screen === "linkOwner") return "Link Owner UID";
+    if (screen === "linkOwner") return "Orchard Owner Verification";
     return "";
   }, [screen]);
 
@@ -390,7 +390,7 @@ export default function App() {
       if (!token) throw new Error("Session expired. Please login again.");
 
       const safeOwnerUid = ownerUidInput.trim();
-      if (!safeOwnerUid) throw new Error("กรุณากรอก Owner UID");
+      if (!safeOwnerUid) throw new Error("Please provide the orchard code");
 
       const data = await api("/auth/link-owner", {
         method: "POST",
@@ -408,7 +408,7 @@ export default function App() {
       saveToken(nextToken);
 
       const nextUser = buildSessionUser(data?.user || sessionUser || null, nextToken);
-      setInfo("เชื่อม Owner UID สำเร็จ");
+      setInfo("เชื่อมสำเร็จ");
       finishLoginFlow(nextUser);
     });
   }
@@ -546,7 +546,7 @@ export default function App() {
       if (isEmployeeWithoutOwner(nextUser)) {
         setOwnerUidInput("");
         setScreen("linkOwner");
-        setInfo("กรอก Owner UID ก่อนเข้าใช้งานระบบ");
+        setInfo("Please verify the orchard owner before accessing the system.");
         return;
       }
 
@@ -798,12 +798,12 @@ export default function App() {
         {screen === "linkOwner" && (
           <>
             <div className="otpHint">
-              บัญชีพนักงานต้องเชื่อมกับ Owner ก่อนเข้าใช้งาน
+              Employees must connect to an orchard owner before using the system.
               <br />
-              <strong>กรอก Owner UID ของเจ้าของสวน</strong>
+              <strong>Link to Orchard Owner</strong>
             </div>
 
-            <div className="label">Owner UID</div>
+            <div className="label">Orchard code</div>
             <input
               className="input"
               value={ownerUidInput}
@@ -813,10 +813,10 @@ export default function App() {
             />
 
             <button className="btn blue" onClick={handleLinkOwner} disabled={loading}>
-              {loading ? "กำลังเชื่อม..." : "ยืนยัน Owner UID"}
+              {loading ? "กำลังเชื่อม..." : "Confirm Orchard Owner"}
             </button>
 
-            <div className="small">เมื่อเชื่อมสำเร็จ ระบบจะพาไปหน้า dashboard อัตโนมัติ</div>
+            <div className="small">Once connected successfully, you will be automatically redirected to the dashboard.</div>
 
             <div className="row" style={{ justifyContent: "center", marginTop: 12 }}>
               <button className="linkBtn" onClick={logout}>
