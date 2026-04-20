@@ -48,7 +48,29 @@ const SENSOR_OPTIONS = [
   { key: "p", labelKey: null, unit: "ppm", nodeType: "soil" },
   { key: "k", labelKey: null, unit: "cmol/kg", nodeType: "soil" },
 ];
+const SERIES_COLORS = [
+  "#2563eb",
+  "#16a34a",
+  "#dc2626",
+  "#d97706",
+  "#7c3aed",
+  "#0891b2",
+  "#65a30d",
+  "#ea580c",
+  "#db2777",
+  "#4f46e5",
+  "#0f766e",
+  "#b91c1c",
+];
 
+function colorOfSeriesByIndex(index = 0) {
+  return SERIES_COLORS[((index % SERIES_COLORS.length) + SERIES_COLORS.length) % SERIES_COLORS.length];
+}
+
+function dashOfSeriesByIndex(index = 0) {
+  const patterns = [0, 6, 2, 8, 4, 10, 3, 12];
+  return patterns[((index % patterns.length) + patterns.length) % patterns.length];
+}
 
 function colorOfPlotByIndex(index = 0) {
   return PLOT_COLORS[((index % PLOT_COLORS.length) + PLOT_COLORS.length) % PLOT_COLORS.length] || "#3b82f6";
@@ -353,6 +375,20 @@ function getObjectValueByAliases(obj, aliases = []) {
 
 function pickValueForSensorKey(item, sensorKey) {
   if (!item || !sensorKey) return null;
+
+  const itemSensorType =
+    item?.sensorType ||
+    item?.sensorName ||
+    item?.name ||
+    item?.sensor?.sensorType ||
+    item?.sensor?.name ||
+    "";
+
+  const itemSensorKey = canonicalSensorKey(itemSensorType);
+
+  if (itemSensorKey && itemSensorKey !== sensorKey) {
+    return null;
+  }
 
   if (typeof item === "number") return Number.isFinite(item) ? item : null;
 
@@ -991,17 +1027,21 @@ export default function HistoryPage() {
           const items = Array.isArray(data?.items)
             ? data.items
             : Array.isArray(data?.data)
-            ? data.data
-            : Array.isArray(data)
-            ? data
-            : [];
+              ? data.data
+              : Array.isArray(data)
+                ? data
+                : [];
 
           if (endpoint === "/api/history") {
-            collected.push(...items.flatMap((entry) => expandHistoryItemToReadings(entry)));
-          } else {
-            collected.push(...items);
-          }
-        } catch {}
+  const expanded = items.flatMap((entry) => expandHistoryItemToReadings(entry));
+
+  
+
+  collected.push(...expanded);
+} else {
+  collected.push(...items);
+}
+        } catch { }
       }
 
       return collected;
@@ -1035,19 +1075,9 @@ export default function HistoryPage() {
           ...plotIdList.map((plotId) => ({ plotId })),
         ];
 
-        const globalReadingParams = [
-          {},
-          ...uidList.map((nodeUid) => ({ nodeUid })),
-          ...nodeIdList.map((nodeId) => ({ nodeId })),
-          ...plotIdList.map((plotId) => ({ plotId })),
-        ];
+        const globalHistoryItems = await collectEndpointItems("/api/history", globalHistoryParams);
 
-        const [globalHistoryItems, globalSensorReadingItems] = await Promise.all([
-          collectEndpointItems("/api/history", globalHistoryParams),
-          collectEndpointItems("/api/sensor-readings", globalReadingParams),
-        ]);
-
-        const globalPool = [...globalHistoryItems, ...globalSensorReadingItems];
+        const globalPool = [...globalHistoryItems];
 
         const results = await Promise.all(
           fetchTargets.map(async (target) => {
@@ -1066,35 +1096,29 @@ export default function HistoryPage() {
                 queryVariants.push({ plotId: target.plotId, nodeId: target.nodeId });
               }
 
-              const [targetHistoryItems, targetSensorReadingItems] = await Promise.all([
-                collectEndpointItems("/api/history", queryVariants),
-                collectEndpointItems("/api/sensor-readings", queryVariants),
-              ]);
+              const targetHistoryItems = await collectEndpointItems("/api/history", queryVariants);
 
               const allItems = [
                 ...globalPool,
                 ...targetHistoryItems,
-                ...targetSensorReadingItems,
               ];
 
               const seenItem = new Set();
               const normalized = allItems
-                .map(normalizeReading)
-                .filter((item) => {
-                  const dedupeKey =
-                    item.id ||
-                    [
-                      item.nodeUid || item.nodeId,
-                      item.sensorUid || item.sensorId || item.sensorKey,
-                      item.timestamp,
-                      item.rawItem?._historyParentId || item.rawItem?._historySensorIndex || "",
-                    ].join("|");
+  .map(normalizeReading)
+  .filter((item) => {
+    const dedupeKey = [
+      item.rawItem?._historyParentId || item.id || "",
+      item.rawItem?._historySensorIndex ?? item.sensorUid ?? item.sensorId ?? item.sensorKey ?? "",
+      item.nodeUid || item.nodeId || "",
+      item.timestamp || "",
+    ].join("|");
 
-                  if (!dedupeKey) return false;
-                  if (seenItem.has(dedupeKey)) return false;
-                  seenItem.add(dedupeKey);
-                  return true;
-                });
+    if (!dedupeKey) return false;
+    if (seenItem.has(dedupeKey)) return false;
+    seenItem.add(dedupeKey);
+    return true;
+  });
 
               return [mapKey, normalized];
             } catch {
@@ -1104,7 +1128,9 @@ export default function HistoryPage() {
         );
 
         if (!alive) return;
-        setReadingMap(Object.fromEntries(results));
+        const nextReadingMap = Object.fromEntries(results);
+        
+        setReadingMap(nextReadingMap);
       } catch (err) {
         if (!alive) return;
         setError(err?.message || txt.loadHistoryFailed);
@@ -1237,8 +1263,7 @@ export default function HistoryPage() {
           sameText(readingKey, target.sensorKey) ||
           (target.sensorId && sameText(readingSensorId, target.sensorId)) ||
           (target.sensorUid && sameText(readingSensorUid, target.sensorUid)) ||
-          sameText(readingSensorType, target.rawSensorType) ||
-          rawValue !== null;
+          sameText(readingSensorType, target.rawSensorType);
         if (!sensorMatched) continue;
 
         const value = safeDisplayValue(target.sensorKey, rawValue);
@@ -1359,6 +1384,10 @@ export default function HistoryPage() {
     [combinedChart]
   );
 
+  useEffect(() => {
+    
+  }, [visibleChartSeries]);
+
   const activeSensorKeys = useMemo(
     () => Array.from(new Set(visibleChartSeries.map((s) => s.sensorKey))),
     [visibleChartSeries]
@@ -1417,13 +1446,11 @@ export default function HistoryPage() {
     if (!visibleChartSeries.length) return [];
 
     return visibleChartSeries.map((item, idx) => {
-      const plotIndex = selectedPlotIds.indexOf(item.plotId) >= 0
-        ? selectedPlotIds.indexOf(item.plotId)
-        : filteredPlots.findIndex((plot) => sameText(plot.id, item.plotId));
-      const plotColor = colorOfPlotByIndex(plotIndex >= 0 ? plotIndex : idx);
+      const seriesColor = colorOfSeriesByIndex(idx);
+      const seriesDash = dashOfSeriesByIndex(idx);
 
       return {
-        name: item.label,
+        name: `${item.sensorLabel} · ${item.nodeName || item.plotName || idx + 1}`,
         yAxisIndex: sensorAxisIndexMap[item.sensorKey] || 0,
         data: item.timestamps.map((ts, i) => ({
           x: new Date(ts).getTime(),
@@ -1435,28 +1462,24 @@ export default function HistoryPage() {
           plotName: item.plotName,
           nodeName: item.nodeName,
         })),
-        color: plotColor,
-        dashArray: 0,
+        color: seriesColor,
+        _dashArray: seriesDash,
+        _strokeWidth: 2.5,
       };
     });
-  }, [visibleChartSeries, sensorAxisIndexMap, selectedPlotIds, filteredPlots]);
+  }, [visibleChartSeries, sensorAxisIndexMap]);
 
   const brushSeries = useMemo(() => {
     if (!visibleChartSeries.length) return [];
-    return visibleChartSeries.map((item, idx) => {
-      const plotIndex = selectedPlotIds.indexOf(item.plotId) >= 0
-        ? selectedPlotIds.indexOf(item.plotId)
-        : filteredPlots.findIndex((plot) => sameText(plot.id, item.plotId));
-      return {
-        name: item.label,
-        data: item.timestamps.map((ts, i) => ({
-          x: new Date(ts).getTime(),
-          y: Number.isFinite(item.values[i]) ? Number(item.values[i].toFixed(2)) : null,
-        })),
-        color: colorOfPlotByIndex(plotIndex >= 0 ? plotIndex : idx),
-      };
-    });
-  }, [visibleChartSeries, selectedPlotIds, filteredPlots]);
+    return visibleChartSeries.map((item, idx) => ({
+      name: item.label,
+      data: item.timestamps.map((ts, i) => ({
+        x: new Date(ts).getTime(),
+        y: Number.isFinite(item.values[i]) ? Number(item.values[i].toFixed(2)) : null,
+      })),
+      color: colorOfSeriesByIndex(idx),
+    }));
+  }, [visibleChartSeries]);
 
   const yAxes = useMemo(() => {
     return activeSensorKeys.map((sensorKey) => {
@@ -1506,18 +1529,19 @@ export default function HistoryPage() {
   const chartSeriesLegend = useMemo(() => {
     const grouped = activeSensorKeys.map((sensorKey) => {
       const sensorItems = visibleChartSeries
-        .filter((item) => item.sensorKey === sensorKey)
-        .map((item, idx) => ({
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => item.sensorKey === sensorKey)
+        .map(({ item, index }) => ({
           key: item.key,
-          color: colorOfSensorKey(item.sensorKey),
+          color: colorOfSeriesByIndex(index),
           label: item.label,
           sensorLabel: item.sensorLabel,
           plotName: item.plotName,
           nodeName: item.nodeName,
           unit: item.unit,
-          dash: 0,
+          dash: dashOfSeriesByIndex(index),
           points: item.values.filter((v) => Number.isFinite(v)).length,
-          plotColor: colorOfPlotByIndex(selectedPlotIds.indexOf(item.plotId) >= 0 ? selectedPlotIds.indexOf(item.plotId) : idx),
+          plotColor: colorOfSeriesByIndex(index),
         }));
 
       return {
@@ -1530,7 +1554,7 @@ export default function HistoryPage() {
     });
 
     return grouped.filter((group) => group.items.length > 0);
-  }, [activeSensorKeys, visibleChartSeries, selectedPlotIds, t]);
+  }, [activeSensorKeys, visibleChartSeries, t]);
 
   const selectedSensorCount = selectedSensors.length;
   const visibleSensorCount = useMemo(
@@ -1686,9 +1710,8 @@ export default function HistoryPage() {
           : "ทุกแปลง"
         : `${selectedPlotNames.join(", ")}`;
 
-    return `${lang === "en" ? "Range" : "ช่วง"}: ${quickRange} · ${plotText} · ${
-      selectedSensors.length
-    } sensor`;
+    return `${lang === "en" ? "Range" : "ช่วง"}: ${quickRange} · ${plotText} · ${selectedSensors.length
+      } sensor`;
   }, [selectedPlotIds, selectedPlotNames, quickRange, selectedSensors.length, lang]);
 
   const mainChartOptions = useMemo(() => {
@@ -1714,11 +1737,12 @@ export default function HistoryPage() {
           enabled: true,
         },
       },
+      colors: apexSeries.map((s) => s.color),
       stroke: {
         curve: "smooth",
         lineCap: "round",
-        width: chartType === "bar" ? 0 : 2,
-        dashArray: apexSeries.map((s) => s.dashArray || 0),
+        width: chartType === "bar" ? 0 : apexSeries.map((s) => s._strokeWidth || 2.5),
+        dashArray: chartType === "bar" ? 0 : apexSeries.map((s) => s._dashArray || 0),
       },
       fill: {
         type: chartType === "area" ? "gradient" : "solid",
@@ -1737,7 +1761,11 @@ export default function HistoryPage() {
         enabled: false,
       },
       legend: {
-        show: false,
+        show: true,
+        position: "top",
+        horizontalAlign: "left",
+        fontSize: "12px",
+        fontWeight: 700,
       },
       xaxis: {
         type: "datetime",
@@ -1762,8 +1790,8 @@ export default function HistoryPage() {
       },
       yaxis: yAxes,
       tooltip: {
-        shared: true,
-        intersect: false,
+        shared: false,
+        intersect: true,
         x: {
           formatter: (value) => formatDateTimeLabel(value, lang),
         },
@@ -1791,10 +1819,10 @@ export default function HistoryPage() {
         },
       },
       markers: {
-        size: 0,
+        size: 6,
         strokeWidth: 0,
         hover: {
-          sizeOffset: 3,
+          sizeOffset: 2,
         },
       },
       plotOptions: {

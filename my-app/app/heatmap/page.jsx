@@ -68,8 +68,8 @@ const UI_TEXT = {
     belowRange: "ต่ำกว่าช่วง",
     aboveRange: "สูงกว่าช่วง",
     withinRange: "อยู่ในช่วง",
-    sensorReadingsMissing: "ยังไม่มี /api/sensor-readings จึงไม่แสดงค่าบน heatmap",
-    sensorReadingsPartial: "โหลด sensor readings บางส่วนไม่สำเร็จ จะแสดงเฉพาะค่าที่โหลดได้",
+    sensorReadingsMissing: "ยังไม่มีข้อมูล /api/history จึงไม่แสดงค่าบน heatmap",
+    sensorReadingsPartial: "โหลด history บางส่วนไม่สำเร็จ จะแสดงเฉพาะค่าที่โหลดได้",
     loadFailed: "โหลดข้อมูลไม่สำเร็จ",
     loadingToday: "กำลังโหลดข้อมูลวันนี้...",
     readyToShow: "ข้อมูลพร้อมแสดงแล้ว",
@@ -102,9 +102,9 @@ const UI_TEXT = {
     referenceRange: "ช่วงอ้างอิง",
     valueStatus: "สถานะค่า",
     normal: "ปกติ",
-    nodesUsedForCalc: "Node ที่ใช้คำนวณ (อิง reading ย้อนหลังตามเฟรม)",
+    nodesUsedForCalc: "Node ที่ใช้คำนวณ (อิง history ย้อนหลังตามเฟรม)",
     climateModeOverlay: "โหมด Climate ใช้ grid ที่ตัดเฉพาะในแปลงที่เลือก",
-    noReadingInFrame: "ยังไม่มี reading ของเซนเซอร์นี้ในช่วงเฟรมที่เลือก",
+    noReadingInFrame: "ยังไม่มี history ของเซนเซอร์นี้ในช่วงเฟรมที่เลือก",
     globalOverlayNote: "โหมด Climate แสดงค่าจาก grid ที่ตัดเฉพาะบริเวณแปลง",
     noSensorForNode: "ไม่มีข้อมูลของเซนเซอร์ที่เลือกใน node นี้",
     dataGlobalClimate: "Global Climate",
@@ -123,8 +123,8 @@ const UI_TEXT = {
     belowRange: "Below range",
     aboveRange: "Above range",
     withinRange: "Within range",
-    sensorReadingsMissing: "No /api/sensor-readings endpoint yet, so heatmap values are hidden.",
-    sensorReadingsPartial: "Some sensor readings could not be loaded. Only available values are shown.",
+    sensorReadingsMissing: "No /api/history data yet, so heatmap values are hidden.",
+    sensorReadingsPartial: "Some history data could not be loaded. Only available values are shown.",
     loadFailed: "Failed to load data",
     loadingToday: "Loading today's data...",
     readyToShow: "Data is ready",
@@ -157,9 +157,9 @@ const UI_TEXT = {
     referenceRange: "Reference range",
     valueStatus: "Value Status",
     normal: "Normal",
-    nodesUsedForCalc: "Nodes used for calculation (based on historical readings by frame)",
+    nodesUsedForCalc: "Nodes used for calculation (based on history records by frame)",
     climateModeOverlay: "Climate mode uses a grid clipped to the selected plots",
-    noReadingInFrame: "No reading for this sensor in the selected frame",
+    noReadingInFrame: "No history for this sensor in the selected frame",
     globalOverlayNote: "Climate mode shows clipped grid values only around the plots",
     noSensorForNode: "No data for the selected sensor in this node",
     dataGlobalClimate: "Global Climate",
@@ -396,7 +396,7 @@ function getAuthToken() {
 async function apiFetch(path, options = {}) {
   const token = getAuthToken();
 
-  console.log("🔑 TOKEN:", token);
+  
 
   const headers = {
     Accept: "application/json",
@@ -427,13 +427,7 @@ async function apiFetch(path, options = {}) {
 
   console.log("🔥 API:", path, json);
 
-  // 🔥 FIX: ไม่ throw สำหรับ sensor-readings
   if (!res.ok) {
-    if (path.includes("sensor-readings")) {
-      console.warn("⚠️ sensor-readings fallback []");
-      return [];
-    }
-
     throw new Error(json?.message || `Request failed (${res.status})`);
   }
 
@@ -441,42 +435,94 @@ async function apiFetch(path, options = {}) {
 }
 
 
-function isMissingSensorReadingsEndpointError(error) {
+function isMissingHistoryEndpointError(error) {
   const msg = String(error?.message || "").toLowerCase();
   return (
-    msg.includes("/api/sensor-readings") ||
-    msg.includes("sensor-readings") ||
+    msg.includes("/api/history") ||
+    msg.includes("load history failed") ||
+    msg.includes("history") ||
     msg.includes("request failed (404)") ||
     msg.includes("request failed (405)") ||
     msg.includes("request failed (501)")
   );
 }
 
-function extractSensorReadingItems(payload) {
+function parseFlexibleDate(raw) {
+  if (!raw && raw !== 0) return null;
+  if (raw instanceof Date) return Number.isNaN(raw.getTime()) ? null : raw;
+  if (typeof raw === "number") {
+    const d = new Date(raw);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof raw === "string") {
+    const safe = raw.trim();
+    if (!safe) return null;
+    const dmy = safe.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (dmy) {
+      const [, dd, mm, yyyy, hh = "0", mi = "0", ss = "0"] = dmy;
+      const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(mi), Number(ss));
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+    const direct = new Date(safe);
+    return Number.isNaN(direct.getTime()) ? null : direct;
+  }
+  if (typeof raw === "object") {
+    if (typeof raw?.toDate === "function") {
+      const d = raw.toDate();
+      return Number.isNaN(d?.getTime?.()) ? null : d;
+    }
+    if (raw?.seconds != null) {
+      const d = new Date(Number(raw.seconds) * 1000);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+  }
+  return null;
+}
+
+function getHistoryTimestamp(item) {
+  return (
+    item?.server_timestamp ||
+    item?.serverTimestamp ||
+    item?.history_timestamp ||
+    item?.historyTimestamp ||
+    item?.timestamp ||
+    item?.createdAt ||
+    null
+  );
+}
+
+function extractHistoryItems(payload) {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.items)) return payload.items;
   if (Array.isArray(payload?.data)) return payload.data;
   return [];
 }
 
-function normalizeReadingItem(item) {
-  const value = Number(item?.value);
+function normalizeHistoryItems(historyItem) {
+  const uid = toText(historyItem?.uid || historyItem?.nodeUid);
+  const nodeId = toText(historyItem?.nodeId);
+  const plotId = toText(historyItem?.plotId);
+  const timestampRaw = getHistoryTimestamp(historyItem);
+  const timestampDate = parseFlexibleDate(timestampRaw);
+  const timestamp = timestampDate ? timestampDate.toISOString() : null;
 
-  if (value === 99) {
-    console.log("🎯 FOUND 99 FROM DB:", item);
-  }
-
-  return {
-    ...item,
-    sensorId: item?.sensorId,
-    sensorName: normalizeSensorName(item?.sensorType || item?.sensorName),
-    value,
-    timestamp:
-      item?.timestamp ||
-      item?.ts ||
-      item?.createdAt ||
-      null,
-  };
+  return (Array.isArray(historyItem?.sensors) ? historyItem.sensors : [])
+    .map((sensor, index) => ({
+      id: toText(historyItem?.id || historyItem?._id || `${uid}-${timestamp || index}`),
+      rowId: `${toText(historyItem?.id || historyItem?._id || uid || 'history')}-${index}`,
+      uid,
+      nodeId,
+      plotId,
+      sensorKey: normalizeSensorName(sensor?.name),
+      sensorName: toText(sensor?.name),
+      value: toNum(sensor?.latestValue ?? sensor?.value),
+      timestamp,
+      rawTimestamp: timestampRaw,
+      status: toText(sensor?.status || historyItem?.status || "active"),
+      minValue: toNum(sensor?.minValue),
+      maxValue: toNum(sensor?.maxValue),
+    }))
+    .filter((row) => row.uid && row.sensorKey && row.value != null && row.timestamp);
 }
 
 function normalizeCoords(input) {
@@ -760,7 +806,8 @@ function buildFrames(startDate, endDate) {
 }
 
 function getReadingTs(reading) {
-  return new Date(reading?.timestamp || reading?.ts || reading?.createdAt || 0).getTime();
+  const d = parseFlexibleDate(reading?.timestamp || reading?.ts || reading?.createdAt || reading?.rawTimestamp || 0);
+  return d ? d.getTime() : NaN;
 }
 
 function findLatestReadingInWindow(readings, startTs, endTs) {
@@ -873,22 +920,6 @@ function getSmoothedReadingForFrame(point, currentTs, nextFrameTs) {
     };
   }
 
-  const latestSensorTs = new Date(
-    point?.latestSensorValue?.timestamp || point?.latestSensorValue?.ts || point?.latestSensorValue?.createdAt || 0
-  ).getTime();
-
-  if (point?.latestSensorValue?.value != null && Number.isFinite(latestSensorTs) && latestSensorTs <= currentTs) {
-    return {
-      chosen: point.latestSensorValue,
-      value: toNum(point.latestSensorValue.value),
-      ts: point.latestSensorValue.timestamp || point.latestSensorValue.ts || point.latestSensorValue.createdAt || null,
-      mode: "latest",
-      readingInFrame: null,
-      beforeReading: point.latestSensorValue,
-      afterReading: null,
-      latestHistory: point.latestSensorValue,
-    };
-  }
 
   return {
     chosen: null,
@@ -1752,7 +1783,7 @@ export default function Page() {
 
   useEffect(() => {
     setMounted(true);
-  }, []);
+  }, [startDate, endDate, tt]);
 
   const frameTimestamps = useMemo(() => buildFrames(startDate, endDate), [startDate, endDate]);
   const framesKey = useMemo(() => frameTimestamps.join("|"), [frameTimestamps]);
@@ -1839,14 +1870,21 @@ export default function Page() {
             };
           });
 
-        const readingsResults = await Promise.allSettled(
-          normalizedPlots.map(async (plot) => {
-            const readingsJson = await apiFetch(
-              `/api/sensor-readings?plotId=${encodeURIComponent(plot.id)}&limit=5000`
+        const uniqueNodeUids = Array.from(
+          new Set(
+            normalizedPlots
+              .flatMap((plot) => plot.nodes || [])
+              .map((node) => toText(node?.uid))
+              .filter(Boolean)
+          )
+        );
+
+        const historyResults = await Promise.allSettled(
+          uniqueNodeUids.map(async (uid) => {
+            const historyJson = await apiFetch(
+              `/api/history?uid=${encodeURIComponent(uid)}&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&limit=5000`
             );
-            return extractSensorReadingItems(readingsJson)
-              .map(normalizeReadingItem)
-              .filter((row) => row.sensorId && row.sensorName && row.value != null && row.timestamp);
+            return extractHistoryItems(historyJson).flatMap(normalizeHistoryItems);
           })
         );
 
@@ -1856,13 +1894,13 @@ export default function Page() {
         let endpointMissing = false;
         let endpointFailures = 0;
 
-        readingsResults.forEach((result) => {
+        historyResults.forEach((result) => {
           if (result.status === "fulfilled") {
             if (Array.isArray(result.value)) flattenedReadings.push(...result.value);
             return;
           }
 
-          if (isMissingSensorReadingsEndpointError(result.reason)) {
+          if (isMissingHistoryEndpointError(result.reason)) {
             endpointMissing = true;
           } else {
             endpointFailures += 1;
@@ -1892,7 +1930,7 @@ export default function Page() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [startDate, endDate, tt]);
 
   
 useEffect(() => {
@@ -1906,54 +1944,53 @@ useEffect(() => {
 }, [selectedSensor, currentFrameTs, selectedPlotId, frameCount, visiblePlotsKey]);
 
 
-  const historicalReadingsBySensorId = useMemo(() => {
+  const historicalReadingsByPointKey = useMemo(() => {
     const grouped = {};
 
     (Array.isArray(allReadings) ? allReadings : []).forEach((r) => {
-      const sensorId = toText(r?.sensorId);
-      const sensorName = normalizeSensorName(r?.sensorName || r?.sensorType || r?.name);
-      const ts = new Date(r?.timestamp || r?.ts || r?.createdAt || 0).getTime();
+      const uid = toText(r?.uid || r?.nodeUid);
+      const sensorKey = normalizeSensorName(r?.sensorKey || r?.sensorName || r?.name);
+      const ts = getReadingTs(r);
 
-      if (!sensorId || !Number.isFinite(ts)) return;
+      if (!uid || !sensorKey || !Number.isFinite(ts)) return;
 
-      if (!grouped[sensorId]) grouped[sensorId] = [];
-      grouped[sensorId].push({
+      const pointKey = `${uid}__${sensorKey}`;
+      if (!grouped[pointKey]) grouped[pointKey] = [];
+      grouped[pointKey].push({
         ...r,
+        uid,
+        sensorKey,
         value: toNum(r?.value),
-        sensorName,
+        timestamp: parseFlexibleDate(r?.timestamp)?.toISOString?.() || r?.timestamp || null,
       });
     });
 
     Object.values(grouped).forEach((arr) => {
-      arr.sort(
-        (a, b) =>
-          new Date(a?.timestamp || a?.createdAt || 0).getTime() -
-          new Date(b?.timestamp || b?.createdAt || 0).getTime()
-      );
+      arr.sort((a, b) => getReadingTs(a) - getReadingTs(b));
     });
 
     return grouped;
   }, [allReadings]);
 
-  const readingsBySensorId = useMemo(() => {
-    const startTs = new Date(`${startDate}T00:00:00`).getTime();
-    const endTs = new Date(`${endDate}T23:59:59`).getTime();
+  const readingsByPointKey = useMemo(() => {
+    const startTs = parseFlexibleDate(`${startDate}T00:00:00`)?.getTime?.() ?? NaN;
+    const endTs = parseFlexibleDate(`${endDate}T23:59:59`)?.getTime?.() ?? NaN;
     const grouped = {};
 
-    Object.entries(historicalReadingsBySensorId).forEach(([sensorId, rows]) => {
+    Object.entries(historicalReadingsByPointKey).forEach(([pointKey, rows]) => {
       const filtered = (Array.isArray(rows) ? rows : []).filter((r) => {
-        const ts = new Date(r?.timestamp || r?.ts || r?.createdAt || 0).getTime();
+        const ts = getReadingTs(r);
         if (!Number.isFinite(ts)) return false;
         if (Number.isFinite(startTs) && ts < startTs) return false;
         if (Number.isFinite(endTs) && ts > endTs) return false;
         return true;
       });
 
-      if (filtered.length) grouped[sensorId] = filtered;
+      if (filtered.length) grouped[pointKey] = filtered;
     });
 
     return grouped;
-  }, [historicalReadingsBySensorId, startDate, endDate]);
+  }, [historicalReadingsByPointKey, startDate, endDate]);
 
   const allNodes = useMemo(() => {
     return visiblePlots.flatMap((plot) =>
@@ -1976,24 +2013,13 @@ useEffect(() => {
         const sensor = (node.sensors || []).find((s) => s.name === selectedSensor);
         if (!sensor) return [];
 
-        const sensorHistoryAll = Array.isArray(historicalReadingsBySensorId[sensor._id])
-          ? historicalReadingsBySensorId[sensor._id].filter((r) => {
-              return (
-                toText(r?.plotId) === toText(plot.id) &&
-                toText(r?.nodeId) === toText(node._id) &&
-                toText(r?.sensorId) === toText(sensor._id)
-              );
-            })
+        const pointHistoryKey = `${toText(node.uid)}__${selectedSensor}`;
+        const sensorHistoryAll = Array.isArray(historicalReadingsByPointKey[pointHistoryKey])
+          ? historicalReadingsByPointKey[pointHistoryKey]
           : [];
 
-        const sensorHistoryInDateRange = Array.isArray(readingsBySensorId[sensor._id])
-          ? readingsBySensorId[sensor._id].filter((r) => {
-              return (
-                toText(r?.plotId) === toText(plot.id) &&
-                toText(r?.nodeId) === toText(node._id) &&
-                toText(r?.sensorId) === toText(sensor._id)
-              );
-            })
+        const sensorHistoryInDateRange = Array.isArray(readingsByPointKey[pointHistoryKey])
+          ? readingsByPointKey[pointHistoryKey]
           : [];
 
         return [
@@ -2012,21 +2038,11 @@ useEffect(() => {
             sensorDisplayName: sensor.rawName || sensor.name,
             readings: sensorHistoryInDateRange,
             allSensorHistory: sensorHistoryAll,
-            latestSensorValue:
-              sensor.latestValue != null
-                ? {
-                    value: toNum(sensor.latestValue),
-                    timestamp: sensor.latestTimestamp || null,
-                    plotId: plot.id,
-                    nodeId: node._id,
-                    sensorId: sensor._id,
-                  }
-                : null,
           },
         ];
       })
     );
-  }, [visiblePlots, selectedNodeType, selectedSensor, readingsBySensorId, historicalReadingsBySensorId]);
+  }, [visiblePlots, selectedNodeType, selectedSensor, readingsByPointKey, historicalReadingsByPointKey]);
 
   const renderedPoints = useMemo(() => {
     const currentTs = frameTimestamps[frameIndex] || alignBangkokFrameStart(Date.now());
@@ -2042,15 +2058,9 @@ useEffect(() => {
       .map((point) => {
         const smoothed = getSmoothedReadingForFrame(point, currentTs, nextFrameTs);
 
-        let value = smoothed?.value ?? null;
-        let ts = smoothed?.ts ?? null;
-        let smoothMode = smoothed?.mode || "none";
-
-        if (value == null && point?.latestSensorValue?.value != null) {
-          value = toNum(point.latestSensorValue.value);
-          ts = point.latestSensorValue.timestamp || null;
-          smoothMode = "latest";
-        }
+        const value = smoothed?.value ?? null;
+        const ts = smoothed?.ts ?? null;
+        const smoothMode = smoothed?.mode || "none";
 
         return {
           ...point,
@@ -2087,8 +2097,8 @@ useEffect(() => {
           nextTs
         );
         const smoothed = getSmoothedReadingForFrame(point, currentTs, nextTs);
-        const chosenValue = smoothed?.value ?? point?.latestSensorValue?.value ?? null;
-        const chosenTs = smoothed?.ts ?? point?.latestSensorValue?.timestamp ?? null;
+        const chosenValue = smoothed?.value ?? null;
+        const chosenTs = smoothed?.ts ?? null;
 
         return {
           id: point.id,
@@ -2096,7 +2106,7 @@ useEffect(() => {
           nodeName: point.nodeName,
           sensorKey: point.sensorKey,
           sensorDisplayName: point.sensorDisplayName,
-          frameMode: smoothed?.mode || (point?.latestSensorValue?.value != null ? "latest" : "none"),
+          frameMode: smoothed?.mode || "none",
           hasValueNow: chosenValue != null && !Number.isNaN(Number(chosenValue)),
           currentValue: chosenValue,
           currentValueTime: chosenTs,
@@ -2108,8 +2118,8 @@ useEffect(() => {
           afterTime: afterAny?.timestamp || afterAny?.ts || afterAny?.createdAt || null,
           historyCountInRange: Array.isArray(point.readings) ? point.readings.length : 0,
           historyCountAll: Array.isArray(point.allSensorHistory) ? point.allSensorHistory.length : 0,
-          latestValue: point?.latestSensorValue?.value ?? null,
-          latestTime: point?.latestSensorValue?.timestamp || null,
+          latestValue: null,
+          latestTime: null,
           statusType: getSensorStatus(selectedSensor, chosenValue)?.type || "none",
         };
       })
@@ -2267,24 +2277,13 @@ const stats = useMemo(() => {
             const sensor = (node.sensors || []).find((s) => s.name === sensorKey);
             if (!sensor) return [];
 
-            const sensorHistoryInDateRange = Array.isArray(readingsBySensorId[sensor._id])
-              ? readingsBySensorId[sensor._id].filter((r) => {
-                  return (
-                    toText(r?.plotId) === toText(plot.id) &&
-                    toText(r?.nodeId) === toText(node._id) &&
-                    toText(r?.sensorId) === toText(sensor._id)
-                  );
-                })
+            const pointHistoryKey = `${toText(node.uid)}__${sensor.name}`;
+            const sensorHistoryInDateRange = Array.isArray(readingsByPointKey[pointHistoryKey])
+              ? readingsByPointKey[pointHistoryKey]
               : [];
 
-            const sensorHistoryAll = Array.isArray(historicalReadingsBySensorId[sensor._id])
-              ? historicalReadingsBySensorId[sensor._id].filter((r) => {
-                  return (
-                    toText(r?.plotId) === toText(plot.id) &&
-                    toText(r?.nodeId) === toText(node._id) &&
-                    toText(r?.sensorId) === toText(sensor._id)
-                  );
-                })
+            const sensorHistoryAll = Array.isArray(historicalReadingsByPointKey[pointHistoryKey])
+              ? historicalReadingsByPointKey[pointHistoryKey]
               : [];
 
             return [
@@ -2303,16 +2302,6 @@ const stats = useMemo(() => {
                 sensorDisplayName: sensor.rawName || sensor.name,
                 readings: sensorHistoryInDateRange,
                 allSensorHistory: sensorHistoryAll,
-                latestSensorValue:
-                  sensor.latestValue != null
-                    ? {
-                        value: toNum(sensor.latestValue),
-                        timestamp: sensor.latestTimestamp || null,
-                        plotId: plot.id,
-                        nodeId: node._id,
-                        sensorId: sensor._id,
-                      }
-                    : null,
               },
             ];
           })
@@ -2321,8 +2310,8 @@ const stats = useMemo(() => {
         const candidates = pointsForSensor
           .map((point) => {
             const smoothed = getSmoothedReadingForFrame(point, currentTs, nextFrameTs);
-            const value = smoothed?.value ?? point?.latestSensorValue?.value ?? null;
-            const ts = smoothed?.ts ?? point?.latestSensorValue?.timestamp ?? null;
+            const value = smoothed?.value ?? null;
+            const ts = smoothed?.ts ?? null;
             const sortTs = new Date(ts || 0).getTime();
 
             return value != null && !Number.isNaN(value)
@@ -2368,13 +2357,13 @@ const stats = useMemo(() => {
   }, [
     frameIndex,
     frameTimestamps,
-    readingsBySensorId,
+    readingsByPointKey,
     selectedNodeType,
     selectedPlotId,
     selectedSensor,
     uiLang,
     visiblePlots,
-    historicalReadingsBySensorId,
+    historicalReadingsByPointKey,
   ]);
 
 
