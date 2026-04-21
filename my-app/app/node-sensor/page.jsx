@@ -93,6 +93,15 @@ function normalizeSensor(sensor = {}) {
   const rawMinValue = toNum(sensor.minValue);
   const rawMaxValue = toNum(sensor.maxValue);
 
+  const normalizedMinValue =
+    rawMinValue !== null && rawMinValue !== 0
+      ? rawMinValue
+      : defaultLimits.minValue;
+  const normalizedMaxValue =
+    rawMaxValue !== null && rawMaxValue !== 0
+      ? rawMaxValue
+      : defaultLimits.maxValue;
+
   return {
     _id: safeText(sensor._id || ""),
     uid,
@@ -100,14 +109,16 @@ function normalizeSensor(sensor = {}) {
     rawName,
     sensorKey,
     status: safeText(sensor.status || "NO_DATA"),
-    minValue:
-      rawMinValue !== null && rawMinValue !== 0
-        ? rawMinValue
-        : defaultLimits.minValue,
-    maxValue:
-      rawMaxValue !== null && rawMaxValue !== 0
-        ? rawMaxValue
-        : defaultLimits.maxValue,
+    minValue: normalizedMinValue,
+    maxValue: normalizedMaxValue,
+    minEnabled:
+      typeof sensor.minEnabled === "boolean"
+        ? sensor.minEnabled
+        : normalizedMinValue !== null,
+    maxEnabled:
+      typeof sensor.maxEnabled === "boolean"
+        ? sensor.maxEnabled
+        : normalizedMaxValue !== null,
     latestValue: toNum(sensor.latestValue),
     latestTimestamp: safeText(sensor.latestTimestamp || ""),
   };
@@ -436,6 +447,8 @@ function buildComparableSensors(sensors = []) {
     name: safeText(sensor.sensorKey || sensor.name || ""),
     minValue: toNum(sensor.minValue),
     maxValue: toNum(sensor.maxValue),
+    minEnabled: sensor.minEnabled !== false,
+    maxEnabled: sensor.maxEnabled !== false,
   }));
 }
 
@@ -861,16 +874,18 @@ function SensorTable({ sensors, t, lang, showLimits = false }) {
               <td className="sensor-name-cell">
                 {getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}
               </td>
-              <td className={`${bad ? "val-red" : "val-green"} sensor-value-cell`}>
-                {formatSensorValue(latest, sensor.sensorKey || sensor.name, sensor.uid)}
+              <td className={`${bad ? "val-red" : "val-green"} sensor-value-cell data-value-cell`}>
+                <span className="data-value-text">
+                  {formatSensorValue(latest, sensor.sensorKey || sensor.name, sensor.uid)}
+                </span>
               </td>
               {showLimits ? (
-                <td className="sensor-value-cell">
+                <td className="sensor-value-cell max-col-cell">
                   {formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)}
                 </td>
               ) : null}
               {showLimits ? (
-                <td className="sensor-value-cell">
+                <td className="sensor-value-cell min-col-cell">
                   {formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}
                 </td>
               ) : null}
@@ -884,12 +899,14 @@ function SensorTable({ sensors, t, lang, showLimits = false }) {
 
 function EditableSensorTable({
   sensors,
-  canEditLimits,
-  showLimits = false,
+  showLimits = true,
   onChangeMin,
   onChangeMax,
+  onToggleMinEnabled,
+  onToggleMaxEnabled,
   t,
   lang,
+  readOnlyLimits = false,
 }) {
   return (
     <table className="node-sensor-table">
@@ -906,59 +923,107 @@ function EditableSensorTable({
           const latest = sensor.latestValue;
           const min = sensor.minValue;
           const max = sensor.maxValue;
+          const minEnabled = sensor.minEnabled !== false;
+          const maxEnabled = sensor.maxEnabled !== false;
+          const comparableMin = minEnabled ? min : null;
+          const comparableMax = maxEnabled ? max : null;
           const bad =
             Number.isFinite(latest) &&
-            ((Number.isFinite(min) && latest < min) ||
-              (Number.isFinite(max) && latest > max));
+            ((Number.isFinite(comparableMin) && latest < comparableMin) ||
+              (Number.isFinite(comparableMax) && latest > comparableMax));
 
           return (
             <tr key={sensor._id || sensor.uid || index}>
               <td className="sensor-name-cell">
                 {getSensorLabel(sensor.sensorKey || sensor.name, lang, sensor.uid)}
               </td>
-              <td className={`${bad ? "val-red" : "val-green"} sensor-value-cell`}>
-                {formatSensorValue(latest, sensor.sensorKey || sensor.name, sensor.uid)}
+              <td className={`${bad ? "val-red" : "val-green"} sensor-value-cell data-value-cell`}>
+                <span className="data-value-text">
+                  {formatSensorValue(latest, sensor.sensorKey || sensor.name, sensor.uid)}
+                </span>
               </td>
 
               {showLimits ? (
-                <td>
-                  {canEditLimits ? (
-                    <div className="edit-limit-wrap">
-                      <input
-                        className="limit-input"
-                        type="number"
-                        step="any"
-                        value={sensor.maxValue ?? ""}
-                        onChange={(e) => onChangeMax(index, e.target.value)}
-                      />
-                      <span className="sensor-unit-text">
-                        {sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}
-                      </span>
-                    </div>
-                  ) : (
-                    formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)
-                  )}
+                <td className="max-col-cell">
+                  <div className="edit-limit-wrap sensor-limit-cell max-limit-cell">
+                    {readOnlyLimits ? (
+                      <>
+                        <span className="limit-readonly-text">
+                          {formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)}
+                        </span>
+                        <label className="sensor-limit-toggle">
+                          <input
+                            type="checkbox"
+                            checked={maxEnabled}
+                            onChange={(e) => onToggleMaxEnabled(index, e.target.checked)}
+                          />
+                        </label>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          className="limit-input"
+                          type="number"
+                          step="any"
+                          value={sensor.maxValue ?? ""}
+                          disabled={!maxEnabled}
+                          onChange={(e) => onChangeMax(index, e.target.value)}
+                        />
+                        <span className="sensor-unit-text">
+                          {sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}
+                        </span>
+                        <label className="sensor-limit-toggle">
+                          <input
+                            type="checkbox"
+                            checked={maxEnabled}
+                            onChange={(e) => onToggleMaxEnabled(index, e.target.checked)}
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
                 </td>
               ) : null}
 
               {showLimits ? (
-                <td>
-                  {canEditLimits ? (
-                    <div className="edit-limit-wrap">
-                      <input
-                        className="limit-input"
-                        type="number"
-                        step="any"
-                        value={sensor.minValue ?? ""}
-                        onChange={(e) => onChangeMin(index, e.target.value)}
-                      />
-                      <span className="sensor-unit-text">
-                        {sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}
-                      </span>
-                    </div>
-                  ) : (
-                    formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)
-                  )}
+                <td className="min-col-cell">
+                  <div className="edit-limit-wrap sensor-limit-cell min-limit-cell">
+                    {readOnlyLimits ? (
+                      <>
+                        <span className="limit-readonly-text">
+                          {formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}
+                        </span>
+                        <label className="sensor-limit-toggle">
+                          <input
+                            type="checkbox"
+                            checked={minEnabled}
+                            onChange={(e) => onToggleMinEnabled(index, e.target.checked)}
+                          />
+                        </label>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          className="limit-input"
+                          type="number"
+                          step="any"
+                          value={sensor.minValue ?? ""}
+                          disabled={!minEnabled}
+                          onChange={(e) => onChangeMin(index, e.target.value)}
+                        />
+                        <span className="sensor-unit-text">
+                          {sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}
+                        </span>
+                        <label className="sensor-limit-toggle">
+                          <input
+                            type="checkbox"
+                            checked={minEnabled}
+                            onChange={(e) => onToggleMinEnabled(index, e.target.checked)}
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
                 </td>
               ) : null}
             </tr>
@@ -999,8 +1064,6 @@ export default function NodeSensorPage() {
   const [formNodeName, setFormNodeName] = useState("");
   const [formMarker, setFormMarker] = useState(null);
   const [formSensors, setFormSensors] = useState(sensorPresetsByType("air"));
-  const [canEditSensorLimit, setCanEditSensorLimit] = useState(false);
-  const [showSensorLimits, setShowSensorLimits] = useState(false);
   const [matchedNode, setMatchedNode] = useState(null);
   const [uidLookupBusy, setUidLookupBusy] = useState(false);
   const [uidLookupMessage, setUidLookupMessage] = useState("");
@@ -1154,26 +1217,36 @@ export default function NodeSensorPage() {
       setMatchedNode(found);
       setFormSensors(
         Array.isArray(found.sensors)
-          ? found.sensors.map((s) => ({
-              ...s,
-              sensorKey: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
-              name: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
-              rawName: s.rawName || s.name,
-            }))
+          ? found.sensors.map((s) => {
+              const sensorKey = s.sensorKey || canonicalizeSensorName(s.name, s.uid);
+              const normalizedMinValue = toNum(s.minValue);
+              const normalizedMaxValue = toNum(s.maxValue);
+              return {
+                ...s,
+                sensorKey,
+                name: sensorKey,
+                rawName: s.rawName || s.name,
+                minEnabled:
+                  typeof s.minEnabled === "boolean"
+                    ? s.minEnabled
+                    : normalizedMinValue !== null,
+                maxEnabled:
+                  typeof s.maxEnabled === "boolean"
+                    ? s.maxEnabled
+                    : normalizedMaxValue !== null,
+              };
+            })
           : []
       );
       setUidLookupMessage(
-        t.uidFoundInDb ||
-          (lang === "en" ? "UID found in database" : "พบ UID ในฐานข้อมูล")
+        lang === "en" ? "UID found in database" : "พบ UID ในฐานข้อมูล"
       );
     } catch (e) {
       if (!alive) return;
       setMatchedNode(null);
       setFormSensors([]);
       setUidLookupMessage(
-        e?.message ||
-          t.uidNotFoundInDb ||
-          (lang === "en" ? "UID not found in database" : "ไม่พบ UID นี้ในฐานข้อมูล")
+        lang === "en" ? "Node UID not found" : "ไม่พบ UID ของ Node ในฐานข้อมูล"
       );
     } finally {
       if (alive) setUidLookupBusy(false);
@@ -1404,14 +1477,11 @@ export default function NodeSensorPage() {
   }
 
   function resetForm() {
-    setCanEditSensorLimit(false);
-    setShowSensorLimits(false);
     setFormPlotId("");
     setFormUid("");
     setFormNodeName("");
     setFormMarker(null);
     setFormSensors([]);
-    setCanEditSensorLimit(false);
     setMatchedNode(null);
     setUidLookupBusy(false);
     setUidLookupMessage("");
@@ -1490,10 +1560,16 @@ export default function NodeSensorPage() {
     );
     setFormSensors(
       Array.isArray(node.sensors) && node.sensors.length
-        ? node.sensors.map((s) => ({ ...s, sensorKey: s.sensorKey || canonicalizeSensorName(s.name, s.uid), name: s.sensorKey || canonicalizeSensorName(s.name, s.uid), rawName: s.rawName || s.name }))
+        ? node.sensors.map((s) => ({
+            ...s,
+            sensorKey: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
+            name: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
+            rawName: s.rawName || s.name,
+            minEnabled: s.minEnabled !== false,
+            maxEnabled: s.maxEnabled !== false,
+          }))
         : sensorPresetsByType(inferNodeTypeFromUid(node.uid, node.sensors, node.nodeName)),
     );
-    setCanEditSensorLimit(false);
     resetValidation();
     setView("edit");
     setInitialFormSnapshot(
@@ -1512,6 +1588,8 @@ export default function NodeSensorPage() {
                 sensorKey: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
                 name: s.sensorKey || canonicalizeSensorName(s.name, s.uid),
                 rawName: s.rawName || s.name,
+                minEnabled: s.minEnabled !== false,
+                maxEnabled: s.maxEnabled !== false,
               }))
             : sensorPresetsByType(inferNodeTypeFromUid(node.uid, node.sensors, node.nodeName)),
       }),
@@ -1613,8 +1691,8 @@ export default function NodeSensorPage() {
         name: sensorKey,
         sensorKey,
         status: sensor.status || "OK",
-        minValue: sensor.minValue,
-        maxValue: sensor.maxValue,
+        minValue: sensor.minEnabled === false ? null : sensor.minValue,
+        maxValue: sensor.maxEnabled === false ? null : sensor.maxValue,
         latestValue: sensor.latestValue,
         latestTimestamp: sensor.latestTimestamp || null,
       };
@@ -1637,6 +1715,23 @@ export default function NodeSensorPage() {
         i === index
           ? { ...sensor, maxValue: value === "" ? null : Number(value) }
           : sensor,
+      ),
+    );
+  }
+
+
+  function toggleSensorMinEnabled(index, checked) {
+    setFormSensors((prev) =>
+      prev.map((sensor, i) =>
+        i === index ? { ...sensor, minEnabled: checked } : sensor,
+      ),
+    );
+  }
+
+  function toggleSensorMaxEnabled(index, checked) {
+    setFormSensors((prev) =>
+      prev.map((sensor, i) =>
+        i === index ? { ...sensor, maxEnabled: checked } : sensor,
       ),
     );
   }
@@ -2026,6 +2121,9 @@ export default function NodeSensorPage() {
 
                   {isOpen ? (
                     <div className="node-body" style={{ display: "block" }}>
+                      <div className="sensor-section-title">
+                        {node.nodeType === "soil" ? "Soil Sensors" : "Air Sensors"}
+                      </div>
                       <SensorTable sensors={node.sensors} t={t} lang={lang} showLimits={true} />
 
                       <div className="node-actions">
@@ -2210,12 +2308,7 @@ export default function NodeSensorPage() {
                   ) : null}
                   {formUid.trim() ? (
                     <div
-                      style={{
-                        marginTop: 6,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: isUidMatched ? "#2e7d32" : "#d84343",
-                      }}
+                      className={`uid-lookup-message ${isUidMatched ? "is-success" : "is-error"}`}
                     >
                       {uidLookupBusy
                         ? lang === "en"
@@ -2296,52 +2389,18 @@ export default function NodeSensorPage() {
                         : "Air Sensors"}
                     </div>
 
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <label className="limits-toggle-label">
-                        <input
-                          type="checkbox"
-                          checked={showSensorLimits}
-                          onChange={(e) => {
-                            const checked = e.target.checked;
-                            setShowSensorLimits(checked);
-                            if (!checked) setCanEditSensorLimit(false);
-                          }}
-                        />
-                        <span>
-                          {lang === "en" ? "Show Max/Min" : "แสดง Max/Min"}
-                        </span>
-                      </label>
-
-                      {showSensorLimits ? (
-                        <label className="limits-toggle-label">
-                          <input
-                            type="checkbox"
-                            checked={canEditSensorLimit}
-                            onChange={(e) => setCanEditSensorLimit(e.target.checked)}
-                          />
-                          <span>
-                            {lang === "en" ? "Edit Max/Min" : "แก้ไข Max/Min"}
-                          </span>
-                        </label>
-                      ) : null}
-                    </div>
                   </div>
 
                   <EditableSensorTable
                     sensors={formSensors}
-                    canEditLimits={canEditSensorLimit}
-                    showLimits={showSensorLimits}
+                    showLimits={true}
                     onChangeMin={updateSensorMin}
                     onChangeMax={updateSensorMax}
+                    onToggleMinEnabled={toggleSensorMinEnabled}
+                    onToggleMaxEnabled={toggleSensorMaxEnabled}
                     t={t}
                     lang={lang}
+                    readOnlyLimits={true}
                   />
                 </div>
               ) : (
@@ -2561,12 +2620,7 @@ export default function NodeSensorPage() {
                   ) : null}
                   {formUid.trim() ? (
                     <div
-                      style={{
-                        marginTop: 6,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: isUidMatched ? "#2e7d32" : "#d84343",
-                      }}
+                      className={`uid-lookup-message ${isUidMatched ? "is-success" : "is-error"}`}
                     >
                       {uidLookupBusy
                         ? lang === "en"
@@ -2623,50 +2677,15 @@ export default function NodeSensorPage() {
                         : "Air Sensors"}
                     </div>
 
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 12,
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <label className="limits-toggle-label">
-                        <input
-                          type="checkbox"
-                          checked={showSensorLimits}
-                          onChange={(e) => {
-                            const checked = e.target.checked;
-                            setShowSensorLimits(checked);
-                            if (!checked) setCanEditSensorLimit(false);
-                          }}
-                        />
-                        <span>
-                          {lang === "en" ? "Show Max/Min" : "แสดง Max/Min"}
-                        </span>
-                      </label>
-
-                      {showSensorLimits ? (
-                        <label className="limits-toggle-label">
-                          <input
-                            type="checkbox"
-                            checked={canEditSensorLimit}
-                            onChange={(e) => setCanEditSensorLimit(e.target.checked)}
-                          />
-                          <span>
-                            {lang === "en" ? "Edit Max/Min" : "แก้ไข Max/Min"}
-                          </span>
-                        </label>
-                      ) : null}
-                    </div>
                   </div>
 
                   <EditableSensorTable
                     sensors={formSensors}
-                    canEditLimits={canEditSensorLimit}
-                    showLimits={showSensorLimits}
+                    showLimits={true}
                     onChangeMin={updateSensorMin}
                     onChangeMax={updateSensorMax}
+                    onToggleMinEnabled={toggleSensorMinEnabled}
+                    onToggleMaxEnabled={toggleSensorMaxEnabled}
                     t={t}
                     lang={lang}
                   />
@@ -3202,13 +3221,7 @@ export default function NodeSensorPage() {
   .node-sensor-table {
     width: 100%;
     border-collapse: collapse;
-    table-layout: auto;
-  }
-
-  .node-sensor-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: auto;
+    table-layout: fixed;
   }
 
   .node-sensor-table th {
@@ -3218,7 +3231,7 @@ export default function NodeSensorPage() {
     font-size: 15px !important;
     font-weight: 800 !important;
     line-height: 1.4 !important;
-    padding: 8px 10px !important;
+    padding: 16px 30px !important;
     white-space: nowrap;
     font-family: inherit !important;
   }
@@ -3227,10 +3240,48 @@ export default function NodeSensorPage() {
     border-top: 1px solid #edf3ea;
     font-size: 16px !important;
     line-height: 1.4 !important;
-    padding: 9px 10px !important;
+    padding: 21px 30px !important;
     vertical-align: middle;
     white-space: nowrap;
     font-family: inherit !important;
+  }
+
+  .node-sensor-table th:nth-child(1),
+  .node-sensor-table td:nth-child(1) {
+    width: 34%;
+    text-align: left;
+    padding-left: 34px !important;
+    padding-right: 16px !important;
+  }
+
+  .node-sensor-table th:nth-child(2) {
+    width: 22%;
+    text-align: center;
+    padding-left: 0 !important;
+    padding-right: 56px !important;
+  }
+
+  .node-sensor-table td:nth-child(2) {
+    width: 22%;
+    text-align: center;
+    padding-left: 0 !important;
+    padding-right: 28px !important;
+  }
+
+  .node-sensor-table th:nth-child(3),
+  .node-sensor-table td:nth-child(3) {
+    width: 22%;
+    text-align: center;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .node-sensor-table th:nth-child(4),
+  .node-sensor-table td:nth-child(4) {
+    width: 22%;
+    text-align: right;
+    padding-left: 12px !important;
+    padding-right: 36px !important;
   }
 
   .node-sensor-table .sensor-name-cell {
@@ -3239,6 +3290,7 @@ export default function NodeSensorPage() {
     line-height: 1.4 !important;
     white-space: nowrap;
     font-family: inherit !important;
+    text-align: left;
   }
 
   .node-sensor-table .sensor-value-cell {
@@ -3247,6 +3299,16 @@ export default function NodeSensorPage() {
     line-height: 1.4 !important;
     white-space: nowrap;
     font-family: inherit !important;
+    text-align: center;
+  }
+
+  .node-sensor-table .data-value-cell {
+    text-align: center !important;
+  }
+
+  .node-sensor-table .data-value-text {
+    display: inline-block;
+    transform: translateX(-28px);
   }
 
   .node-sensor-table .sensor-unit-text {
@@ -3256,33 +3318,90 @@ export default function NodeSensorPage() {
     font-family: inherit !important;
   }
 
-  .limits-toggle-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 18px;
-    font-weight: 800;
-    color: #355e2d;
-    cursor: pointer;
+  .uid-lookup-message {
+    margin-top: 8px;
+    font-size: 14px;
+    line-height: 1.4;
+    font-weight: 700;
   }
 
-  .limits-toggle-label input {
-    width: 18px;
-    height: 18px;
-    accent-color: #2e7d32;
-    cursor: pointer;
+  .uid-lookup-message.is-success {
+    color: #2e7d32;
+  }
+
+  .uid-lookup-message.is-error {
+    color: #d84343;
+  }
+
+    .sensor-section-title {
+    margin: 0 0 12px;
+    font-size: 20px;
+    font-weight: 800;
+    color: #355e2d;
   }
 
   .edit-limit-wrap {
     display: inline-flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 8px;
     flex-wrap: nowrap;
     white-space: nowrap;
+    width: 100%;
+  }
+
+  .sensor-limit-cell {
+    gap: 8px;
+    width: 100%;
+  }
+
+  .max-col-cell {
+    text-align: center !important;
+  }
+
+  .max-col-cell .edit-limit-wrap {
+    transform: none;
+  }
+
+  .min-col-cell {
+    text-align: right !important;
+  }
+
+  .max-limit-cell {
+    justify-content: center;
+  }
+
+  .min-limit-cell {
+    justify-content: flex-end;
+  }
+
+  .sensor-limit-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0;
+    cursor: pointer;
+  }
+
+  .sensor-limit-toggle input {
+    width: 18px;
+    height: 18px;
+    accent-color: #2e7d32;
+    cursor: pointer;
+    flex: 0 0 auto;
+  }
+
+  .limit-readonly-text {
+    font-size: 15px !important;
+    font-weight: 700 !important;
+    line-height: 1.4 !important;
+    color: #203019;
+    white-space: nowrap;
+    font-family: inherit !important;
   }
 
   .limit-input {
-    width: 132px;
+    width: 108px;
     height: 46px;
     border-radius: 12px;
     border: 1px solid #cfe0c8;
@@ -3293,6 +3412,12 @@ export default function NodeSensorPage() {
     font-size: 18px !important;
     line-height: 1.35 !important;
     font-family: inherit !important;
+  }
+
+  .limit-input:disabled {
+    background: #eef2ec;
+    color: #9aa79a;
+    cursor: not-allowed;
   }
 
   .confirm-overlay {
