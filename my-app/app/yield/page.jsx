@@ -886,20 +886,22 @@ export default function YieldPage() {
                           <strong>{formatVolume(item?.volume, lang)}</strong>
                         </td>
                         <td className="yield-actions-cell">
-                          <button
-                            className="edit-row-btn"
-                            type="button"
-                            onClick={() => openEditPopup(item)}
-                          >
-                            {tx.edit}
-                          </button>
-                          <button
-                            className="del-row-btn"
-                            type="button"
-                            onClick={() => openDeletePopup(item)}
-                          >
-                            {tx.delete}
-                          </button>
+                          <div className="yield-actions-inner">
+                            <button
+                              className="edit-row-btn"
+                              type="button"
+                              onClick={() => openEditPopup(item)}
+                            >
+                              {tx.edit}
+                            </button>
+                            <button
+                              className="del-row-btn"
+                              type="button"
+                              onClick={() => openDeletePopup(item)}
+                            >
+                              {tx.delete}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1457,37 +1459,47 @@ export default function YieldPage() {
             border-bottom: none;
           }
 
-           .yield-table th:nth-child(1),
-          .yield-table td:nth-child(1) {
-            width: 20%;
-            text-align: center;
+          .yield-table th,
+          .yield-table td {
+            width: calc(100% / 6);
           }
 
-           .yield-table th:nth-child(2),
-          .yield-table td:nth-child(2) {
-            width: 20%;
-            text-align: center;
-          }
-
-           .yield-table th:nth-child(3),
-          .yield-table td:nth-child(3) {
-            width: 17%;
-          }
-
-           .yield-table th:nth-child(4),
-          .yield-table td:nth-child(4) {
-            width: 17%;
-          }
-
-           .yield-table th:nth-child(5),
-          .yield-table td:nth-child(5) {
-            width: 12%;
-          }
-
+          .yield-table th:nth-child(1),
+          .yield-table td:nth-child(1),
+          .yield-table th:nth-child(2),
+          .yield-table td:nth-child(2),
+          .yield-table th:nth-child(3),
+          .yield-table td:nth-child(3),
+          .yield-table th:nth-child(4),
+          .yield-table td:nth-child(4),
+          .yield-table th:nth-child(5),
+          .yield-table td:nth-child(5),
           .yield-table th:nth-child(6),
           .yield-table td:nth-child(6) {
-            width: 16%;
-            min-width: 170px;
+            width: calc(100% / 6);
+          }
+
+          .yield-table th:nth-child(1) {
+            text-align: left;
+            padding-left: 28px;
+          }
+
+          .yield-table td:nth-child(1) {
+            text-align: left;
+            padding-left: 28px;
+          }
+
+          .yield-table th:nth-child(2),
+          .yield-table td:nth-child(2),
+          .yield-table th:nth-child(3),
+          .yield-table td:nth-child(3),
+          .yield-table th:nth-child(4),
+          .yield-table td:nth-child(4),
+          .yield-table th:nth-child(5),
+          .yield-table td:nth-child(5),
+          .yield-table th:nth-child(6),
+          .yield-table td:nth-child(6) {
+            text-align: center;
           }
 
           .yield-empty-cell {
@@ -1501,24 +1513,30 @@ export default function YieldPage() {
           }
 
           .yield-actions-cell {
+            text-align: center;
+            vertical-align: middle;
+          }
+
+          .yield-actions-inner {
             display: flex;
-            flex-direction: column;
-            gap: 12px;
+            flex-direction: row;
+            gap: 10px;
             align-items: center;
             justify-content: center;
             width: 100%;
+            flex-wrap: nowrap;
           }
 
-          .yield-actions-cell :global(.edit-row-btn),
-          .yield-actions-cell :global(.del-row-btn) {
+          .yield-actions-inner :global(.edit-row-btn),
+          .yield-actions-inner :global(.del-row-btn) {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 122px;
-            min-width: 122px;
-            min-height: 42px;
-            padding: 8px 14px;
-            font-size: 14px;
+            width: 76px;
+            min-width: 76px;
+            min-height: 38px;
+            padding: 7px 10px;
+            font-size: 13px;
             font-weight: 700;
             border-radius: 12px;
             white-space: nowrap;
@@ -1630,13 +1648,15 @@ export default function YieldPage() {
               font-size: 13px;
             }
 
-            .yield-actions-cell {
-              flex-direction: column;
-              gap: 10px;
+            .yield-actions-inner {
+              flex-direction: row;
+              gap: 8px;
+              justify-content: center;
             }
 
-            .yield-actions-cell > * {
-              width: 100%;
+            .yield-actions-inner > * {
+              width: auto;
+              min-width: 92px;
             }
           }
 

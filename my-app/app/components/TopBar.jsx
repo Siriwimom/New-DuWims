@@ -753,6 +753,11 @@ export default function TopBar() {
             box-sizing: border-box;
           }
 
+.topbar-shell {
+  padding: 14px 14px;
+  min-height: 78px;
+}
+
           .topbar-shell {
             width: 100%;
             min-width: 0;

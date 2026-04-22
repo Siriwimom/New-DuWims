@@ -358,6 +358,13 @@ function formatDateInput(date) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+function formatDateDisplay(date) {
+  if (!date) return "";
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
 function formatDateThai(date) {
   if (!date) return "-";
   const d = new Date(date);
@@ -1586,7 +1593,8 @@ function buildPlotSvgOverlay(plot, points, sensorKey) {
     const boundsHeight = Math.max(1e-9, plotBounds.maxLat - plotBounds.minLat);
     const nearestEdgeNorm = Math.max(nearestEdge / Math.max(boundsWidth, boundsHeight), 0.025);
 
-    const radius = clamp(Math.max(farthestCorner * 1.15, nearestEdgeNorm * 2.8, 0.42), 0.42, 1.35);
+    const radius = clamp(Math.max(farthestCorner * 0.50, nearestEdgeNorm * 2.2, 0.34), 0.34, 1.12);
+
     const valueRatio = getSensorRatio(sensorKey, point.value);
     const nodeColor = getHeatColor(sensorKey, point.value);
     const gradientId = `grad-${plot.id}-${index}`;
@@ -2402,30 +2410,50 @@ const stats = useMemo(() => {
 
           <div className="plot-card">
             <div className="top-label">{tt("startDate")}</div>
-            <input
-              className="plot-select"
-              type="date"
-              value={startDate}
-              onChange={(e) => {
-                setPlaying(false);
-                setFrameIndex(frameTimestamps.length ? frameTimestamps.length - 1 : 0);
-                setStartDate(e.target.value);
-              }}
-            />
+            <div className="date-display-wrap">
+              <input
+                className="plot-select date-display-input"
+                type="text"
+                value={formatDateDisplay(startDate)}
+                placeholder="วัน/เดือน/ปี"
+                readOnly
+              />
+              <input
+                className="date-native-overlay"
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setPlaying(false);
+                  setFrameIndex(frameTimestamps.length ? frameTimestamps.length - 1 : 0);
+                  setStartDate(e.target.value);
+                }}
+                aria-label={tt("startDate")}
+              />
+            </div>
           </div>
 
           <div className="plot-card">
             <div className="top-label">{tt("endDate")}</div>
-            <input
-              className="plot-select"
-              type="date"
-              value={endDate}
-              onChange={(e) => {
-                setPlaying(false);
-                setFrameIndex(frameTimestamps.length ? frameTimestamps.length - 1 : 0);
-                setEndDate(e.target.value);
-              }}
-            />
+            <div className="date-display-wrap">
+              <input
+                className="plot-select date-display-input"
+                type="text"
+                value={formatDateDisplay(endDate)}
+                placeholder="วัน/เดือน/ปี"
+                readOnly
+              />
+              <input
+                className="date-native-overlay"
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setPlaying(false);
+                  setFrameIndex(frameTimestamps.length ? frameTimestamps.length - 1 : 0);
+                  setEndDate(e.target.value);
+                }}
+                aria-label={tt("endDate")}
+              />
+            </div>
           </div>
         </div>
 
@@ -2762,6 +2790,35 @@ const stats = useMemo(() => {
             padding: 0 12px;
             font-size: 14px;
             outline: none;
+          }
+
+          .date-display-wrap {
+            position: relative;
+            width: 100%;
+          }
+
+          .date-display-input {
+            padding-right: 44px;
+            cursor: pointer;
+          }
+
+          .date-native-overlay {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 44px;
+            opacity: 0.01;
+            cursor: pointer;
+            border: 0;
+            background: transparent;
+          }
+
+          .date-native-overlay::-webkit-calendar-picker-indicator {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
           }
 
           .content-grid {
