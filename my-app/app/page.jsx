@@ -304,10 +304,6 @@ export default function App() {
         },
       });
 
-      await api("/auth/send-email-verification", {
-        method: "POST",
-        body: { email: emailN },
-      });
 
       setPendingVerifyEmail(emailN);
       setOtp(["", "", "", "", "", ""]);

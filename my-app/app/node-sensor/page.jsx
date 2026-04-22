@@ -1670,12 +1670,27 @@ export default function NodeSensorPage() {
       !Number.isFinite(formMarker[0]) ||
       !Number.isFinite(formMarker[1])
     ) {
-      setError(
+      const pinMessage =
         t.pinOnMapError ||
-          (lang === "en"
-            ? "Please pin a marker on the map"
-            : "กรุณาปักหมุดบนแผนที่"),
-      );
+        (lang === "en"
+          ? "Please pin a marker on the map"
+          : "กรุณาปักหมุดบนแผนที่");
+
+      setError(pinMessage);
+      openConfirm({
+        type: "pin-required",
+        icon: "📍",
+        title: lang === "en" ? "Marker required" : "ต้องปักหมุดก่อนบันทึก",
+        sub:
+          lang === "en"
+            ? "Please pin the node location on the map before saving this node."
+            : "กรุณาปักตำแหน่งของ Node บนแผนที่ก่อนบันทึกข้อมูล",
+        confirmText: lang === "en" ? "OK" : "ตกลง",
+        confirmClassName: "confirm-warn",
+        onConfirm: async () => {
+          closeConfirm();
+        },
+      });
       return false;
     }
     return true;
@@ -3256,32 +3271,26 @@ export default function NodeSensorPage() {
 
   .node-sensor-table th:nth-child(2) {
     width: 22%;
-    text-align: center;
-    padding-left: 0 !important;
-    padding-right: 56px !important;
-  }
-
-  .node-sensor-table td:nth-child(2) {
-    width: 22%;
-    text-align: center;
-    padding-left: 0 !important;
-    padding-right: 28px !important;
-  }
-
-  .node-sensor-table th:nth-child(3),
-  .node-sensor-table td:nth-child(3) {
-    width: 22%;
-    text-align: center;
+    text-align: center !important;
     padding-left: 12px !important;
     padding-right: 12px !important;
   }
 
+  .node-sensor-table td:nth-child(2) {
+    width: 22%;
+    text-align: center !important;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  .node-sensor-table th:nth-child(3),
+  .node-sensor-table td:nth-child(3),
   .node-sensor-table th:nth-child(4),
   .node-sensor-table td:nth-child(4) {
     width: 22%;
-    text-align: right;
+    text-align: center !important;
     padding-left: 12px !important;
-    padding-right: 36px !important;
+    padding-right: 12px !important;
   }
 
   .node-sensor-table .sensor-name-cell {
@@ -3307,8 +3316,12 @@ export default function NodeSensorPage() {
   }
 
   .node-sensor-table .data-value-text {
-    display: inline-block;
-    transform: translateX(-28px);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    transform: none !important;
+    text-align: center !important;
   }
 
   .node-sensor-table .sensor-unit-text {
@@ -3343,7 +3356,7 @@ export default function NodeSensorPage() {
   .edit-limit-wrap {
     display: inline-flex;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: center;
     gap: 8px;
     flex-wrap: nowrap;
     white-space: nowrap;
@@ -3355,24 +3368,21 @@ export default function NodeSensorPage() {
     width: 100%;
   }
 
-  .max-col-cell {
-    text-align: center !important;
-  }
-
-  .max-col-cell .edit-limit-wrap {
-    transform: none;
-  }
-
+  .max-col-cell,
   .min-col-cell {
-    text-align: right !important;
+    text-align: center !important;
+    vertical-align: middle;
   }
 
-  .max-limit-cell {
+  .max-col-cell .edit-limit-wrap,
+  .min-col-cell .edit-limit-wrap {
+    transform: none;
     justify-content: center;
   }
 
+  .max-limit-cell,
   .min-limit-cell {
-    justify-content: flex-end;
+    justify-content: center;
   }
 
   .sensor-limit-toggle {
@@ -3391,6 +3401,23 @@ export default function NodeSensorPage() {
     flex: 0 0 auto;
   }
 
+  .limit-input {
+    flex: 0 0 108px;
+    width: 108px;
+    text-align: center;
+  }
+
+  .sensor-unit-text {
+    flex: 0 0 52px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  .sensor-limit-toggle {
+    flex: 0 0 18px;
+  }
+
   .limit-readonly-text {
     font-size: 15px !important;
     font-weight: 700 !important;
@@ -3402,6 +3429,7 @@ export default function NodeSensorPage() {
 
   .limit-input {
     width: 108px;
+    min-width: 108px;
     height: 46px;
     border-radius: 12px;
     border: 1px solid #cfe0c8;

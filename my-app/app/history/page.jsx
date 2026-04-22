@@ -232,6 +232,78 @@ function bucketTimestampMs(value, bucketHours = 3) {
   return Math.floor(ts / bucketMs) * bucketMs;
 }
 
+function averageByEqualIntervals(rows, bucketHours = 6) {
+  const buckets = new Map();
+
+  for (const row of safeArray(rows)) {
+    const bucketTs = bucketTimestampMs(row?.timestamp || row?.timestampMs || row, bucketHours);
+    const value = toNum(row?.value);
+    if (!Number.isFinite(bucketTs) || value === null) continue;
+
+    if (!buckets.has(bucketTs)) {
+      buckets.set(bucketTs, []);
+    }
+    buckets.get(bucketTs).push(value);
+  }
+
+  const bucketAverages = Array.from(buckets.values())
+    .map((values) => average(values))
+    .filter((value) => Number.isFinite(value));
+
+  return average(bucketAverages);
+}
+
+function diffDaysInclusive(startDate, endDate) {
+  const start = startOfDayMs(startDate);
+  const end = startOfDayMs(endDate);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return 1;
+  return Math.max(1, Math.round((end - start) / (24 * 60 * 60 * 1000)) + 1);
+}
+
+function getChartBucketHours(startDate, endDate) {
+  const days = diffDaysInclusive(startDate, endDate);
+  if (days <= 1) return 1;
+  if (days <= 7) return 3;
+  if (days <= 31) return 6;
+  if (days <= 62) return 12;
+  return 24;
+}
+
+function aggregateRowsByBuckets(rows, bucketHours = 6) {
+  const buckets = new Map();
+
+  for (const row of safeArray(rows)) {
+    const bucketTs = bucketTimestampMs(row?.timestamp || row?.timestampMs || row, bucketHours);
+    const value = toNum(row?.value);
+    if (!Number.isFinite(bucketTs) || value === null) continue;
+
+    if (!buckets.has(bucketTs)) {
+      buckets.set(bucketTs, []);
+    }
+    buckets.get(bucketTs).push({ row, value });
+  }
+
+  return Array.from(buckets.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([bucketTs, entries]) => {
+      const avgValue = average(entries.map((entry) => entry.value));
+      const latestEntry = [...entries].sort((a, b) => {
+        const aTs = toNum(a?.row?.timestampMs) || parseFlexibleDate(a?.row?.timestamp)?.getTime?.() || bucketTs;
+        const bTs = toNum(b?.row?.timestampMs) || parseFlexibleDate(b?.row?.timestamp)?.getTime?.() || bucketTs;
+        return aTs - bTs;
+      }).at(-1);
+
+      return {
+        ...latestEntry?.row,
+        value: avgValue,
+        timestampMs: bucketTs,
+        timestamp: new Date(bucketTs).toISOString(),
+        aggregatedCount: entries.length,
+      };
+    })
+    .filter((row) => Number.isFinite(row?.value));
+}
+
 function formatDateTimeLabel(value, lang = "th") {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value || "-");
@@ -1340,11 +1412,16 @@ export default function HistoryPage() {
     return rows;
   }, [targetRows, readingMap, startDate, endDate]);
 
+  const chartBucketHours = useMemo(
+    () => getChartBucketHours(startDate, endDate),
+    [startDate, endDate]
+  );
+
   const combinedChart = useMemo(() => {
     if (!targetRows.length) return { series: [], timestamps: [] };
 
     const series = targetRows.map((target) => {
-      const points = filteredReadingRows
+      const rawPoints = filteredReadingRows
         .filter(
           (row) =>
             sameText(row.plotId, target.plotId) &&
@@ -1352,6 +1429,8 @@ export default function HistoryPage() {
             (sameText(row.nodeId, target.nodeId) || sameText(row.nodeUid, target.nodeUid))
         )
         .sort((a, b) => (a.timestampMs || 0) - (b.timestampMs || 0));
+
+      const points = aggregateRowsByBuckets(rawPoints, chartBucketHours);
 
       return {
         key: [target.plotId, target.nodeId || target.nodeUid, target.sensorKey].join("|"),
@@ -1369,15 +1448,16 @@ export default function HistoryPage() {
         label: `${target.plotName} · ${target.nodeName} · ${target.sensorLabel}`,
         timestamps: points.map((row) => row.timestamp),
         values: points.map((row) => row.value),
+        aggregatedCounts: points.map((row) => row.aggregatedCount || 1),
         hasAnyValue: points.some((row) => Number.isFinite(row.value)),
       };
     });
 
     return {
       series,
-      timestamps: filteredReadingRows.map((row) => row.timestamp),
+      timestamps: series.flatMap((item) => item.timestamps),
     };
-  }, [targetRows, filteredReadingRows]);
+  }, [targetRows, filteredReadingRows, chartBucketHours]);
 
   const visibleChartSeries = useMemo(
     () => safeArray(combinedChart?.series).filter((s) => s.hasAnyValue),
@@ -1447,8 +1527,6 @@ export default function HistoryPage() {
 
     return visibleChartSeries.map((item, idx) => {
       const seriesColor = colorOfSeriesByIndex(idx);
-      const seriesDash = dashOfSeriesByIndex(idx);
-
       return {
         name: `${item.sensorLabel} · ${item.nodeName || item.plotName || idx + 1}`,
         yAxisIndex: sensorAxisIndexMap[item.sensorKey] || 0,
@@ -1463,7 +1541,7 @@ export default function HistoryPage() {
           nodeName: item.nodeName,
         })),
         color: seriesColor,
-        _dashArray: seriesDash,
+        _dashArray: 0,
         _strokeWidth: 2.5,
       };
     });
@@ -1539,8 +1617,9 @@ export default function HistoryPage() {
           plotName: item.plotName,
           nodeName: item.nodeName,
           unit: item.unit,
-          dash: dashOfSeriesByIndex(index),
+          dash: 0,
           points: item.values.filter((v) => Number.isFinite(v)).length,
+          bucketHours: chartBucketHours,
           plotColor: colorOfSeriesByIndex(index),
         }));
 
@@ -1554,7 +1633,7 @@ export default function HistoryPage() {
     });
 
     return grouped.filter((group) => group.items.length > 0);
-  }, [activeSensorKeys, visibleChartSeries, t]);
+  }, [activeSensorKeys, visibleChartSeries, t, chartBucketHours]);
 
   const selectedSensorCount = selectedSensors.length;
   const visibleSensorCount = useMemo(
@@ -1573,7 +1652,8 @@ export default function HistoryPage() {
       const values = {};
 
       for (const opt of SENSOR_OPTIONS) {
-        const fromHistory = average(nodeRows.filter((r) => r.sensorKey === opt.key).map((r) => r.value));
+        const sensorRows = nodeRows.filter((r) => r.sensorKey === opt.key);
+        const fromHistory = averageByEqualIntervals(sensorRows, 6);
 
         if (fromHistory !== null) {
           values[opt.key] = fromHistory;
@@ -1719,7 +1799,7 @@ export default function HistoryPage() {
       chart: {
         id: "h2MainHistoryChart",
         type: chartType,
-        height: 360,
+        height: 520,
         fontFamily: "Sarabun, sans-serif",
         toolbar: {
           show: true,
@@ -1742,7 +1822,7 @@ export default function HistoryPage() {
         curve: "smooth",
         lineCap: "round",
         width: chartType === "bar" ? 0 : apexSeries.map((s) => s._strokeWidth || 2.5),
-        dashArray: chartType === "bar" ? 0 : apexSeries.map((s) => s._dashArray || 0),
+        dashArray: 0,
       },
       fill: {
         type: chartType === "area" ? "gradient" : "solid",
@@ -1761,11 +1841,7 @@ export default function HistoryPage() {
         enabled: false,
       },
       legend: {
-        show: true,
-        position: "top",
-        horizontalAlign: "left",
-        fontSize: "12px",
-        fontWeight: 700,
+        show: false,
       },
       xaxis: {
         type: "datetime",
@@ -1812,14 +1888,14 @@ export default function HistoryPage() {
         borderColor: "rgba(148,163,184,0.18)",
         strokeDashArray: 3,
         padding: {
-          left: 8,
-          right: 8,
-          top: 4,
-          bottom: 0,
+          left: 20,
+          right: 20,
+          top: 18,
+          bottom: 8,
         },
       },
       markers: {
-        size: 6,
+        size: chartType === "bar" ? 0 : 3,
         strokeWidth: 0,
         hover: {
           sizeOffset: 2,
@@ -2102,7 +2178,7 @@ export default function HistoryPage() {
               <div>
                 <div className="h2-chart-title">📈 {txt.chartComparePlots}</div>
                 <div className="h2-chart-meta">
-                  {chartMeta} ·{" "}
+                  {chartMeta} · {lang === "en" ? `bucket ${chartBucketHours}h` : `เฉลี่ยทุก ${chartBucketHours} ชม.`} ·{" "}
                   {lang === "en"
                     ? `showing ${visibleSensorCount}/${selectedSensorCount} sensor types with data`
                     : `แสดง ${visibleSensorCount}/${selectedSensorCount} ประเภทเซนเซอร์ที่มีข้อมูล`}
@@ -2145,7 +2221,7 @@ export default function HistoryPage() {
                 <div className="chart-wrap chart-wrap-apex">
                   <ReactApexChart
                     type={chartType}
-                    height={360}
+                    height={520}
                     series={apexSeries}
                     options={mainChartOptions}
                   />
@@ -2192,7 +2268,7 @@ export default function HistoryPage() {
                               <div className="chart-right-legend-texts">
                                 <div className="chart-right-legend-main">{item.plotName}</div>
                                 <div className="chart-right-legend-sub">{item.nodeName}</div>
-                                <div className="chart-right-legend-meta">{item.points} pts</div>
+                                <div className="chart-right-legend-meta">{item.points} pts · {lang === "en" ? `${item.bucketHours}h avg` : `เฉลี่ย ${item.bucketHours} ชม.`}</div>
                               </div>
                             </div>
                           ))}
@@ -2211,7 +2287,7 @@ export default function HistoryPage() {
             <div className="chart-wrap chart-wrap-brush">
               <ReactApexChart
                 type="area"
-                height={72}
+                height={84}
                 series={brushSeries}
                 options={brushChartOptions}
               />
@@ -2239,6 +2315,15 @@ export default function HistoryPage() {
 
           <div className="table-scroll">
             <table className="summary-table">
+              <colgroup>
+                <col className="summary-col-plot" />
+                <col className="summary-col-node" />
+                <col className="summary-col-sensor" />
+                <col className="summary-col-sensor" />
+                <col className="summary-col-sensor" />
+                <col className="summary-col-sensor" />
+                <col className="summary-col-sensor" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>{lang === "en" ? "Plot" : "แปลง"}</th>
@@ -2282,6 +2367,15 @@ export default function HistoryPage() {
 
           <div className="table-scroll">
             <table className="summary-table">
+              <colgroup>
+                <col className="summary-col-plot" />
+                <col className="summary-col-node" />
+                <col className="summary-col-sensor" />
+                <col className="summary-col-sensor" />
+                <col className="summary-col-sensor" />
+                <col className="summary-col-sensor" />
+                <col className="summary-col-sensor" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>{lang === "en" ? "Plot" : "แปลง"}</th>
@@ -2678,9 +2772,9 @@ export default function HistoryPage() {
 
           .chart-main-row {
             display: grid;
-            grid-template-columns: minmax(0, 1fr) 250px;
-            gap: 14px;
-            align-items: start;
+            grid-template-columns: minmax(0, 1fr) 300px;
+            gap: 18px;
+            align-items: stretch;
           }
 
           .chart-main-col {
@@ -2691,16 +2785,16 @@ export default function HistoryPage() {
             border: 1px solid #e4ede0;
             background: #f8fbf7;
             border-radius: 18px;
-            padding: 12px;
-            max-height: 430px;
+            padding: 14px;
+            max-height: 520px;
             overflow: auto;
           }
 
           .chart-right-legend-title {
-            font-size: 15px;
+            font-size: 16px;
             font-weight: 900;
             color: #244f15;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
           }
 
           .chart-right-legend-list {
@@ -2837,7 +2931,7 @@ export default function HistoryPage() {
           .chart-wrap-apex {
             border: 1px solid #edf2f7;
             border-radius: 18px;
-            padding: 10px 8px 6px;
+            padding: 14px 12px 10px;
             background: #fff;
           }
 
@@ -2845,7 +2939,7 @@ export default function HistoryPage() {
             margin-top: 8px;
             border: 1px solid #edf2f7;
             border-radius: 14px;
-            padding: 8px;
+            padding: 10px;
             background: #fff;
           }
 
@@ -2871,15 +2965,29 @@ export default function HistoryPage() {
             width: 100%;
             border-collapse: separate;
             border-spacing: 0;
-            min-width: 780px;
+            min-width: 900px;
+            table-layout: fixed;
+          }
+
+          .summary-col-plot {
+            width: 14%;
+          }
+
+          .summary-col-node {
+            width: 12%;
+          }
+
+          .summary-col-sensor {
+            width: 14.8%;
           }
 
           .summary-table th,
           .summary-table td {
-            padding: 12px 10px;
+            padding: 12px 12px;
             border-bottom: 1px solid #edf2f7;
-            text-align: left;
+            text-align: center;
             font-size: 13px;
+            vertical-align: middle;
           }
 
           .summary-table th {
@@ -2891,6 +2999,16 @@ export default function HistoryPage() {
           .summary-table td {
             color: #1f2937;
             font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          .summary-table th:first-child,
+          .summary-table th:nth-child(2),
+          .summary-table td:first-child,
+          .summary-table td:nth-child(2) {
+            text-align: left;
           }
 
           .table-empty {
