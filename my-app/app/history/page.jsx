@@ -23,6 +23,52 @@ function getToken() {
 
 const ReactApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
+const REALTIME_REFRESH_MS = 60 * 1000;
+const HISTORY_CACHE_STORAGE_KEY = "DUWIMS_HISTORY_PAGE_CACHE_V1";
+const HISTORY_PLOTS_CACHE_KEY = "DUWIMS_HISTORY_PLOTS_CACHE_V1";
+const HISTORY_CACHE_TTL_MS = 10 * 60 * 1000;
+const HISTORY_CACHE_MAX_ENTRIES = 6;
+
+function readBrowserCache(storageKey, cacheKey = "default") {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    const entry = parsed?.[cacheKey];
+    if (!entry || !entry.savedAt) return null;
+
+    if (Date.now() - Number(entry.savedAt) > HISTORY_CACHE_TTL_MS) return null;
+
+    return entry.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function writeBrowserCache(storageKey, cacheKey = "default", data) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    const parsed = raw ? JSON.parse(raw) : {};
+    const next = {
+      ...(parsed && typeof parsed === "object" ? parsed : {}),
+      [cacheKey]: { savedAt: Date.now(), data },
+    };
+
+    const entries = Object.entries(next)
+      .sort((a, b) => Number(b?.[1]?.savedAt || 0) - Number(a?.[1]?.savedAt || 0))
+      .slice(0, HISTORY_CACHE_MAX_ENTRIES);
+
+    window.localStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    // localStorage may be full or blocked; ignore and keep normal API loading.
+  }
+}
+
 
 
 const PLOT_COLORS = [
@@ -891,14 +937,14 @@ export default function HistoryPage() {
   const txt = {
     historyFilterTitle: t?.historyFilterTitle || "ตัวกรองประวัติ",
     historyFilterSub: t?.historyFilterSub || "เลือกช่วงเวลา แปลง และประเภทเซนเซอร์",
-    quickRange: t?.quickRange || "ช่วงเวลา",
+    quickRange: "ช่วงเวลา",
     todayShort: t?.todayShort || "วันนี้",
-    last7Days: t?.last7Days || "7D",
-    last30Days: t?.last30Days || "30D",
+    last7Days: t?.last7Days || "7 วันล่าสุด",
+    last30Days: t?.last30Days || "30 วันล่าสุด",
     startDate: t?.startDate || "วันที่เริ่ม",
     endDate: t?.endDate || "วันที่สิ้นสุด",
     plotSelect: t?.plotSelect || "เลือกแปลง",
-    allPlots: t?.allPlots || "ทุกแปลง",
+    allPlots: t?.allPlots || "เลือกแปลง",
     sensorType: t?.sensorType || "ประเภทเซนเซอร์",
     selectSensorType: t?.selectSensorType || "เลือกประเภทเซนเซอร์",
     done: t?.done || "เสร็จสิ้น",
@@ -911,28 +957,28 @@ export default function HistoryPage() {
 
   const today = useMemo(() => new Date(), []);
   const defaultEnd = formatDateInput(today);
-  const defaultStart = formatDateInput(
-    new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29)
-  );
+  const defaultStart = formatDateInput(today);
 
   const [plots, setPlots] = useState([]);
   const [loadingPlots, setLoadingPlots] = useState(true);
   const [loadingReadings, setLoadingReadings] = useState(false);
   const [error, setError] = useState("");
 
-  const [quickRange, setQuickRange] = useState(txt.last30Days);
+  const [quickRange, setQuickRange] = useState(txt.todayShort);
   const [startDate, setStartDate] = useState(defaultStart);
   const [endDate, setEndDate] = useState(defaultEnd);
 
   const [selectedPlotIds, setSelectedPlotIds] = useState([]);
   const [plotDropdownOpen, setPlotDropdownOpen] = useState(false);
 
-  const [selectedSensors, setSelectedSensors] = useState(SENSOR_OPTIONS.map((s) => s.key));
+  const [selectedSensors, setSelectedSensors] = useState([]);
   const [sensorDropdownOpen, setSensorDropdownOpen] = useState(false);
   const [chartType, setChartType] = useState("line");
 
   const [readingMap, setReadingMap] = useState({});
+  const [refreshTick, setRefreshTick] = useState(0);
   const csvRef = useRef("");
+  const readingRequestIdRef = useRef(0);
 
   const sensorWrapRef = useRef(null);
   const plotWrapRef = useRef(null);
@@ -952,14 +998,20 @@ export default function HistoryPage() {
   );
 
   useEffect(() => {
-    setQuickRange(txt.last30Days);
-  }, [txt.last30Days]);
+    setQuickRange(txt.todayShort);
+  }, [txt.todayShort]);
 
   useEffect(() => {
     let alive = true;
 
     async function loadPlots() {
-      setLoadingPlots(true);
+      const cachedPlots = readBrowserCache(HISTORY_PLOTS_CACHE_KEY);
+      if (Array.isArray(cachedPlots) && cachedPlots.length > 0) {
+        setPlots(cachedPlots);
+        setLoadingPlots(false);
+      }
+
+      setLoadingPlots(!Array.isArray(cachedPlots) || cachedPlots.length === 0);
       setError("");
       try {
         const [plotsData, nodesData] = await Promise.all([
@@ -969,11 +1021,15 @@ export default function HistoryPage() {
         if (!alive) return;
         const plotItems = Array.isArray(plotsData?.items) ? plotsData.items : Array.isArray(plotsData) ? plotsData : [];
         const nodeItems = Array.isArray(nodesData?.items) ? nodesData.items : Array.isArray(nodesData) ? nodesData : [];
-        setPlots(attachNodesToPlots(plotItems, nodeItems, txt));
+        const normalizedPlots = attachNodesToPlots(plotItems, nodeItems, txt);
+        setPlots(normalizedPlots);
+        writeBrowserCache(HISTORY_PLOTS_CACHE_KEY, "default", normalizedPlots);
       } catch (err) {
         if (!alive) return;
         setError(err?.message || txt.loadPlotsFailed);
-        setPlots([]);
+        if (!Array.isArray(cachedPlots) || cachedPlots.length === 0) {
+          setPlots([]);
+        }
       } finally {
         if (alive) setLoadingPlots(false);
       }
@@ -999,6 +1055,16 @@ export default function HistoryPage() {
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
+
+  useEffect(() => {
+    if (!authChecked || selectedSensors.length === 0) return undefined;
+
+    const timer = window.setInterval(() => {
+      setRefreshTick((value) => value + 1);
+    }, REALTIME_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, [authChecked, selectedSensors.length]);
 
   const filteredPlots = useMemo(() => {
     if (!selectedPlotIds.length) return plots;
@@ -1071,6 +1137,16 @@ export default function HistoryPage() {
     return targets;
   }, [filteredPlots]);
 
+  const historyCacheKey = useMemo(() => {
+    const targetKey = fetchTargets
+      .map((target) => `${target.plotId}:${target.nodeUid || target.nodeId}`)
+      .filter(Boolean)
+      .sort()
+      .join(",");
+
+    return `${startDate}|${endDate}|${targetKey}`;
+  }, [fetchTargets, startDate, endDate]);
+
   useEffect(() => {
     let alive = true;
 
@@ -1120,12 +1196,20 @@ export default function HistoryPage() {
     }
 
     async function loadReadings() {
-      if (!fetchTargets.length) {
+      if (!fetchTargets.length || selectedSensors.length === 0) {
         setReadingMap({});
         return;
       }
 
-      setLoadingReadings(true);
+      const cachedReadingMap = readBrowserCache(HISTORY_CACHE_STORAGE_KEY, historyCacheKey);
+      if (cachedReadingMap && typeof cachedReadingMap === "object") {
+        setReadingMap(cachedReadingMap);
+      }
+
+      const requestId = readingRequestIdRef.current + 1;
+      readingRequestIdRef.current = requestId;
+
+      setLoadingReadings(!cachedReadingMap);
       setError("");
 
       try {
@@ -1139,76 +1223,116 @@ export default function HistoryPage() {
           new Set(fetchTargets.map((target) => String(target.plotId || "").trim()).filter(Boolean))
         );
 
-        const globalHistoryParams = [
-          {},
-          ...uidList.map((uid) => ({ uid })),
-          ...uidList.map((nodeUid) => ({ nodeUid })),
-          ...nodeIdList.map((nodeId) => ({ nodeId })),
-          ...plotIdList.map((plotId) => ({ plotId })),
-        ];
+        function normalizeItemsForTarget(items, target) {
+          const seenItem = new Set();
 
-        const globalHistoryItems = await collectEndpointItems("/api/history", globalHistoryParams);
+          return safeArray(items)
+            .map(normalizeReading)
+            .filter((item) => {
+              const raw = item?.rawItem || item;
+              const readingPlotId = item?.plotId || raw?.plotId || raw?.plot_id || raw?.plot?.id || raw?.plot?._id || "";
+              const readingNodeId = item?.nodeId || raw?.nodeId || raw?.node_id || raw?.node?.id || raw?.node?._id || "";
+              const readingNodeUid = item?.nodeUid || raw?.nodeUid || raw?.node_uid || raw?.node?.uid || raw?.uid || "";
 
-        const globalPool = [...globalHistoryItems];
+              if (readingPlotId && target.plotId && !sameText(readingPlotId, target.plotId)) return false;
 
-        const results = await Promise.all(
-          fetchTargets.map(async (target) => {
-            const mapKey = `${target.plotId}|${target.nodeUid || target.nodeId}`;
+              const uidMatched = target.nodeUid && readingNodeUid && sameText(readingNodeUid, target.nodeUid);
+              const idMatched = target.nodeId && readingNodeId && sameText(readingNodeId, target.nodeId);
+              const fetchedForTargetWithoutNodeIds = !readingNodeUid && !readingNodeId;
+              if (!uidMatched && !idMatched && !fetchedForTargetWithoutNodeIds) return false;
 
-            try {
-              const queryVariants = [];
-              if (target.nodeUid) queryVariants.push({ uid: target.nodeUid });
-              if (target.nodeUid) queryVariants.push({ nodeUid: target.nodeUid });
-              if (target.nodeId) queryVariants.push({ nodeId: target.nodeId });
-              if (target.plotId && target.nodeUid) {
-                queryVariants.push({ plotId: target.plotId, uid: target.nodeUid });
-                queryVariants.push({ plotId: target.plotId, nodeUid: target.nodeUid });
+              const dedupeKey = [
+                item.rawItem?._historyParentId || item.id || "",
+                item.rawItem?._historySensorIndex ?? item.sensorUid ?? item.sensorId ?? item.sensorKey ?? "",
+                item.nodeUid || item.nodeId || "",
+                item.timestamp || "",
+              ].join("|");
+
+              if (!dedupeKey) return false;
+              if (seenItem.has(dedupeKey)) return false;
+              seenItem.add(dedupeKey);
+              return true;
+            });
+        }
+
+        async function buildReadingMapFromParams(globalParams, includeTargetQueries) {
+          const globalHistoryItems = await collectEndpointItems("/api/history", globalParams);
+          const globalPool = [...globalHistoryItems];
+
+          return Promise.all(
+            fetchTargets.map(async (target) => {
+              const mapKey = `${target.plotId}|${target.nodeUid || target.nodeId}`;
+
+              try {
+                const queryVariants = [];
+
+                if (includeTargetQueries) {
+                  if (target.nodeUid) queryVariants.push({ uid: target.nodeUid });
+                  if (target.nodeUid) queryVariants.push({ nodeUid: target.nodeUid });
+                  if (target.nodeId) queryVariants.push({ nodeId: target.nodeId });
+                  if (target.plotId && target.nodeUid) {
+                    queryVariants.push({ plotId: target.plotId, uid: target.nodeUid });
+                    queryVariants.push({ plotId: target.plotId, nodeUid: target.nodeUid });
+                  }
+                  if (target.plotId && target.nodeId) {
+                    queryVariants.push({ plotId: target.plotId, nodeId: target.nodeId });
+                  }
+                }
+
+                const targetHistoryItems = includeTargetQueries
+                  ? await collectEndpointItems("/api/history", queryVariants)
+                  : [];
+
+                const normalized = normalizeItemsForTarget(
+                  [...globalPool, ...targetHistoryItems],
+                  target
+                );
+
+                return [mapKey, normalized];
+              } catch {
+                return [mapKey, []];
               }
-              if (target.plotId && target.nodeId) {
-                queryVariants.push({ plotId: target.plotId, nodeId: target.nodeId });
-              }
+            })
+          );
+        }
 
-              const targetHistoryItems = await collectEndpointItems("/api/history", queryVariants);
+        const fastHistoryParams = plotIdList.length > 0
+          ? plotIdList.map((plotId) => ({ plotId }))
+          : [
+              ...uidList.map((uid) => ({ uid })),
+              ...uidList.map((nodeUid) => ({ nodeUid })),
+              ...nodeIdList.map((nodeId) => ({ nodeId })),
+            ];
 
-              const allItems = [
-                ...globalPool,
-                ...targetHistoryItems,
-              ];
+        let results = await buildReadingMapFromParams(fastHistoryParams, false);
+        const fastHasDataForAllTargets =
+          results.length > 0 && results.every(([, rows]) => Array.isArray(rows) && rows.length > 0);
 
-              const seenItem = new Set();
-              const normalized = allItems
-  .map(normalizeReading)
-  .filter((item) => {
-    const dedupeKey = [
-      item.rawItem?._historyParentId || item.id || "",
-      item.rawItem?._historySensorIndex ?? item.sensorUid ?? item.sensorId ?? item.sensorKey ?? "",
-      item.nodeUid || item.nodeId || "",
-      item.timestamp || "",
-    ].join("|");
+        if (!fastHasDataForAllTargets) {
+          const fallbackHistoryParams = [
+            {},
+            ...uidList.map((uid) => ({ uid })),
+            ...uidList.map((nodeUid) => ({ nodeUid })),
+            ...nodeIdList.map((nodeId) => ({ nodeId })),
+            ...plotIdList.map((plotId) => ({ plotId })),
+          ];
 
-    if (!dedupeKey) return false;
-    if (seenItem.has(dedupeKey)) return false;
-    seenItem.add(dedupeKey);
-    return true;
-  });
+          results = await buildReadingMapFromParams(fallbackHistoryParams, true);
+        }
 
-              return [mapKey, normalized];
-            } catch {
-              return [mapKey, []];
-            }
-          })
-        );
-
-        if (!alive) return;
+        if (!alive || requestId !== readingRequestIdRef.current) return;
         const nextReadingMap = Object.fromEntries(results);
         
         setReadingMap(nextReadingMap);
+        writeBrowserCache(HISTORY_CACHE_STORAGE_KEY, historyCacheKey, nextReadingMap);
       } catch (err) {
-        if (!alive) return;
+        if (!alive || requestId !== readingRequestIdRef.current) return;
         setError(err?.message || txt.loadHistoryFailed);
-        setReadingMap({});
+        if (!readBrowserCache(HISTORY_CACHE_STORAGE_KEY, historyCacheKey)) {
+          setReadingMap({});
+        }
       } finally {
-        if (alive) setLoadingReadings(false);
+        if (alive && requestId === readingRequestIdRef.current) setLoadingReadings(false);
       }
     }
 
@@ -1217,7 +1341,7 @@ export default function HistoryPage() {
     return () => {
       alive = false;
     };
-  }, [fetchTargets, startDate, endDate, txt.loadHistoryFailed]);
+  }, [fetchTargets, selectedSensors.length, startDate, endDate, refreshTick, historyCacheKey, txt.loadHistoryFailed]);
 
   const targetRows = useMemo(() => {
     const out = [];
