@@ -3141,6 +3141,49 @@ export default function HistoryPage() {
             font-weight: 700;
           }
 
+
+          /* Responsive-only adjustments */
+          .history-page-shell,
+          .history-card,
+          .chart-card,
+          .chart-main-col,
+          .chart-wrap,
+          .chart-wrap-apex,
+          .chart-wrap-brush {
+            min-width: 0;
+            box-sizing: border-box;
+          }
+
+          .h2-chart-topbar > div:first-child {
+            min-width: 0;
+            flex: 1 1 320px;
+          }
+
+          .h2-chart-actions {
+            flex: 0 1 auto;
+          }
+
+          .plot-dd-menu,
+          .sensor-dd-menu {
+            max-height: min(68vh, 520px);
+            overflow: auto;
+          }
+
+          .table-scroll {
+            -webkit-overflow-scrolling: touch;
+          }
+
+          @media (max-width: 1280px) {
+            .history-page-shell {
+              padding: 14px;
+            }
+
+            .chart-main-row {
+              grid-template-columns: minmax(0, 1fr) 280px;
+              gap: 14px;
+            }
+          }
+
           @media (max-width: 1180px) {
             .chart-main-row {
               grid-template-columns: 1fr;
@@ -3148,6 +3191,22 @@ export default function HistoryPage() {
 
             .chart-right-legend {
               max-height: none;
+            }
+
+            .chart-right-legend-list,
+            .chart-right-legend-group-items {
+              display: grid;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 10px;
+            }
+
+            .chart-right-legend-group {
+              display: contents;
+            }
+
+            .chart-right-legend-group-title {
+              grid-column: 1 / -1;
+              margin-top: 4px;
             }
 
             .chart-series-legend {
@@ -3160,23 +3219,180 @@ export default function HistoryPage() {
               grid-template-columns: 1fr;
             }
 
+            .h2-chart-topbar {
+              align-items: stretch;
+            }
+
+            .h2-chart-actions,
+            .h2-type-toggle {
+              width: 100%;
+            }
+
+            .h2-type-btn,
+            .h2-export-btn {
+              flex: 1 1 130px;
+              text-align: center;
+            }
+
             .plot-dd-grid,
             .sensor-dd-grid {
+              grid-template-columns: 1fr;
+            }
+
+            .chart-right-legend-list,
+            .chart-right-legend-group-items {
               grid-template-columns: 1fr;
             }
           }
 
           @media (max-width: 640px) {
             .history-page-shell {
-              padding: 12px;
+              padding: 10px;
+              gap: 12px;
             }
 
             .history-card {
-              padding: 14px;
+              padding: 12px;
+              border-radius: 18px;
+            }
+
+            .history-title {
+              font-size: 18px;
+            }
+
+            .history-sub,
+            .history-label {
+              font-size: 12px;
+            }
+
+            .quick-wrap {
+              display: grid;
+              grid-template-columns: 1fr;
+              gap: 8px;
+            }
+
+            .quick-btn,
+            .h2-type-btn,
+            .h2-export-btn {
+              width: 100%;
+              min-height: 44px;
+            }
+
+            .history-input,
+            .plot-dd-trigger,
+            .sensor-dd-trigger {
+              min-height: 44px;
+              height: auto;
+            }
+
+            .plot-dd-menu,
+            .sensor-dd-menu {
+              position: fixed;
+              left: 10px;
+              right: 10px;
+              top: auto;
+              bottom: 12px;
+              max-height: 76vh;
+              border-radius: 18px;
+              z-index: 9999;
+            }
+
+            .plot-dd-actions,
+            .sensor-dd-actions,
+            .plot-dd-footer,
+            .sensor-dd-footer {
+              display: grid;
+              grid-template-columns: 1fr;
+            }
+
+            .plot-dd-action,
+            .sensor-dd-action,
+            .plot-dd-done,
+            .sensor-dd-done {
+              width: 100%;
+              min-height: 44px;
+            }
+
+            .plot-dd-item,
+            .sensor-dd-item {
+              min-height: 48px;
+              padding: 8px 12px;
+            }
+
+            .sensor-dd-unit {
+              white-space: nowrap;
             }
 
             .h2-chart-topbar {
               gap: 10px;
+            }
+
+            .h2-chart-title {
+              font-size: 18px;
+              line-height: 1.35;
+            }
+
+            .h2-chart-meta,
+            .h2-chart-sub {
+              font-size: 11px;
+              line-height: 1.45;
+              word-break: break-word;
+            }
+
+            .chart-wrap-apex,
+            .chart-wrap-brush {
+              padding: 8px 6px 6px;
+              border-radius: 14px;
+              overflow-x: auto;
+              -webkit-overflow-scrolling: touch;
+            }
+
+            .chart-wrap-apex > div,
+            .chart-wrap-brush > div {
+              min-width: 620px;
+            }
+
+            .chart-right-legend {
+              padding: 10px;
+              border-radius: 14px;
+            }
+
+            .chart-right-legend-item {
+              padding: 8px 9px;
+            }
+
+            .summary-table {
+              min-width: 760px;
+            }
+
+            .summary-table th,
+            .summary-table td {
+              padding: 10px 9px;
+              font-size: 12px;
+            }
+          }
+
+          @media (max-width: 420px) {
+            .history-page-shell {
+              padding: 8px;
+            }
+
+            .history-card {
+              padding: 10px;
+            }
+
+            .plot-dd-trigger-text,
+            .sensor-dd-trigger-text {
+              font-size: 12px;
+            }
+
+            .chart-wrap-apex > div,
+            .chart-wrap-brush > div {
+              min-width: 560px;
+            }
+
+            .summary-table {
+              min-width: 700px;
             }
           }
         `}</style>

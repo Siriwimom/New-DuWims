@@ -1676,6 +1676,131 @@ export default function YieldPage() {
               font-size: 12px;
             }
           }
+
+
+          /* RESPONSIVE FIX ONLY: keep table readable by scrolling inside the card instead of squeezing columns */
+          .yield-table-card {
+            max-width: 100%;
+            overflow: hidden !important;
+          }
+
+          .yield-table-card > div {
+            max-width: 100%;
+            overflow-x: auto !important;
+            overflow-y: hidden;
+            -webkit-overflow-scrolling: touch;
+          }
+
+          .yield-table {
+            table-layout: fixed;
+          }
+
+          .yield-table th,
+          .yield-table td {
+            white-space: normal;
+          }
+
+          .yield-table th:nth-child(3),
+          .yield-table td:nth-child(3),
+          .yield-table th:nth-child(4),
+          .yield-table td:nth-child(4),
+          .yield-table th:nth-child(5),
+          .yield-table td:nth-child(5),
+          .yield-table th:nth-child(6),
+          .yield-table td:nth-child(6) {
+            white-space: nowrap;
+            word-break: normal;
+            overflow-wrap: normal;
+          }
+
+          .yield-table th:nth-child(1),
+          .yield-table td:nth-child(1) {
+            width: 180px;
+            min-width: 180px;
+          }
+
+          .yield-table th:nth-child(2),
+          .yield-table td:nth-child(2) {
+            width: 150px;
+            min-width: 150px;
+          }
+
+          .yield-table th:nth-child(3),
+          .yield-table td:nth-child(3),
+          .yield-table th:nth-child(4),
+          .yield-table td:nth-child(4) {
+            width: 130px;
+            min-width: 130px;
+          }
+
+          .yield-table th:nth-child(5),
+          .yield-table td:nth-child(5) {
+            width: 140px;
+            min-width: 140px;
+          }
+
+          .yield-table th:nth-child(6),
+          .yield-table td:nth-child(6) {
+            width: 210px;
+            min-width: 210px;
+          }
+
+          @media (max-width: 640px) {
+            .yield-table {
+              width: 940px;
+              min-width: 940px;
+            }
+
+            .yield-table thead th {
+              font-size: 13px;
+              line-height: 1.25;
+              padding: 14px 12px;
+            }
+
+            .yield-table tbody td {
+              font-size: 14px;
+              line-height: 1.35;
+              padding: 14px 12px;
+            }
+
+            .yield-table tbody td strong {
+              font-size: 16px;
+              line-height: 1.25;
+            }
+
+            .yield-actions-inner {
+              gap: 8px;
+              flex-wrap: nowrap;
+              justify-content: center;
+            }
+
+            .yield-actions-inner :global(.edit-row-btn),
+            .yield-actions-inner :global(.del-row-btn) {
+              width: 82px;
+              min-width: 82px;
+              min-height: 38px;
+              padding: 7px 9px;
+              font-size: 13px;
+            }
+          }
+
+          @media (max-width: 480px) {
+            .yield-table {
+              width: 900px;
+              min-width: 900px;
+            }
+
+            .yield-table thead th,
+            .yield-table tbody td {
+              font-size: 13px;
+              padding: 12px 10px;
+            }
+
+            .yield-table tbody td strong {
+              font-size: 15px;
+            }
+          }
+
         `}</style>
       </div>
     </DuwimsStaticPage>

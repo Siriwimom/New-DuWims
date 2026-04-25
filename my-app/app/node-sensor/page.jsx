@@ -850,7 +850,8 @@ function NodeMap({
 
 function SensorTable({ sensors, t, lang, showLimits = false }) {
   return (
-    <table className="node-sensor-table">
+    <div className="node-sensor-table-scroll">
+      <table className="node-sensor-table">
       <thead>
         <tr>
           <th>{t.sensorTableSensor || "sensor"}</th>
@@ -893,7 +894,8 @@ function SensorTable({ sensors, t, lang, showLimits = false }) {
           );
         })}
       </tbody>
-    </table>
+      </table>
+    </div>
   );
 }
 
@@ -909,7 +911,8 @@ function EditableSensorTable({
   readOnlyLimits = false,
 }) {
   return (
-    <table className="node-sensor-table">
+    <div className="node-sensor-table-scroll">
+      <table className="node-sensor-table">
       <thead>
         <tr>
           <th>{t.sensorTableSensor || "sensor"}</th>
@@ -1030,7 +1033,8 @@ function EditableSensorTable({
           );
         })}
       </tbody>
-    </table>
+      </table>
+    </div>
   );
 }
 
@@ -3233,6 +3237,18 @@ export default function NodeSensorPage() {
     flex-wrap: wrap;
   }
 
+  .node-sensor-table-scroll {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .node-sensor-table-scroll .node-sensor-table {
+    min-width: 720px;
+  }
+
   .node-sensor-table {
     width: 100%;
     border-collapse: collapse;
@@ -3556,6 +3572,85 @@ export default function NodeSensorPage() {
   .confirm-btn.primary {
     background: linear-gradient(180deg, #eb4a3c, #cf2f24);
     box-shadow: 0 10px 22px rgba(207, 47, 36, 0.22);
+  }
+
+
+  /* responsive-only adjustments: keep all data/API/map/form logic unchanged */
+  @media (max-width: 1180px) {
+    .page-content { padding: 14px; }
+    .node-header, .node-header-btn { align-items: flex-start; }
+    .node-summary-line { gap: 8px; }
+    .node-summary-value { font-size: 16px; }
+    .node-sensor-table th { padding: 14px 18px !important; }
+    .node-sensor-table td { padding: 18px 18px !important; }
+    .limit-input { flex-basis: 92px; width: 92px; min-width: 92px; }
+  }
+
+  @media (max-width: 900px) {
+    .page-content { padding: 12px; }
+    .card { padding: 12px; border-radius: 14px; }
+    .card-title { font-size: 18px !important; line-height: 1.35 !important; }
+    .form-grid-2 { grid-template-columns: 1fr; gap: 10px; }
+    .map-wrapper, #currentMapHost, #createMapHost, #editMapHost, .leaflet-box { min-height: 300px !important; }
+    .leaflet-box { height: 300px !important; }
+    .node-header, .node-header-btn { padding: 10px 12px; }
+    .node-header-left { width: 100%; }
+    .node-summary-line { width: 100%; align-items: flex-start; }
+    .node-summary-item { max-width: 100%; }
+    .node-summary-item-compact { flex: 1 1 220px; }
+    .node-summary-value { overflow-wrap: anywhere; word-break: break-word; }
+    .node-body { padding: 12px; overflow-x: visible; }
+    .node-sensor-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .node-sensor-table { min-width: 680px; }
+    .node-actions { justify-content: flex-start; margin-top: 16px; }
+  }
+
+  @media (max-width: 640px) {
+    .page-content { padding: 10px; min-height: calc(100vh - 64px); }
+    .card { padding: 11px; border-radius: 14px; }
+    .card-title { font-size: 17px !important; }
+    .filter-label, .filter-field-label { font-size: 14px; }
+    .form-select, .form-input { height: 44px; font-size: 16px; border-radius: 11px; }
+    .create-btn, .btn-save, .btn-confirm, .locate-btn, .locate-btn-inline, .btn-cancel, .btn-sm { font-size: 16px; border-radius: 12px; }
+    .create-btn, .btn-save, .btn-confirm { width: 100%; padding: 10px 14px; }
+    .btn-cancel, .btn-sm { padding: 8px 12px; }
+    .map-wrapper, #currentMapHost, #createMapHost, #editMapHost, .leaflet-box { min-height: 260px !important; border-radius: 14px; }
+    .leaflet-box { height: 260px !important; }
+    .locate-btn { left: 10px; right: 10px; bottom: 10px; width: calc(100% - 20px); padding: 9px 12px; }
+    .locate-btn-inline { width: 100%; padding: 9px 12px; }
+    .map-msg, .coord-read, .uid-lookup-message, .field-error-text, .alert-text { font-size: 14px !important; line-height: 1.45 !important; overflow-wrap: anywhere; }
+    .node-card { border-radius: 14px; margin-bottom: 10px; }
+    .node-header, .node-header-btn { gap: 8px; padding: 10px; }
+    .node-summary-line { display: grid; grid-template-columns: 1fr; gap: 7px; }
+    .node-summary-sep { display: none; }
+    .node-summary-item, .node-summary-item-compact, .node-type-badge, .node-status-pill-inline { width: fit-content; max-width: 100%; }
+    .node-summary-label { font-size: 12px; }
+    .node-summary-value { font-size: 15px; }
+    .node-type-badge, .node-status-pill-inline { font-size: 12px; padding: 4px 9px; }
+    .accordion-arrow { font-size: 16px; padding-top: 2px; }
+    .node-body { padding: 10px; overflow-x: visible; }
+    .node-sensor-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .sensor-section-title { font-size: 17px; margin-bottom: 10px; }
+    .node-sensor-table { min-width: 620px; }
+    .node-sensor-table th { font-size: 14px !important; padding: 12px 14px !important; }
+    .node-sensor-table td { font-size: 14px !important; padding: 14px 14px !important; }
+    .node-sensor-table th:nth-child(1), .node-sensor-table td:nth-child(1) { padding-left: 16px !important; padding-right: 10px !important; }
+    .node-sensor-table .sensor-name-cell, .node-sensor-table .sensor-value-cell, .limit-readonly-text { font-size: 14px !important; }
+    .edit-limit-wrap, .sensor-limit-cell { gap: 6px; }
+    .limit-input { flex: 0 0 82px; width: 82px; min-width: 82px; height: 40px; font-size: 15px !important; padding: 0 8px; }
+    .sensor-unit-text { flex-basis: 44px; font-size: 12px !important; }
+    .node-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+    .node-actions .btn-sm { width: 100%; }
+  }
+
+  @media (max-width: 420px) {
+    .page-content { padding: 8px; }
+    .map-wrapper, #currentMapHost, #createMapHost, #editMapHost, .leaflet-box { min-height: 230px !important; }
+    .leaflet-box { height: 230px !important; }
+    .node-sensor-table { min-width: 580px; }
+    .node-actions { grid-template-columns: 1fr; }
+    .confirm-actions { flex-direction: column; }
+    .confirm-btn { width: 100%; }
   }
 
   @media (max-width: 640px) {

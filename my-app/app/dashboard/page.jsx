@@ -729,7 +729,200 @@ function buildHtmlContent(t, weatherView, weatherLoading, weatherError, lang, ro
         </div>
       `;
 
-  return `<div id="p1" class="page active">
+  const responsiveCss = `
+    <style>
+      #p1.page.active {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+        box-sizing: border-box;
+      }
+
+      #p1 *,
+      #p1 *::before,
+      #p1 *::after {
+        box-sizing: border-box;
+      }
+
+      #p1 .grid-top {
+        display: grid;
+        grid-template-columns: minmax(0, 1.55fr) minmax(220px, 0.75fr) minmax(220px, 0.75fr);
+        gap: 16px;
+        align-items: stretch;
+        width: 100%;
+      }
+
+      #p1 .col-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-width: 0;
+      }
+
+      #p1 .card,
+      #p1 .metric-card,
+      #p1 .status-alert,
+      #p1 .status-on,
+      #p1 .pin-card,
+      #p1 .sensor-group {
+        min-width: 0;
+        max-width: 100%;
+      }
+
+      #p1 .weather-strip {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 8px;
+        width: 100%;
+      }
+
+      #p1 .weather-day {
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      #dashboardSensorCards {
+        width: 100% !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+      }
+
+      #p1 .pin-header {
+        display: flex;
+        justify-content: space-between;
+        min-width: 0;
+      }
+
+      #p1 .pin-header > div:first-child {
+        min-width: 0;
+      }
+
+      #p1 .pin-name,
+      #p1 .pin-sub,
+      #p1 .sg-title,
+      #p1 .metric-card-value,
+      #p1 .alert-pill {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      #p1 .sgi-row {
+        min-width: 0;
+      }
+
+      #p1 .sgi-row-val,
+      #p1 .sgi-row-sub {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      #dashboardMapHost,
+      #dashboardMap {
+        width: 100% !important;
+      }
+
+      @media (max-width: 1180px) {
+        #p1 .grid-top {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        #p1 .grid-top > .card {
+          grid-column: 1 / -1;
+        }
+
+        #dashboardSensorCards {
+          grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        }
+      }
+
+      @media (max-width: 820px) {
+        #p1 .grid-top {
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+
+        #p1 .weather-strip {
+          grid-template-columns: repeat(4, minmax(78px, 1fr));
+          overflow-x: auto;
+          padding-bottom: 4px;
+          scrollbar-width: thin;
+        }
+
+        #dashboardSensorCards {
+          grid-template-columns: 1fr !important;
+          gap: 12px !important;
+          justify-content: stretch !important;
+        }
+
+        #p1 .pin-header {
+          flex-direction: column;
+        }
+
+        #p1 .status-badge {
+          width: fit-content;
+        }
+
+        #dashboardMapHost,
+        #dashboardMap {
+          min-height: 280px !important;
+          height: 280px !important;
+        }
+      }
+
+      @media (max-width: 520px) {
+        #p1 .card,
+        #p1 .metric-card,
+        #p1 .status-alert,
+        #p1 .status-on,
+        #p1 .pin-card {
+          border-radius: 14px !important;
+        }
+
+        #p1 .weather-strip {
+          grid-template-columns: repeat(7, minmax(82px, 1fr));
+        }
+
+        #p1 .weather-day {
+          padding: 8px 6px;
+        }
+
+        #p1 .metric-card-value {
+          font-size: clamp(18px, 6vw, 26px) !important;
+        }
+
+        #p1 .pin-name {
+          font-size: 16px !important;
+        }
+
+        #p1 .sg-title {
+          font-size: 15px !important;
+        }
+
+        #p1 .sgi-row {
+          grid-template-columns: 78px minmax(0, 1fr) !important;
+          column-gap: 8px !important;
+        }
+
+        #p1 .sgi-row-label,
+        #p1 .sgi-row-sub,
+        #p1 .status-badge {
+          font-size: 12px !important;
+        }
+
+        #p1 .sgi-row-val {
+          font-size: 15px !important;
+        }
+
+        #dashboardMapHost,
+        #dashboardMap {
+          min-height: 240px !important;
+          height: 240px !important;
+          border-radius: 14px !important;
+        }
+      }
+    </style>
+  `;
+
+  return `${responsiveCss}<div id="p1" class="page active">
 
   <div class="grid-top">
 
