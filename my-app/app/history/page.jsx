@@ -983,6 +983,23 @@ export default function HistoryPage() {
   const sensorWrapRef = useRef(null);
   const plotWrapRef = useRef(null);
 
+  const [viewportWidth, setViewportWidth] = useState(1200);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const updateViewportWidth = () => {
+      setViewportWidth(window.innerWidth || 1200);
+    };
+
+    updateViewportWidth();
+    window.addEventListener("resize", updateViewportWidth);
+    return () => window.removeEventListener("resize", updateViewportWidth);
+  }, []);
+
+  const isMobileChart = viewportWidth <= 640;
+  const isTabletChart = viewportWidth > 640 && viewportWidth <= 980;
+
   const quickRangeOptions = useMemo(
     () => [txt.todayShort, txt.last7Days, txt.last30Days],
     [txt.todayShort, txt.last7Days, txt.last30Days]
@@ -1935,27 +1952,79 @@ export default function HistoryPage() {
       } sensor`;
   }, [selectedPlotIds, selectedPlotNames, quickRange, selectedSensors.length, lang]);
 
+  const chartCanvasWidth = useMemo(() => {
+    const axisCount = Math.max(1, activeSensorKeys.length);
+    const seriesCount = Math.max(1, apexSeries.length);
+
+    if (isMobileChart) {
+      return Math.max(980, 430 + axisCount * 135 + Math.min(seriesCount, 12) * 18);
+    }
+
+    if (isTabletChart) {
+      return Math.max(900, 500 + axisCount * 105 + Math.min(seriesCount, 12) * 14);
+    }
+
+    return "100%";
+  }, [activeSensorKeys.length, apexSeries.length, isMobileChart, isTabletChart]);
+
+  const mainChartHeight = isMobileChart ? 560 : 520;
+  const brushChartWidth = isMobileChart || isTabletChart ? chartCanvasWidth : "100%";
+
+  const responsiveYAxes = useMemo(() => {
+    if (!isMobileChart && !isTabletChart) return yAxes;
+
+    return safeArray(yAxes).map((axis) => ({
+      ...axis,
+      tickAmount: isMobileChart ? 5 : 6,
+      labels: {
+        ...(axis.labels || {}),
+        minWidth: isMobileChart ? 40 : 46,
+        maxWidth: isMobileChart ? 44 : 52,
+        offsetX: 0,
+        style: {
+          ...((axis.labels || {}).style || {}),
+          fontSize: isMobileChart ? "10px" : "11px",
+          fontWeight: 800,
+        },
+      },
+      title: {
+        ...(axis.title || {}),
+        offsetX: 0,
+        style: {
+          ...((axis.title || {}).style || {}),
+          fontSize: isMobileChart ? "10px" : "11px",
+          fontWeight: 900,
+        },
+      },
+    }));
+  }, [isMobileChart, isTabletChart, yAxes]);
+
   const mainChartOptions = useMemo(() => {
     return {
       chart: {
         id: "h2MainHistoryChart",
         type: chartType,
-        height: 520,
+        height: mainChartHeight,
         fontFamily: "Sarabun, sans-serif",
         toolbar: {
-          show: true,
+          show: !isMobileChart,
           tools: {
             download: true,
-            selection: true,
-            zoom: true,
-            zoomin: true,
-            zoomout: true,
-            pan: true,
+            selection: !isMobileChart,
+            zoom: !isMobileChart,
+            zoomin: !isMobileChart,
+            zoomout: !isMobileChart,
+            pan: !isMobileChart,
             reset: true,
           },
         },
+        selection: {
+          enabled: !isMobileChart,
+        },
         zoom: {
-          enabled: true,
+          enabled: !isMobileChart,
+          type: "x",
+          autoScaleYaxis: true,
         },
       },
       colors: apexSeries.map((s) => s.color),
@@ -1986,8 +2055,11 @@ export default function HistoryPage() {
       },
       xaxis: {
         type: "datetime",
+        tickAmount: isMobileChart ? 4 : undefined,
         labels: {
           datetimeUTC: false,
+          rotate: isMobileChart ? -45 : 0,
+          rotateAlways: isMobileChart,
           formatter: (value) => {
             const d = new Date(value);
             if (Number.isNaN(d.getTime())) return "";
@@ -2000,12 +2072,12 @@ export default function HistoryPage() {
             });
           },
           style: {
-            fontSize: "11px",
+            fontSize: isMobileChart ? "10px" : "11px",
             fontWeight: 700,
           },
         },
       },
-      yaxis: yAxes,
+      yaxis: responsiveYAxes,
       tooltip: {
         shared: false,
         intersect: true,
@@ -2029,8 +2101,8 @@ export default function HistoryPage() {
         borderColor: "rgba(148,163,184,0.18)",
         strokeDashArray: 3,
         padding: {
-          left: 20,
-          right: 20,
+          left: isMobileChart ? 6 : 20,
+          right: isMobileChart ? 6 : 20,
           top: 18,
           bottom: 8,
         },
@@ -2049,20 +2121,20 @@ export default function HistoryPage() {
         },
       },
     };
-  }, [chartType, apexSeries, lang, yAxes]);
+  }, [chartType, apexSeries, lang, responsiveYAxes, isMobileChart, mainChartHeight]);
 
   const brushChartOptions = useMemo(() => {
     return {
       chart: {
         id: "h2BrushHistoryChart",
-        height: 72,
+        height: isMobileChart ? 72 : 72,
         type: "area",
         brush: {
-          enabled: true,
+          enabled: !isMobileChart,
           target: "h2MainHistoryChart",
         },
         selection: {
-          enabled: true,
+          enabled: !isMobileChart,
           fill: {
             color: "#90CAF9",
             opacity: 0.25,
@@ -2091,6 +2163,7 @@ export default function HistoryPage() {
       },
       xaxis: {
         type: "datetime",
+        tickAmount: isMobileChart ? 4 : undefined,
         labels: {
           datetimeUTC: false,
           style: {
@@ -2111,7 +2184,7 @@ export default function HistoryPage() {
         enabled: false,
       },
     };
-  }, []);
+  }, [isMobileChart]);
 
   return (
     <DuwimsStaticPage current="history">
@@ -2360,12 +2433,18 @@ export default function HistoryPage() {
             <div className="chart-main-row">
               <div className="chart-main-col">
                 <div className="chart-wrap chart-wrap-apex">
-                  <ReactApexChart
-                    type={chartType}
-                    height={520}
-                    series={apexSeries}
-                    options={mainChartOptions}
-                  />
+                  <div
+                    className="chart-apex-inner"
+                    style={{ width: chartCanvasWidth, minWidth: chartCanvasWidth }}
+                  >
+                    <ReactApexChart
+                      type={chartType}
+                      height={mainChartHeight}
+                      width={chartCanvasWidth}
+                      series={apexSeries}
+                      options={mainChartOptions}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -2422,16 +2501,28 @@ export default function HistoryPage() {
             </div>
 
             <div className="h2-brush-label">
-              📍 {lang === "en" ? "Drag to zoom timeline" : "ลากเพื่อซูมช่วงเวลา"}
+              📍 {isMobileChart
+                ? lang === "en"
+                  ? "Swipe horizontally to view the chart"
+                  : "เลื่อนซ้าย-ขวาเพื่อดูกราฟ"
+                : lang === "en"
+                  ? "Drag to zoom timeline"
+                  : "ลากเพื่อซูมช่วงเวลา"}
             </div>
 
             <div className="chart-wrap chart-wrap-brush">
-              <ReactApexChart
-                type="area"
-                height={84}
-                series={brushSeries}
-                options={brushChartOptions}
-              />
+              <div
+                className="chart-brush-inner"
+                style={{ width: brushChartWidth, minWidth: brushChartWidth }}
+              >
+                <ReactApexChart
+                  type="area"
+                  height={84}
+                  width={brushChartWidth}
+                  series={brushSeries}
+                  options={brushChartOptions}
+                />
+              </div>
             </div>
 
 
@@ -3069,6 +3160,11 @@ export default function HistoryPage() {
             overflow: hidden;
           }
 
+          .chart-apex-inner,
+          .chart-brush-inner {
+            max-width: none;
+          }
+
           .chart-wrap-apex {
             border: 1px solid #edf2f7;
             border-radius: 18px;
@@ -3361,12 +3457,30 @@ export default function HistoryPage() {
               padding: 8px 6px 6px;
               border-radius: 14px;
               overflow-x: auto;
+              overflow-y: hidden;
               -webkit-overflow-scrolling: touch;
             }
 
-            .chart-wrap-apex > div,
-            .chart-wrap-brush > div {
-              min-width: 620px;
+            .chart-wrap-apex,
+            .chart-wrap-brush {
+              touch-action: pan-x pan-y;
+              overscroll-behavior-x: contain;
+            }
+
+            .chart-wrap-apex .apexcharts-selection-rect,
+            .chart-wrap-apex .apexcharts-zoom-rect,
+            .chart-wrap-brush .apexcharts-selection-rect,
+            .chart-wrap-brush .apexcharts-zoom-rect {
+              display: none !important;
+            }
+
+            .chart-wrap-apex {
+              scrollbar-width: thin;
+            }
+
+            .chart-apex-inner,
+            .chart-brush-inner {
+              display: block;
             }
 
             .chart-right-legend {
@@ -3403,9 +3517,10 @@ export default function HistoryPage() {
               font-size: 12px;
             }
 
-            .chart-wrap-apex > div,
-            .chart-wrap-brush > div {
-              min-width: 560px;
+            .chart-wrap-apex,
+            .chart-wrap-brush {
+              margin-left: -2px;
+              margin-right: -2px;
             }
 
             .summary-table {
