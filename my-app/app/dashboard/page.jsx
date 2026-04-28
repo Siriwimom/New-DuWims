@@ -186,8 +186,72 @@ function getLatestNumericValue(sensor) {
   return Number.isFinite(n) ? n : null;
 }
 
-function getDisplayUnit(sensor = {}) {
-  return sensor?.unit || sensor?.sensorUnit || sensor?.latestUnit || "";
+function getDefaultSensorUnit(sensorName = "") {
+  const raw = String(sensorName || "").trim();
+  const key = raw.toLowerCase();
+
+  if (key.includes("temp") || raw.includes("อุณหภูมิ")) return "°C";
+
+  if (
+    (key.includes("humidity") && !key.includes("soil")) ||
+    raw.includes("ความชื้นสัมพัทธ์") ||
+    key === "rh"
+  ) {
+    return "%";
+  }
+
+  if (key.includes("wind") || raw.includes("ความเร็วลม") || raw.includes("ลม")) {
+    return "km/h";
+  }
+
+  if (key.includes("light") || raw.includes("ความเข้มแสง") || raw.includes("แสง")) {
+    return "lux";
+  }
+
+  if (key.includes("rain") || raw.includes("ปริมาณน้ำฝน") || raw.includes("ฝน")) {
+    return "mm/day";
+  }
+
+  if (
+    key.includes("soil") ||
+    key.includes("moisture") ||
+    raw.includes("ความชื้นดิน") ||
+    raw.includes("ความชื้นในดิน")
+  ) {
+    return "%";
+  }
+
+  if (key === "n" || raw === "N" || key.includes("nitrogen") || raw.includes("ไนโตรเจน")) {
+    return "%";
+  }
+
+  if (key === "p" || raw === "P" || key.includes("phosphorus") || raw.includes("ฟอสฟอรัส")) {
+    return "ppm";
+  }
+
+  if (key === "k" || raw === "K" || key.includes("potassium") || raw.includes("โพแทสเซียม")) {
+    return "cmol/kg";
+  }
+
+  if (
+    key.includes("water") ||
+    key.includes("availability") ||
+    raw.includes("ความพร้อมใช้น้ำ") ||
+    raw.includes("การให้น้ำ")
+  ) {
+    return "kPa";
+  }
+
+  return "";
+}
+
+function getDisplayUnit(sensor = {}, sensorName = "") {
+  return (
+    sensor?.unit ||
+    sensor?.sensorUnit ||
+    sensor?.latestUnit ||
+    getDefaultSensorUnit(sensorName || sensor?.name || sensor?.uid || "")
+  );
 }
 
 function formatSensorValue(value, unit = "") {
@@ -460,37 +524,47 @@ function getSensorThresholdProfile(sensorName = "", lang = "th") {
   };
 }
 
+function getSensorMinMax(sensor = {}) {
+  return {
+    min: toNum(sensor?.minValue ?? sensor?.min ?? sensor?.minimum),
+    max: toNum(sensor?.maxValue ?? sensor?.max ?? sensor?.maximum),
+  };
+}
+
 function getSensorStatusInfo(sensor = {}, sensorName = "", t, lang = "th") {
   const latest = getLatestNumericValue(sensor);
   const profile = getSensorThresholdProfile(sensorName, lang);
-  const unit = getDisplayUnit(sensor);
+  const unit = getDisplayUnit(sensor, sensorName);
+  const { min, max } = getSensorMinMax(sensor);
+
+  const range = {
+    min,
+    max,
+    displayMin: min != null ? formatSensorValue(min, unit) : "-",
+    displayMax: max != null ? formatSensorValue(max, unit) : "-",
+  };
 
   if (latest == null) {
     return {
       latest,
       unit,
       profile,
+      range,
       isOut: false,
       statusText: t.noCurrentData,
       reasonText: t.noCurrentDataReason,
     };
   }
 
-  const hasLowRed =
-    profile.redLowMax !== null &&
-    profile.redLowMax !== undefined &&
-    latest <= profile.redLowMax;
-
-  const hasHighRed =
-    profile.redHighMin !== null &&
-    profile.redHighMin !== undefined &&
-    latest >= profile.redHighMin;
+  const hasLowRed = min != null && latest < min;
+  const hasHighRed = max != null && latest > max;
 
   if (hasLowRed) {
     return {
       latest,
       unit,
       profile,
+      range,
       isOut: true,
       statusText: t.tooLow,
       reasonText: profile.lowReason || t.outOfRange,
@@ -502,6 +576,7 @@ function getSensorStatusInfo(sensor = {}, sensorName = "", t, lang = "th") {
       latest,
       unit,
       profile,
+      range,
       isOut: true,
       statusText: t.tooHigh,
       reasonText: profile.highReason || t.outOfRange,
@@ -512,9 +587,10 @@ function getSensorStatusInfo(sensor = {}, sensorName = "", t, lang = "th") {
     latest,
     unit,
     profile,
+    range,
     isOut: false,
     statusText: t.normalValue,
-    reasonText: t.inRange,
+    reasonText: min == null && max == null ? (t.noThreshold || t.inRange) : t.inRange,
   };
 }
 
@@ -1021,7 +1097,7 @@ function buildSensorCards(plots = [], t, lang) {
                 lang
               );
               const sensorStatus = getSensorStatusInfo(sensor, sensorName, t, lang);
-              const range = sensorStatus.profile;
+              const range = sensorStatus.range;
               const latestValueText =
                 sensorStatus.latest != null
                   ? formatSensorValue(sensorStatus.latest, sensorStatus.unit)
@@ -1605,7 +1681,10 @@ export default function Page() {
                       sensor?.name || sensor?.uid || `${t.sensor} ${i + 1}`,
                       lang
                     );
-                    const latestValue = displayLatest(sensor);
+                    const latestValue = formatSensorValue(
+                      displayLatest(sensor),
+                      getDisplayUnit(sensor, sensorName)
+                    );
                     return `<li>${escapeHtml(sensorName)} • ${escapeHtml(latestValue)}</li>`;
                   })
                   .join("")}
