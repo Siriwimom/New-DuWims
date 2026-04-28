@@ -90,17 +90,23 @@ function normalizeSensor(sensor = {}) {
   const rawName = safeText(sensor.name || sensor.sensorType || uid || "Sensor");
   const sensorKey = canonicalizeSensorName(rawName, uid);
   const defaultLimits = getDefaultSensorLimits(sensorKey, uid);
+  const hasMinValue = Object.prototype.hasOwnProperty.call(sensor, "minValue");
+  const hasMaxValue = Object.prototype.hasOwnProperty.call(sensor, "maxValue");
   const rawMinValue = toNum(sensor.minValue);
   const rawMaxValue = toNum(sensor.maxValue);
 
   const normalizedMinValue =
-    rawMinValue !== null && rawMinValue !== 0
-      ? rawMinValue
-      : defaultLimits.minValue;
+    hasMinValue && sensor.minValue === null
+      ? null
+      : rawMinValue !== null && rawMinValue !== 0
+        ? rawMinValue
+        : defaultLimits.minValue;
   const normalizedMaxValue =
-    rawMaxValue !== null && rawMaxValue !== 0
-      ? rawMaxValue
-      : defaultLimits.maxValue;
+    hasMaxValue && sensor.maxValue === null
+      ? null
+      : rawMaxValue !== null && rawMaxValue !== 0
+        ? rawMaxValue
+        : defaultLimits.maxValue;
 
   return {
     _id: safeText(sensor._id || ""),
@@ -301,12 +307,15 @@ function getDefaultSensorLimits(name = "", uid = "") {
 }
 
 function resolveDisplayLimitValue(sensor = {}, limitType = "min") {
+  const enabled =
+    limitType === "max"
+      ? sensor?.maxEnabled !== false
+      : sensor?.minEnabled !== false;
+
+  if (!enabled) return null;
+
   const rawValue = limitType === "max" ? toNum(sensor?.maxValue) : toNum(sensor?.minValue);
-
-  if (rawValue !== null && rawValue !== 0) return rawValue;
-
-  const defaults = getDefaultSensorLimits(sensor?.sensorKey || sensor?.name || "", sensor?.uid || "");
-  return limitType === "max" ? defaults.maxValue : defaults.minValue;
+  return rawValue !== null ? rawValue : null;
 }
 
 function sensorPresetsByType(type) {
@@ -856,8 +865,8 @@ function SensorTable({ sensors, t, lang, showLimits = false }) {
         <tr>
           <th>{t.sensorTableSensor || "sensor"}</th>
           <th>{t.sensorTableData || (lang === "en" ? "Data" : "ข้อมูล")}</th>
-          {showLimits ? <th>{t.sensorTableMax || "Max"}</th> : null}
           {showLimits ? <th>{t.sensorTableMin || "Min"}</th> : null}
+          {showLimits ? <th>{t.sensorTableMax || "Max"}</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -881,13 +890,13 @@ function SensorTable({ sensors, t, lang, showLimits = false }) {
                 </span>
               </td>
               {showLimits ? (
-                <td className="sensor-value-cell max-col-cell">
-                  {formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)}
+                <td className="sensor-value-cell min-col-cell">
+                  {formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}
                 </td>
               ) : null}
               {showLimits ? (
-                <td className="sensor-value-cell min-col-cell">
-                  {formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}
+                <td className="sensor-value-cell max-col-cell">
+                  {formatSensorValue(max, sensor.sensorKey || sensor.name, sensor.uid)}
                 </td>
               ) : null}
             </tr>
@@ -917,8 +926,8 @@ function EditableSensorTable({
         <tr>
           <th>{t.sensorTableSensor || "sensor"}</th>
           <th>{t.sensorTableData || (lang === "en" ? "Data" : "ข้อมูล")}</th>
-          {showLimits ? <th>{t.sensorTableMax || "Max"}</th> : null}
           {showLimits ? <th>{t.sensorTableMin || "Min"}</th> : null}
+          {showLimits ? <th>{t.sensorTableMax || "Max"}</th> : null}
         </tr>
       </thead>
       <tbody>
@@ -947,8 +956,50 @@ function EditableSensorTable({
               </td>
 
               {showLimits ? (
+                <td className="min-col-cell">
+                  <div className={`edit-limit-wrap sensor-limit-cell min-limit-cell ${readOnlyLimits ? "readonly-limit-cell" : "editable-limit-cell"}`}>
+                    {readOnlyLimits ? (
+                      <>
+                        <span className="limit-readonly-text">
+                          {formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}
+                        </span>
+                        <label className="sensor-limit-toggle">
+                          <input
+                            type="checkbox"
+                            checked={minEnabled}
+                            onChange={(e) => onToggleMinEnabled(index, e.target.checked)}
+                          />
+                        </label>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          className="limit-input"
+                          type="number"
+                          step="any"
+                          value={sensor.minValue ?? ""}
+                          disabled={!minEnabled}
+                          onChange={(e) => onChangeMin(index, e.target.value)}
+                        />
+                        <span className="sensor-unit-text">
+                          {sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}
+                        </span>
+                        <label className="sensor-limit-toggle">
+                          <input
+                            type="checkbox"
+                            checked={minEnabled}
+                            onChange={(e) => onToggleMinEnabled(index, e.target.checked)}
+                          />
+                        </label>
+                      </>
+                    )}
+                  </div>
+                </td>
+              ) : null}
+
+              {showLimits ? (
                 <td className="max-col-cell">
-                  <div className="edit-limit-wrap sensor-limit-cell max-limit-cell">
+                  <div className={`edit-limit-wrap sensor-limit-cell max-limit-cell ${readOnlyLimits ? "readonly-limit-cell" : "editable-limit-cell"}`}>
                     {readOnlyLimits ? (
                       <>
                         <span className="limit-readonly-text">
@@ -988,47 +1039,6 @@ function EditableSensorTable({
                 </td>
               ) : null}
 
-              {showLimits ? (
-                <td className="min-col-cell">
-                  <div className="edit-limit-wrap sensor-limit-cell min-limit-cell">
-                    {readOnlyLimits ? (
-                      <>
-                        <span className="limit-readonly-text">
-                          {formatSensorValue(min, sensor.sensorKey || sensor.name, sensor.uid)}
-                        </span>
-                        <label className="sensor-limit-toggle">
-                          <input
-                            type="checkbox"
-                            checked={minEnabled}
-                            onChange={(e) => onToggleMinEnabled(index, e.target.checked)}
-                          />
-                        </label>
-                      </>
-                    ) : (
-                      <>
-                        <input
-                          className="limit-input"
-                          type="number"
-                          step="any"
-                          value={sensor.minValue ?? ""}
-                          disabled={!minEnabled}
-                          onChange={(e) => onChangeMin(index, e.target.value)}
-                        />
-                        <span className="sensor-unit-text">
-                          {sensorUnit(sensor.sensorKey || sensor.name, sensor.uid)}
-                        </span>
-                        <label className="sensor-limit-toggle">
-                          <input
-                            type="checkbox"
-                            checked={minEnabled}
-                            onChange={(e) => onToggleMinEnabled(index, e.target.checked)}
-                          />
-                        </label>
-                      </>
-                    )}
-                  </div>
-                </td>
-              ) : null}
             </tr>
           );
         })}
@@ -1223,21 +1233,39 @@ export default function NodeSensorPage() {
         Array.isArray(found.sensors)
           ? found.sensors.map((s) => {
               const sensorKey = s.sensorKey || canonicalizeSensorName(s.name, s.uid);
-              const normalizedMinValue = toNum(s.minValue);
-              const normalizedMaxValue = toNum(s.maxValue);
+              const defaults = getDefaultSensorLimits(sensorKey, s.uid);
+              const rawMinValue = toNum(s.minValue);
+              const rawMaxValue = toNum(s.maxValue);
+              const normalizedMinValue =
+                rawMinValue !== null && rawMinValue !== 0
+                  ? rawMinValue
+                  : defaults.minValue;
+              const normalizedMaxValue =
+                rawMaxValue !== null && rawMaxValue !== 0
+                  ? rawMaxValue
+                  : defaults.maxValue;
+
+              const shouldAutoFillDefaultLimits = view === "create";
+              const minEnabled = shouldAutoFillDefaultLimits
+                ? true
+                : typeof s.minEnabled === "boolean"
+                  ? s.minEnabled
+                  : normalizedMinValue !== null;
+              const maxEnabled = shouldAutoFillDefaultLimits
+                ? true
+                : typeof s.maxEnabled === "boolean"
+                  ? s.maxEnabled
+                  : normalizedMaxValue !== null;
+
               return {
                 ...s,
                 sensorKey,
                 name: sensorKey,
                 rawName: s.rawName || s.name,
-                minEnabled:
-                  typeof s.minEnabled === "boolean"
-                    ? s.minEnabled
-                    : normalizedMinValue !== null,
-                maxEnabled:
-                  typeof s.maxEnabled === "boolean"
-                    ? s.maxEnabled
-                    : normalizedMaxValue !== null,
+                minEnabled,
+                maxEnabled,
+                minValue: minEnabled ? normalizedMinValue : null,
+                maxValue: maxEnabled ? normalizedMaxValue : null,
               };
             })
           : []
@@ -1260,7 +1288,7 @@ export default function NodeSensorPage() {
   return () => {
     alive = false;
   };
-}, [formUid, lang]);
+}, [formUid, lang, view]);
 
   useEffect(() => {
     if (!hasPendingLeaveGuard || busy) return;
@@ -1712,6 +1740,8 @@ export default function NodeSensorPage() {
         status: sensor.status || "OK",
         minValue: sensor.minEnabled === false ? null : sensor.minValue,
         maxValue: sensor.maxEnabled === false ? null : sensor.maxValue,
+        minEnabled: sensor.minEnabled !== false,
+        maxEnabled: sensor.maxEnabled !== false,
         latestValue: sensor.latestValue,
         latestTimestamp: sensor.latestTimestamp || null,
       };
@@ -1741,17 +1771,39 @@ export default function NodeSensorPage() {
 
   function toggleSensorMinEnabled(index, checked) {
     setFormSensors((prev) =>
-      prev.map((sensor, i) =>
-        i === index ? { ...sensor, minEnabled: checked } : sensor,
-      ),
+      prev.map((sensor, i) => {
+        if (i !== index) return sensor;
+
+        const defaults = getDefaultSensorLimits(
+          sensor.sensorKey || sensor.name,
+          sensor.uid,
+        );
+
+        return {
+          ...sensor,
+          minEnabled: checked,
+          minValue: checked ? defaults.minValue : null,
+        };
+      }),
     );
   }
 
   function toggleSensorMaxEnabled(index, checked) {
     setFormSensors((prev) =>
-      prev.map((sensor, i) =>
-        i === index ? { ...sensor, maxEnabled: checked } : sensor,
-      ),
+      prev.map((sensor, i) => {
+        if (i !== index) return sensor;
+
+        const defaults = getDefaultSensorLimits(
+          sensor.sensorKey || sensor.name,
+          sensor.uid,
+        );
+
+        return {
+          ...sensor,
+          maxEnabled: checked,
+          maxValue: checked ? defaults.maxValue : null,
+        };
+      }),
     );
   }
 
@@ -3278,35 +3330,23 @@ export default function NodeSensorPage() {
   }
 
   .node-sensor-table th:nth-child(1),
-  .node-sensor-table td:nth-child(1) {
-    width: 34%;
-    text-align: left;
-    padding-left: 34px !important;
-    padding-right: 16px !important;
-  }
-
-  .node-sensor-table th:nth-child(2) {
-    width: 22%;
-    text-align: center !important;
-    padding-left: 12px !important;
-    padding-right: 12px !important;
-  }
-
-  .node-sensor-table td:nth-child(2) {
-    width: 22%;
-    text-align: center !important;
-    padding-left: 12px !important;
-    padding-right: 12px !important;
-  }
-
+  .node-sensor-table td:nth-child(1),
+  .node-sensor-table th:nth-child(2),
+  .node-sensor-table td:nth-child(2),
   .node-sensor-table th:nth-child(3),
   .node-sensor-table td:nth-child(3),
   .node-sensor-table th:nth-child(4),
   .node-sensor-table td:nth-child(4) {
-    width: 22%;
+    width: 25%;
     text-align: center !important;
     padding-left: 12px !important;
     padding-right: 12px !important;
+  }
+
+  .node-sensor-table th:nth-child(1),
+  .node-sensor-table td:nth-child(1) {
+    text-align: left !important;
+    padding-left: 24px !important;
   }
 
   .node-sensor-table .sensor-name-cell {
@@ -3370,18 +3410,26 @@ export default function NodeSensorPage() {
   }
 
   .edit-limit-wrap {
-    display: inline-flex;
+    display: grid;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    flex-wrap: nowrap;
+    column-gap: 8px;
+    row-gap: 0;
     white-space: nowrap;
     width: 100%;
+    margin: 0 auto;
   }
 
   .sensor-limit-cell {
-    gap: 8px;
     width: 100%;
+  }
+
+  .editable-limit-cell {
+    grid-template-columns: 108px 54px 24px;
+  }
+
+  .readonly-limit-cell {
+    grid-template-columns: 118px 24px;
   }
 
   .max-col-cell,
@@ -3405,6 +3453,8 @@ export default function NodeSensorPage() {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    width: 24px;
+    min-width: 24px;
     margin: 0;
     cursor: pointer;
   }
@@ -3415,23 +3465,32 @@ export default function NodeSensorPage() {
     accent-color: #2e7d32;
     cursor: pointer;
     flex: 0 0 auto;
+    margin: 0;
   }
 
   .limit-input {
-    flex: 0 0 108px;
     width: 108px;
+    min-width: 108px;
     text-align: center;
+    justify-self: center;
   }
 
   .sensor-unit-text {
-    flex: 0 0 52px;
+    width: 54px;
+    min-width: 54px;
     display: inline-flex;
     align-items: center;
     justify-content: flex-start;
+    justify-self: start;
   }
 
-  .sensor-limit-toggle {
-    flex: 0 0 18px;
+  .limit-readonly-text {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    width: 118px;
+    min-width: 118px;
+    text-align: right;
   }
 
   .limit-readonly-text {
@@ -3636,9 +3695,13 @@ export default function NodeSensorPage() {
     .node-sensor-table td { font-size: 14px !important; padding: 14px 14px !important; }
     .node-sensor-table th:nth-child(1), .node-sensor-table td:nth-child(1) { padding-left: 16px !important; padding-right: 10px !important; }
     .node-sensor-table .sensor-name-cell, .node-sensor-table .sensor-value-cell, .limit-readonly-text { font-size: 14px !important; }
-    .edit-limit-wrap, .sensor-limit-cell { gap: 6px; }
-    .limit-input { flex: 0 0 82px; width: 82px; min-width: 82px; height: 40px; font-size: 15px !important; padding: 0 8px; }
-    .sensor-unit-text { flex-basis: 44px; font-size: 12px !important; }
+    .edit-limit-wrap, .sensor-limit-cell { column-gap: 6px; }
+    .editable-limit-cell { grid-template-columns: 82px 44px 22px; }
+    .readonly-limit-cell { grid-template-columns: 94px 22px; }
+    .limit-input { width: 82px; min-width: 82px; height: 40px; font-size: 15px !important; padding: 0 8px; }
+    .sensor-unit-text { width: 44px; min-width: 44px; font-size: 12px !important; }
+    .limit-readonly-text { width: 94px; min-width: 94px; }
+    .sensor-limit-toggle { width: 22px; min-width: 22px; }
     .node-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
     .node-actions .btn-sm { width: 100%; }
   }

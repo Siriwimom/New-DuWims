@@ -1150,18 +1150,29 @@ export default function HistoryPage() {
   useEffect(() => {
     let alive = true;
 
-    async function collectEndpointItems(endpoint, paramsList = []) {
-      const collected = [];
+    async function collectHistoryItemsFast(paramsList = []) {
       const seenReq = new Set();
+      const requests = safeArray(paramsList)
+        .filter((params) => params && typeof params === "object")
+        .map((params) => {
+          const normalizedParams = Object.fromEntries(
+            Object.entries(params).filter(([, v]) => v !== undefined && v !== null && String(v) !== "")
+          );
+          return normalizedParams;
+        })
+        .filter((params) => {
+          const reqKey = JSON.stringify(params || {});
+          if (seenReq.has(reqKey)) return false;
+          seenReq.add(reqKey);
+          return true;
+        });
 
-      for (const params of paramsList) {
-        const reqKey = `${endpoint}|${JSON.stringify(params || {})}`;
-        if (seenReq.has(reqKey)) continue;
-        seenReq.add(reqKey);
+      const limitedRequests = requests.length ? requests : [{}];
 
-        try {
+      const settled = await Promise.allSettled(
+        limitedRequests.map(async (params) => {
           const qs = new URLSearchParams();
-          qs.set("limit", endpoint === "/api/history" ? "20000" : "10000");
+          qs.set("limit", "20000");
           if (startDate) qs.set("startDate", startDate);
           if (endDate) qs.set("endDate", endDate);
 
@@ -1171,7 +1182,7 @@ export default function HistoryPage() {
             }
           });
 
-          const data = await apiGet(`${endpoint}?${qs.toString()}`);
+          const data = await apiGet(`/api/history?${qs.toString()}`);
           const items = Array.isArray(data?.items)
             ? data.items
             : Array.isArray(data?.data)
@@ -1180,19 +1191,108 @@ export default function HistoryPage() {
                 ? data
                 : [];
 
-          if (endpoint === "/api/history") {
-  const expanded = items.flatMap((entry) => expandHistoryItemToReadings(entry));
+          return items.flatMap((entry) => expandHistoryItemToReadings(entry));
+        })
+      );
 
-  
+      const out = [];
+      const seenItem = new Set();
 
-  collected.push(...expanded);
-} else {
-  collected.push(...items);
-}
-        } catch { }
+      for (const result of settled) {
+        if (result.status !== "fulfilled") continue;
+
+        for (const item of safeArray(result.value)) {
+          const raw = item?.rawItem || item;
+          const key = [
+            raw?._historyParentId || getId(raw) || "",
+            raw?._historySensorIndex ?? raw?.sensorUid ?? raw?.sensorId ?? raw?.sensorType ?? "",
+            raw?.uid || raw?.nodeUid || raw?.nodeId || "",
+            raw?.server_timestamp || raw?.history_timestamp || raw?.timestamp || raw?.latestTimestamp || "",
+          ].join("|");
+
+          if (seenItem.has(key)) continue;
+          seenItem.add(key);
+          out.push(item);
+        }
       }
 
-      return collected;
+      return out;
+    }
+
+    function buildReadingMapFromItems(items) {
+      const targets = safeArray(fetchTargets);
+      const nextMap = Object.fromEntries(
+        targets.map((target) => [`${target.plotId}|${target.nodeUid || target.nodeId}`, []])
+      );
+
+      const targetByUid = new Map();
+      const targetByNodeId = new Map();
+      const targetsByPlot = new Map();
+
+      for (const target of targets) {
+        const mapKey = `${target.plotId}|${target.nodeUid || target.nodeId}`;
+        if (target.nodeUid) targetByUid.set(String(target.nodeUid).trim().toLowerCase(), { target, mapKey });
+        if (target.nodeId) targetByNodeId.set(String(target.nodeId).trim().toLowerCase(), { target, mapKey });
+
+        const plotKey = String(target.plotId || "").trim().toLowerCase();
+        if (plotKey) {
+          if (!targetsByPlot.has(plotKey)) targetsByPlot.set(plotKey, []);
+          targetsByPlot.get(plotKey).push({ target, mapKey });
+        }
+      }
+
+      const seenPerMap = new Map();
+
+      function pushForMap(mapKey, normalized) {
+        if (!nextMap[mapKey]) return;
+        if (!seenPerMap.has(mapKey)) seenPerMap.set(mapKey, new Set());
+
+        const raw = normalized?.rawItem || normalized;
+        const dedupeKey = [
+          raw?._historyParentId || normalized?.id || getId(raw) || "",
+          raw?._historySensorIndex ?? normalized?.sensorUid ?? normalized?.sensorId ?? normalized?.sensorKey ?? "",
+          normalized?.nodeUid || normalized?.nodeId || raw?.uid || raw?.nodeUid || raw?.nodeId || "",
+          normalized?.timestamp || raw?.server_timestamp || raw?.history_timestamp || raw?.timestamp || "",
+        ].join("|");
+
+        if (seenPerMap.get(mapKey).has(dedupeKey)) return;
+        seenPerMap.get(mapKey).add(dedupeKey);
+        nextMap[mapKey].push(normalized);
+      }
+
+      for (const item of safeArray(items)) {
+        const normalized = normalizeReading(item);
+        const raw = normalized?.rawItem || item;
+        const readingPlotId = String(
+          normalized?.plotId || raw?.plotId || raw?.plot_id || raw?.plot?.id || raw?.plot?._id || ""
+        ).trim().toLowerCase();
+        const readingNodeUid = String(
+          normalized?.nodeUid || raw?.nodeUid || raw?.node_uid || raw?.node?.uid || raw?.uid || ""
+        ).trim().toLowerCase();
+        const readingNodeId = String(
+          normalized?.nodeId || raw?.nodeId || raw?.node_id || raw?.node?.id || raw?.node?._id || ""
+        ).trim().toLowerCase();
+
+        const uidTarget = readingNodeUid ? targetByUid.get(readingNodeUid) : null;
+        if (uidTarget && (!readingPlotId || sameText(readingPlotId, uidTarget.target.plotId))) {
+          pushForMap(uidTarget.mapKey, normalized);
+          continue;
+        }
+
+        const idTarget = readingNodeId ? targetByNodeId.get(readingNodeId) : null;
+        if (idTarget && (!readingPlotId || sameText(readingPlotId, idTarget.target.plotId))) {
+          pushForMap(idTarget.mapKey, normalized);
+          continue;
+        }
+
+        if (!readingNodeUid && !readingNodeId && readingPlotId && targetsByPlot.has(readingPlotId)) {
+          for (const { mapKey } of targetsByPlot.get(readingPlotId)) {
+            pushForMap(mapKey, normalized);
+          }
+        }
+      }
+
+      return nextMap;
     }
 
     async function loadReadings() {
@@ -1213,116 +1313,33 @@ export default function HistoryPage() {
       setError("");
 
       try {
+        const plotIdList = Array.from(
+          new Set(fetchTargets.map((target) => String(target.plotId || "").trim()).filter(Boolean))
+        );
         const uidList = Array.from(
           new Set(fetchTargets.map((target) => String(target.nodeUid || "").trim()).filter(Boolean))
         );
         const nodeIdList = Array.from(
           new Set(fetchTargets.map((target) => String(target.nodeId || "").trim()).filter(Boolean))
         );
-        const plotIdList = Array.from(
-          new Set(fetchTargets.map((target) => String(target.plotId || "").trim()).filter(Boolean))
-        );
 
-        function normalizeItemsForTarget(items, target) {
-          const seenItem = new Set();
-
-          return safeArray(items)
-            .map(normalizeReading)
-            .filter((item) => {
-              const raw = item?.rawItem || item;
-              const readingPlotId = item?.plotId || raw?.plotId || raw?.plot_id || raw?.plot?.id || raw?.plot?._id || "";
-              const readingNodeId = item?.nodeId || raw?.nodeId || raw?.node_id || raw?.node?.id || raw?.node?._id || "";
-              const readingNodeUid = item?.nodeUid || raw?.nodeUid || raw?.node_uid || raw?.node?.uid || raw?.uid || "";
-
-              if (readingPlotId && target.plotId && !sameText(readingPlotId, target.plotId)) return false;
-
-              const uidMatched = target.nodeUid && readingNodeUid && sameText(readingNodeUid, target.nodeUid);
-              const idMatched = target.nodeId && readingNodeId && sameText(readingNodeId, target.nodeId);
-              const fetchedForTargetWithoutNodeIds = !readingNodeUid && !readingNodeId;
-              if (!uidMatched && !idMatched && !fetchedForTargetWithoutNodeIds) return false;
-
-              const dedupeKey = [
-                item.rawItem?._historyParentId || item.id || "",
-                item.rawItem?._historySensorIndex ?? item.sensorUid ?? item.sensorId ?? item.sensorKey ?? "",
-                item.nodeUid || item.nodeId || "",
-                item.timestamp || "",
-              ].join("|");
-
-              if (!dedupeKey) return false;
-              if (seenItem.has(dedupeKey)) return false;
-              seenItem.add(dedupeKey);
-              return true;
-            });
-        }
-
-        async function buildReadingMapFromParams(globalParams, includeTargetQueries) {
-          const globalHistoryItems = await collectEndpointItems("/api/history", globalParams);
-          const globalPool = [...globalHistoryItems];
-
-          return Promise.all(
-            fetchTargets.map(async (target) => {
-              const mapKey = `${target.plotId}|${target.nodeUid || target.nodeId}`;
-
-              try {
-                const queryVariants = [];
-
-                if (includeTargetQueries) {
-                  if (target.nodeUid) queryVariants.push({ uid: target.nodeUid });
-                  if (target.nodeUid) queryVariants.push({ nodeUid: target.nodeUid });
-                  if (target.nodeId) queryVariants.push({ nodeId: target.nodeId });
-                  if (target.plotId && target.nodeUid) {
-                    queryVariants.push({ plotId: target.plotId, uid: target.nodeUid });
-                    queryVariants.push({ plotId: target.plotId, nodeUid: target.nodeUid });
-                  }
-                  if (target.plotId && target.nodeId) {
-                    queryVariants.push({ plotId: target.plotId, nodeId: target.nodeId });
-                  }
-                }
-
-                const targetHistoryItems = includeTargetQueries
-                  ? await collectEndpointItems("/api/history", queryVariants)
-                  : [];
-
-                const normalized = normalizeItemsForTarget(
-                  [...globalPool, ...targetHistoryItems],
-                  target
-                );
-
-                return [mapKey, normalized];
-              } catch {
-                return [mapKey, []];
-              }
-            })
-          );
-        }
-
-        const fastHistoryParams = plotIdList.length > 0
+        const primaryParams = plotIdList.length > 0
           ? plotIdList.map((plotId) => ({ plotId }))
           : [
               ...uidList.map((uid) => ({ uid })),
-              ...uidList.map((nodeUid) => ({ nodeUid })),
               ...nodeIdList.map((nodeId) => ({ nodeId })),
             ];
 
-        let results = await buildReadingMapFromParams(fastHistoryParams, false);
-        const fastHasDataForAllTargets =
-          results.length > 0 && results.every(([, rows]) => Array.isArray(rows) && rows.length > 0);
+        let historyItems = await collectHistoryItemsFast(primaryParams);
+        let nextReadingMap = buildReadingMapFromItems(historyItems);
+        const hasAnyData = Object.values(nextReadingMap).some((rows) => Array.isArray(rows) && rows.length > 0);
 
-        if (!fastHasDataForAllTargets) {
-          const fallbackHistoryParams = [
-            {},
-            ...uidList.map((uid) => ({ uid })),
-            ...uidList.map((nodeUid) => ({ nodeUid })),
-            ...nodeIdList.map((nodeId) => ({ nodeId })),
-            ...plotIdList.map((plotId) => ({ plotId })),
-          ];
-
-          results = await buildReadingMapFromParams(fallbackHistoryParams, true);
+        if (!hasAnyData) {
+          historyItems = await collectHistoryItemsFast([{}]);
+          nextReadingMap = buildReadingMapFromItems(historyItems);
         }
 
         if (!alive || requestId !== readingRequestIdRef.current) return;
-        const nextReadingMap = Object.fromEntries(results);
-        
         setReadingMap(nextReadingMap);
         writeBrowserCache(HISTORY_CACHE_STORAGE_KEY, historyCacheKey, nextReadingMap);
       } catch (err) {
@@ -1341,7 +1358,7 @@ export default function HistoryPage() {
     return () => {
       alive = false;
     };
-  }, [fetchTargets, selectedSensors.length, startDate, endDate, refreshTick, historyCacheKey, txt.loadHistoryFailed]);
+  }, [fetchTargets, selectedSensors, startDate, endDate, refreshTick, historyCacheKey, txt.loadHistoryFailed]);
 
   const targetRows = useMemo(() => {
     const out = [];
