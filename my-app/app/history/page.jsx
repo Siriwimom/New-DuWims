@@ -363,6 +363,32 @@ function formatDateTimeLabel(value, lang = "th") {
   });
 }
 
+
+function formatCsvTimestamp(value) {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value || "");
+
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+
+  // Force Excel to keep timestamp as readable text instead of auto-formatting it as #######.
+  return `="${y}-${m}-${day} ${hh}:${mm}:${ss}"`;
+}
+
+function sanitizeFilenamePart(value, fallback = "history") {
+  const text = String(value || "")
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, "_")
+    .replace(/-+/g, "-");
+
+  return text || fallback;
+}
+
 function normalizeDateKey(value) {
   const d = parseFlexibleDate(value);
   if (!d) return null;
@@ -1531,39 +1557,7 @@ export default function HistoryPage() {
         });
       }
 
-      const latestFallbackDate = parseFlexibleDate(target.latestTimestamp || `${endDate}T12:00:00` || new Date());
-      const latestValue = safeDisplayValue(
-        target.sensorKey,
-        pickValueForSensorKey({ latestValue: target.latestValue }, target.sensorKey)
-      );
-      const hasHistoryForThisTarget = rows.some(
-        (r) =>
-          sameText(r.plotId, target.plotId) &&
-          sameText(r.sensorKey, target.sensorKey) &&
-          (sameText(r.nodeUid, target.nodeUid) || sameText(r.nodeId, target.nodeId))
-      );
-
-      if (latestValue !== null && latestFallbackDate && !hasHistoryForThisTarget) {
-        rows.push({
-          plotId: target.plotId,
-          plotName: target.plotName,
-          nodeId: target.nodeId,
-          nodeUid: target.nodeUid,
-          nodeName: target.nodeName,
-          nodeType: target.nodeType,
-          sensorId: target.sensorId,
-          sensorUid: target.sensorUid,
-          sensorKey: target.sensorKey,
-          sensorLabel: target.sensorLabel,
-          unit: target.unit,
-          value: latestValue,
-          timestamp: latestFallbackDate.toISOString(),
-          timestampMs: latestFallbackDate.getTime(),
-          status: "active",
-          dateKey: formatDateInput(latestFallbackDate),
-          source: "latest",
-        });
-      }
+      // Do not fallback to node latestValue here. History page must show only data that exists in the selected date range.
     }
 
     rows.sort((a, b) => (a.timestampMs || 0) - (b.timestampMs || 0));
@@ -1642,6 +1636,9 @@ export default function HistoryPage() {
 
   const sensorMinMax = useMemo(() => {
     const out = {};
+    const sensorCount = activeSensorKeys.length;
+    const seriesCount = visibleChartSeries.length;
+    const isDenseMultiSensorChart = sensorCount >= 4 || seriesCount >= 5;
 
     for (const key of activeSensorKeys) {
       const vals = visibleChartSeries
@@ -1658,10 +1655,16 @@ export default function HistoryPage() {
       let max = Math.max(...vals);
 
       if (min === max) {
-        min -= 1;
-        max += 1;
+        const basePad = isDenseMultiSensorChart
+          ? Math.max(Math.abs(max || 1) * 0.28, 4)
+          : Math.max(Math.abs(max || 1) * 0.12, 1);
+        min -= basePad;
+        max += basePad;
       } else {
-        const pad = (max - min) * 0.12;
+        const range = max - min;
+        const normalPad = range * 0.12;
+        const densePad = Math.max(range * 1.05, Math.abs(max) * 0.08, 4);
+        const pad = isDenseMultiSensorChart ? densePad : normalPad;
         min -= pad;
         max += pad;
       }
@@ -1699,6 +1702,7 @@ export default function HistoryPage() {
           nodeName: item.nodeName,
         })),
         color: seriesColor,
+        _markerColor: colorOfSensorKey(item.sensorKey),
         _dashArray: 0,
         _strokeWidth: 2.5,
       };
@@ -1714,6 +1718,7 @@ export default function HistoryPage() {
         y: Number.isFinite(item.values[i]) ? Number(item.values[i].toFixed(2)) : null,
       })),
       color: colorOfSeriesByIndex(idx),
+      _markerColor: colorOfSensorKey(item.sensorKey),
     }));
   }, [visibleChartSeries]);
 
@@ -1779,6 +1784,7 @@ export default function HistoryPage() {
           points: item.values.filter((v) => Number.isFinite(v)).length,
           bucketHours: chartBucketHours,
           plotColor: colorOfSeriesByIndex(index),
+          sensorColor: colorOfSensorKey(item.sensorKey),
         }));
 
       return {
@@ -1800,44 +1806,31 @@ export default function HistoryPage() {
   );
 
   const summaryRows = useMemo(() => {
-    return visibleNodes.map((node) => {
-      const nodeRows = filteredReadingRows.filter(
-        (r) =>
-          sameText(r.plotId, node.plotId) &&
-          (sameText(r.nodeId, node.nodeId) || sameText(r.nodeUid, node.nodeUid))
-      );
-
-      const values = {};
-
-      for (const opt of SENSOR_OPTIONS) {
-        const sensorRows = nodeRows.filter((r) => r.sensorKey === opt.key);
-        const fromHistory = averageByEqualIntervals(sensorRows, 6);
-
-        if (fromHistory !== null) {
-          values[opt.key] = fromHistory;
-          continue;
-        }
-
-        const fallbackSensor = safeArray(node.sensors).find((s) => {
-          const keys = safeArray(s?._frontendSensorKeys).length ? s._frontendSensorKeys : expandSensorKeys(s);
-          return keys.includes(opt.key);
-        });
-
-        const fallbackValue = safeDisplayValue(
-          opt.key,
-          pickValueForSensorKey({ latestValue: fallbackSensor?.latestValue }, opt.key)
+    return visibleNodes
+      .map((node) => {
+        const nodeRows = filteredReadingRows.filter(
+          (r) =>
+            sameText(r.plotId, node.plotId) &&
+            (sameText(r.nodeId, node.nodeId) || sameText(r.nodeUid, node.nodeUid))
         );
 
-        values[opt.key] = fallbackValue;
-      }
+        if (!nodeRows.length) return null;
 
-      return {
-        plotName: node.plotName,
-        nodeName: node.nodeName,
-        nodeType: node.nodeType,
-        values,
-      };
-    });
+        const values = {};
+
+        for (const opt of SENSOR_OPTIONS) {
+          const sensorRows = nodeRows.filter((r) => r.sensorKey === opt.key);
+          values[opt.key] = averageByEqualIntervals(sensorRows, 6);
+        }
+
+        return {
+          plotName: node.plotName,
+          nodeName: node.nodeName,
+          nodeType: node.nodeType,
+          values,
+        };
+      })
+      .filter(Boolean);
   }, [visibleNodes, filteredReadingRows]);
 
   const airNodeSummaryRows = useMemo(
@@ -1851,21 +1844,67 @@ export default function HistoryPage() {
   );
 
   const csvRows = useMemo(() => {
-    const header = ["plot", "node", "nodeType", "sensor", "unit", "value", "timestamp", "status", "source"];
-    const body = filteredReadingRows.map((row) => [
-      row.plotName,
-      row.nodeName,
-      row.nodeType,
-      row.sensorLabel,
-      row.unit ?? "",
-      row.value ?? "",
-      row.timestamp ?? "",
-      row.status ?? "",
-      row.source ?? "",
-    ]);
+    const sensorColumns = SENSOR_OPTIONS.map((sensor) => ({
+      ...sensor,
+      label: sensorLabelFromKey(sensor.key, t),
+    }));
+
+    const header = [
+      "timestamp",
+      "ชื่อ plot",
+      "ชื่อ node",
+      "nodeType",
+      "status",
+      "อุณหภูมิ (°C)",
+      "ความชื้นสัมพัทธ์ (%)",
+      "วัดความเร็วลม (m/s)",
+      "ความเข้มแสง (lux)",
+      "ปริมาณน้ำฝน (mm)",
+      "ความชื้นในดิน (%)",
+      "ความพร้อมใช้น้ำ (%)",
+      "N (%)",
+      "P (ppm)",
+      "K (cmol/kg)",
+    ];
+
+    const grouped = new Map();
+
+    for (const row of filteredReadingRows) {
+      const timeKey = row.timestampMs
+        ? new Date(row.timestampMs).toISOString()
+        : row.timestamp || "";
+      const key = [timeKey, row.plotId, row.nodeId || row.nodeUid, row.nodeType].join("|");
+
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          timestampMs: row.timestampMs || 0,
+          time: timeKey,
+          plotName: row.plotName,
+          nodeName: row.nodeName,
+          nodeType: row.nodeType,
+          status: row.status || "active",
+          values: {},
+        });
+      }
+
+      const current = grouped.get(key);
+      current.values[row.sensorKey] = Number.isFinite(row.value) ? Number(row.value).toFixed(2) : "";
+      if (row.status) current.status = row.status;
+    }
+
+    const body = Array.from(grouped.values())
+      .sort((a, b) => (a.timestampMs || 0) - (b.timestampMs || 0))
+      .map((item) => [
+        item.time ? formatCsvTimestamp(item.time) : "",
+        item.plotName,
+        item.nodeName,
+        item.nodeType,
+        item.status,
+        ...sensorColumns.map((sensor) => item.values[sensor.key] ?? ""),
+      ]);
 
     return [header, ...body];
-  }, [filteredReadingRows]);
+  }, [filteredReadingRows, t, lang]);
 
   useEffect(() => {
     csvRef.current = makeCsv(csvRows);
@@ -1933,7 +1972,13 @@ export default function HistoryPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `history-${startDate}-to-${endDate}.csv`;
+    const plotFilenamePart = sanitizeFilenamePart(
+      !selectedPlotIds.length
+        ? selectedPlotNames.join("-") || (lang === "en" ? "all-plots" : "ทุกแปลง")
+        : selectedPlotNames.join("-"),
+      lang === "en" ? "plot" : "แปลง"
+    );
+    a.download = `${plotFilenamePart}_history-${startDate}-to-${endDate}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2003,7 +2048,7 @@ export default function HistoryPage() {
     return {
       chart: {
         id: "h2MainHistoryChart",
-        type: chartType,
+        type: "line",
         height: mainChartHeight,
         fontFamily: "Sarabun, sans-serif",
         toolbar: {
@@ -2031,21 +2076,12 @@ export default function HistoryPage() {
       stroke: {
         curve: "smooth",
         lineCap: "round",
-        width: chartType === "bar" ? 0 : apexSeries.map((s) => s._strokeWidth || 2.5),
+        width: apexSeries.map((s) => s._strokeWidth || 2.5),
         dashArray: 0,
       },
       fill: {
-        type: chartType === "area" ? "gradient" : "solid",
-        opacity: chartType === "area" ? 0.22 : 1,
-        gradient:
-          chartType === "area"
-            ? {
-                shadeIntensity: 1,
-                opacityFrom: 0.24,
-                opacityTo: 0.05,
-                stops: [0, 90, 100],
-              }
-            : undefined,
+        type: "solid",
+        opacity: 1,
       },
       dataLabels: {
         enabled: false,
@@ -2108,27 +2144,23 @@ export default function HistoryPage() {
         },
       },
       markers: {
-        size: chartType === "bar" ? 0 : 3,
-        strokeWidth: 0,
+        size: 4,
+        colors: apexSeries.map((series) => series._markerColor || series.color),
+        strokeColors: apexSeries.map((series) => series.color),
+        strokeWidth: 2,
         hover: {
-          sizeOffset: 2,
-        },
-      },
-      plotOptions: {
-        bar: {
-          borderRadius: 4,
-          columnWidth: "55%",
+          sizeOffset: 3,
         },
       },
     };
-  }, [chartType, apexSeries, lang, responsiveYAxes, isMobileChart, mainChartHeight]);
+  }, [apexSeries, lang, responsiveYAxes, isMobileChart, mainChartHeight]);
 
   const brushChartOptions = useMemo(() => {
     return {
       chart: {
         id: "h2BrushHistoryChart",
         height: isMobileChart ? 72 : 72,
-        type: "area",
+        type: "line",
         brush: {
           enabled: !isMobileChart,
           target: "h2MainHistoryChart",
@@ -2156,7 +2188,7 @@ export default function HistoryPage() {
         width: 1.5,
       },
       fill: {
-        opacity: 0.08,
+        opacity: 0,
       },
       legend: {
         show: false,
@@ -2401,26 +2433,8 @@ export default function HistoryPage() {
 
               <div className="h2-chart-actions">
                 <div className="h2-type-toggle">
-                  <button
-                    type="button"
-                    className={`h2-type-btn ${chartType === "line" ? "active" : ""}`}
-                    onClick={() => setChartType("line")}
-                  >
+                  <button type="button" className="h2-type-btn active" onClick={() => setChartType("line")}>
                     📈 Line
-                  </button>
-                  <button
-                    type="button"
-                    className={`h2-type-btn ${chartType === "area" ? "active" : ""}`}
-                    onClick={() => setChartType("area")}
-                  >
-                    🏔 Area
-                  </button>
-                  <button
-                    type="button"
-                    className={`h2-type-btn ${chartType === "bar" ? "active" : ""}`}
-                    onClick={() => setChartType("bar")}
-                  >
-                    📊 Bar
                   </button>
                 </div>
 
@@ -2438,7 +2452,7 @@ export default function HistoryPage() {
                     style={{ width: chartCanvasWidth, minWidth: chartCanvasWidth }}
                   >
                     <ReactApexChart
-                      type={chartType}
+                      type="line"
                       height={mainChartHeight}
                       width={chartCanvasWidth}
                       series={apexSeries}
@@ -2480,8 +2494,8 @@ export default function HistoryPage() {
                                 <span
                                   className="chart-series-dot"
                                   style={{
-                                    background: group.color,
-                                    boxShadow: `0 0 0 3px ${item.plotColor}22`,
+                                    background: item.sensorColor,
+                                    boxShadow: `0 0 0 3px ${item.sensorColor}22`,
                                   }}
                                 />
                               </div>

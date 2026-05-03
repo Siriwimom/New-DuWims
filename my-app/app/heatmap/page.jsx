@@ -633,13 +633,30 @@ function getSensorThresholds(sensorKey) {
   };
 }
 
-function getSensorRatio(sensorKey, value) {
+function normalizeHeatScale(sensorKey, scaleRange = null) {
   const meta = getSensorThresholds(sensorKey);
-  const min = meta.scaleMin;
-  const max = meta.scaleMax;
+  let min = toNum(scaleRange?.min);
+  let max = toNum(scaleRange?.max);
+
+  if (min == null || max == null || max <= min) {
+    min = meta.scaleMin;
+    max = meta.scaleMax;
+  }
+
+  if (min == null || max == null || max <= min) {
+    return { min: null, max: null, source: "fallback" };
+  }
+
+  return { min, max, source: scaleRange?.source || "selected-range" };
+}
+
+function getSensorRatio(sensorKey, value, scaleRange = null) {
+  const scale = normalizeHeatScale(sensorKey, scaleRange);
+  const min = scale.min;
+  const max = scale.max;
 
   if (value == null || min == null || max == null || max <= min) return 0.5;
-  return clamp((value - min) / (max - min), 0, 1);
+  return clamp((Number(value) - min) / (max - min), 0, 1);
 }
 
 function getHeatColorByRatio(ratio) {
@@ -651,8 +668,20 @@ function getHeatColorByRatio(ratio) {
   return lerpColor(colors[index], colors[index + 1], frac);
 }
 
-function getHeatColor(sensorKey, value) {
+function hasUsableHeatScale(scaleRange = null) {
+  const min = toNum(scaleRange?.min);
+  const max = toNum(scaleRange?.max);
+  return min != null && max != null && max > min;
+}
+
+function getHeatColor(sensorKey, value, scaleRange = null) {
   if (value == null || Number.isNaN(Number(value))) return "#9ca3af";
+
+  // ใช้ scale เดียวกับ Legend/ช่วงวันที่เลือกก่อนเสมอ
+  // กันปัญหา K = 15 แต่กลายเป็นแดง เพราะไปชนค่า SENSOR_META เดิม 0.8-1.4
+  if (hasUsableHeatScale(scaleRange)) {
+    return getHeatColorByRatio(getSensorRatio(sensorKey, value, scaleRange));
+  }
 
   const meta = getSensorThresholds(sensorKey);
   const normalMin = meta.normalMin;
@@ -676,7 +705,7 @@ function getHeatColor(sensorKey, value) {
     return getHeatColorByRatio(1);
   }
 
-  return getHeatColorByRatio(getSensorRatio(sensorKey, value));
+  return getHeatColorByRatio(getSensorRatio(sensorKey, value, scaleRange));
 }
 
 function getContrastText(color) {
@@ -706,14 +735,24 @@ function getContrastText(color) {
   return luminance > 0.68 ? "#111827" : "#ffffff";
 }
 
-function getSensorStatus(sensorKey, value) {
+function getSensorStatus(sensorKey, value, scaleRange = null) {
+  if (value == null || Number.isNaN(value)) {
+    return { type: "none", label: "ไม่มีข้อมูล" };
+  }
+
+  // เมื่อมี dynamic scale ให้สถานะอิงช่วงสีเดียวกันกับ heatmap
+  if (hasUsableHeatScale(scaleRange)) {
+    const min = toNum(scaleRange?.min);
+    const max = toNum(scaleRange?.max);
+    if (value < min) return { type: "low", label: "ต่ำกว่าช่วง" };
+    if (value > max) return { type: "high", label: "สูงกว่าช่วง" };
+    return { type: "normal", label: "อยู่ในช่วง" };
+  }
+
   const meta = getSensorThresholds(sensorKey);
   const lowThreshold = meta.abnormalLow ?? meta.normalMin;
   const highThreshold = meta.abnormalHigh ?? meta.normalMax;
 
-  if (value == null || Number.isNaN(value)) {
-    return { type: "none", label: "ไม่มีข้อมูล" };
-  }
   if (lowThreshold != null && value < lowThreshold) {
     return { type: "low", label: "ต่ำกว่าช่วง" };
   }
@@ -744,10 +783,10 @@ function formatLegendValue(value) {
   return n % 1 === 0 ? String(n) : n.toFixed(2);
 }
 
-function getLegendStops(sensorKey) {
-  const meta = getSensorThresholds(sensorKey);
-  const min = meta.scaleMin;
-  const max = meta.scaleMax;
+function getLegendStops(sensorKey, scaleRange = null) {
+  const scale = normalizeHeatScale(sensorKey, scaleRange);
+  const min = scale.min;
+  const max = scale.max;
   if (min == null || max == null || max <= min) return [];
   const segments = 4;
   return Array.from({ length: segments + 1 }, (_, i) => {
@@ -1104,7 +1143,7 @@ function getRectPolygon(minLat, maxLat, minLng, maxLng) {
 }
 
 
-function getPlotFillStats(plot, points, sensorKey) {
+function getPlotFillStats(plot, points, sensorKey, scaleRange = null) {
   const insidePoints = (Array.isArray(points) ? points : []).filter((p) => {
     if (p?.value == null || Number.isNaN(p.value)) return false;
     if (p?.lat == null || p?.lng == null) return false;
@@ -1146,7 +1185,7 @@ function getPlotFillStats(plot, points, sensorKey) {
   const avg = values.reduce((a, b) => a + b, 0) / values.length;
   const min = Math.min(...values);
   const max = Math.max(...values);
-  const ratio = getSensorRatio(sensorKey, avg);
+  const ratio = getSensorRatio(sensorKey, avg, scaleRange);
   const color = getHeatColorByRatio(ratio);
   const opacity = clamp(0.45 + ratio * 0.45, 0.45, 0.9);
 
@@ -1204,7 +1243,7 @@ function getDistanceToPolygonEdge(point, polygon) {
   return Number.isFinite(minDist) ? minDist : 0;
 }
 
-function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
+function buildLocalHeatCells(plots, points, sensorKey, density = 72, scaleRange = null) {
   if (!plots.length || !points.length) return [];
 
   const allCoords = plots.flatMap((p) => p.coords || []);
@@ -1267,7 +1306,7 @@ function buildLocalHeatCells(plots, points, sensorKey, density = 72) {
       if (!nearestPoint) continue;
 
       const sourceValue = Number(nearestPoint.value);
-      const ratio = getSensorRatio(sensorKey, sourceValue);
+      const ratio = getSensorRatio(sensorKey, sourceValue, scaleRange);
       const color = getHeatColorByRatio(ratio);
 
       const sourcePoint = { lat: nearestPoint.lat, lng: nearestPoint.lng };
@@ -1483,14 +1522,14 @@ function getPercentile(values, percentile) {
   return nums[lower] * (1 - weight) + nums[upper] * weight;
 }
 
-function buildGlobalClimateCells(points, sensorKey, step = GLOBAL_GRID_STEP, clipPlots = []) {
+function buildGlobalClimateCells(points, sensorKey, step = GLOBAL_GRID_STEP, clipPlots = [], scaleRange = null) {
   if (!points.length) return [];
 
   const shouldClip = Array.isArray(clipPlots) && clipPlots.some((plot) => (plot?.coords || []).length >= 3);
 
   return points
     .map((p, idx) => {
-      const ratio = getSensorRatio(sensorKey, p.value);
+      const ratio = getSensorRatio(sensorKey, p.value, scaleRange);
       const minLat = p.lat - step / 2;
       const maxLat = p.lat + step / 2;
       const minLng = p.lng - step / 2;
@@ -1554,7 +1593,7 @@ function getDistanceNormalized(a, b) {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-function buildPlotSvgOverlay(plot, points, sensorKey) {
+function buildPlotSvgOverlay(plot, points, sensorKey, scaleRange = null) {
   const coords = Array.isArray(plot?.coords) ? plot.coords : [];
   if (coords.length < 3) return null;
 
@@ -1571,7 +1610,7 @@ function buildPlotSvgOverlay(plot, points, sensorKey) {
 
   const polygonNorm = coords.map((coord) => normalizePointInBounds(coord.lat, coord.lng, plotBounds));
   const avgValue = insidePoints.reduce((sum, point) => sum + Number(point.value || 0), 0) / insidePoints.length;
-  const baseColor = getHeatColor(sensorKey, avgValue);
+  const baseColor = getHeatColor(sensorKey, avgValue, scaleRange);
   const polygonPointsAttr = polygonNorm
     .map((point) => `${(point.x * 1000).toFixed(2)},${(point.y * 1000).toFixed(2)}`)
     .join(" ");
@@ -1595,8 +1634,8 @@ function buildPlotSvgOverlay(plot, points, sensorKey) {
 
     const radius = clamp(Math.max(farthestCorner * 0.50, nearestEdgeNorm * 2.2, 0.34), 0.34, 1.12);
 
-    const valueRatio = getSensorRatio(sensorKey, point.value);
-    const nodeColor = getHeatColor(sensorKey, point.value);
+    const valueRatio = getSensorRatio(sensorKey, point.value, scaleRange);
+    const nodeColor = getHeatColor(sensorKey, point.value, scaleRange);
     const gradientId = `grad-${plot.id}-${index}`;
     const cx = center.x.toFixed(4);
     const cy = center.y.toFixed(4);
@@ -2052,6 +2091,29 @@ useEffect(() => {
     );
   }, [visiblePlots, selectedNodeType, selectedSensor, readingsByPointKey, historicalReadingsByPointKey]);
 
+  const selectedRangeHeatScale = useMemo(() => {
+    const values = activeSensorPoints
+      .flatMap((point) => (Array.isArray(point.readings) ? point.readings : []))
+      .map((reading) => Number(reading?.value))
+      .filter((value) => Number.isFinite(value));
+
+    if (!values.length) {
+      return normalizeHeatScale(selectedSensor, null);
+    }
+
+    let min = Math.min(...values);
+    let max = Math.max(...values);
+
+    // ถ้าทั้งช่วงมีค่าเท่ากันทั้งหมด ให้ขยายช่วงเล็กน้อยเพื่อไม่ให้สีค้างกลางตลอด
+    if (min === max) {
+      const padValue = Math.max(Math.abs(min) * 0.05, 1);
+      min -= padValue;
+      max += padValue;
+    }
+
+    return { min, max, source: "selected-range" };
+  }, [activeSensorPoints, selectedSensor]);
+
   const renderedPoints = useMemo(() => {
     const currentTs = frameTimestamps[frameIndex] || alignBangkokFrameStart(Date.now());
     const nextFrameTs =
@@ -2075,12 +2137,12 @@ useEffect(() => {
           value,
           ts,
           smoothMode,
-          status: getSensorStatus(selectedSensor, value),
-          color: getHeatColor(selectedSensor, value),
+          status: getSensorStatus(selectedSensor, value, selectedRangeHeatScale),
+          color: getHeatColor(selectedSensor, value, selectedRangeHeatScale),
         };
       })
       .filter((point) => point.value != null && !Number.isNaN(point.value));
-  }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
+  }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor, selectedRangeHeatScale]);
 
   const frameDebugRows = useMemo(() => {
     const currentTs = frameTimestamps[frameIndex] || alignBangkokFrameStart(Date.now());
@@ -2128,7 +2190,7 @@ useEffect(() => {
           historyCountAll: Array.isArray(point.allSensorHistory) ? point.allSensorHistory.length : 0,
           latestValue: null,
           latestTime: null,
-          statusType: getSensorStatus(selectedSensor, chosenValue)?.type || "none",
+          statusType: getSensorStatus(selectedSensor, chosenValue, selectedRangeHeatScale)?.type || "none",
         };
       })
       .sort((a, b) => {
@@ -2137,7 +2199,7 @@ useEffect(() => {
         const tb = new Date(b.currentValueTime || b.beforeTime || 0).getTime();
         return tb - ta;
       });
-  }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor]);
+  }, [activeSensorPoints, frameIndex, frameTimestamps, selectedSensor, selectedRangeHeatScale]);
 
   const clipDebugSummary = useMemo(() => {
     const rows = frameDebugRows;
@@ -2169,21 +2231,21 @@ const plotHeatFills = useMemo(() => {
 
   for (const plot of visiblePlots) {
     if (!plot?.id || !Array.isArray(plot?.coords) || plot.coords.length < 3) continue;
-    map[plot.id] = getPlotFillStats(plot, renderedPoints, selectedSensor);
+    map[plot.id] = getPlotFillStats(plot, renderedPoints, selectedSensor, selectedRangeHeatScale);
   }
 
   return map;
-}, [visiblePlots, renderedPoints, selectedSensor]);
+}, [visiblePlots, renderedPoints, selectedSensor, selectedRangeHeatScale]);
 
 const plotSvgOverlays = useMemo(() => {
   return visiblePlots
     .filter((plot) => Array.isArray(plot?.coords) && plot.coords.length >= 3)
     .map((plot) => ({
       plotId: plot.id,
-      overlay: buildPlotSvgOverlay(plot, renderedPoints, selectedSensor),
+      overlay: buildPlotSvgOverlay(plot, renderedPoints, selectedSensor, selectedRangeHeatScale),
     }))
     .filter((item) => item.overlay);
-}, [visiblePlots, renderedPoints, selectedSensor]);
+}, [visiblePlots, renderedPoints, selectedSensor, selectedRangeHeatScale]);
 
 
 const stats = useMemo(() => {
@@ -2208,7 +2270,7 @@ const stats = useMemo(() => {
   let high = 0;
 
   values.forEach((v) => {
-    const type = getSensorStatus(selectedSensor, v).type;
+    const type = getSensorStatus(selectedSensor, v, selectedRangeHeatScale).type;
     if (type === "low") low += 1;
     else if (type === "high") high += 1;
     else if (type === "normal") normal += 1;
@@ -2223,7 +2285,7 @@ const stats = useMemo(() => {
     normal,
     high,
   };
-}, [renderedPoints, selectedSensor]);
+}, [renderedPoints, selectedSensor, selectedRangeHeatScale]);
 
 
   useEffect(() => {
@@ -2262,7 +2324,46 @@ const stats = useMemo(() => {
   const sensorMeta = getSensorThresholds(selectedSensor) || getSensorThresholds("soil_moisture");
   const referenceRange = getReferenceRange(selectedSensor);
 
-  const legendStops = useMemo(() => getLegendStops(selectedSensor), [selectedSensor]);
+  const legendStops = useMemo(() => getLegendStops(selectedSensor, selectedRangeHeatScale), [selectedSensor, selectedRangeHeatScale]);
+
+  const heatScaleBySensor = useMemo(() => {
+    const map = {};
+    const allowedKeys = getSensorOptionsByNodeType(selectedNodeType);
+
+    for (const sensorKey of allowedKeys) {
+      const values = [];
+
+      visiblePlots.forEach((plot) => {
+        (plot.nodes || []).forEach((node) => {
+          if (getNodeTypeFromNode(node) !== selectedNodeType) return;
+          const pointHistoryKey = `${toText(node.uid)}__${sensorKey}`;
+          const rows = Array.isArray(readingsByPointKey[pointHistoryKey])
+            ? readingsByPointKey[pointHistoryKey]
+            : [];
+
+          rows.forEach((reading) => {
+            const value = Number(reading?.value);
+            if (Number.isFinite(value)) values.push(value);
+          });
+        });
+      });
+
+      if (values.length) {
+        let min = Math.min(...values);
+        let max = Math.max(...values);
+        if (min === max) {
+          const padValue = Math.max(Math.abs(min) * 0.05, 1);
+          min -= padValue;
+          max += padValue;
+        }
+        map[sensorKey] = { min, max, source: "selected-range" };
+      } else {
+        map[sensorKey] = normalizeHeatScale(sensorKey, null);
+      }
+    }
+
+    return map;
+  }, [readingsByPointKey, selectedNodeType, visiblePlots]);
 
   const legendSensorItems = useMemo(() => {
     const currentTs = frameTimestamps[frameIndex] || alignBangkokFrameStart(Date.now());
@@ -2342,7 +2443,8 @@ const stats = useMemo(() => {
         const avgValue = values.reduce((sum, v) => sum + v, 0) / values.length;
         const minValue = Math.min(...values);
         const maxValue = Math.max(...values);
-        const ratio = Math.round(getSensorRatio(sensorKey, avgValue) * 100);
+        const heatScale = heatScaleBySensor[sensorKey] || normalizeHeatScale(sensorKey, null);
+        const ratio = Math.round(getSensorRatio(sensorKey, avgValue, heatScale) * 100);
         const nodeCount = new Set(candidates.map((item) => item.nodeId)).size;
         const isAllPlots = selectedPlotId === "all";
 
@@ -2355,7 +2457,7 @@ const stats = useMemo(() => {
               ? `${formatLegendValue(avgValue)} ${meta.unit || ""}`.trim()
               : `${formatLegendValue(minValue)}–${formatLegendValue(maxValue)} ${meta.unit || ""}`.trim(),
           avgText: `${formatLegendValue(avgValue)} ${meta.unit || ""}`.trim(),
-          color: getHeatColor(sensorKey, avgValue),
+          color: getHeatColor(sensorKey, avgValue, heatScale),
           active: selectedSensor === sensorKey,
           nodeCount,
           hideValues: isAllPlots,
@@ -2372,6 +2474,7 @@ const stats = useMemo(() => {
     uiLang,
     visiblePlots,
     historicalReadingsByPointKey,
+    heatScaleBySensor,
   ]);
 
 
@@ -2601,7 +2704,7 @@ const stats = useMemo(() => {
                     ))}
                   </div>
                   <div className="map-scale-range-note map-scale-range-note-overlay">
-                    ช่วงอ้างอิง: {formatLegendValue(referenceRange.min)} - {formatLegendValue(referenceRange.max)} {sensorMeta.unit || ""}
+                    ช่วงสีตามช่วงที่เลือก: {formatLegendValue(selectedRangeHeatScale.min)} - {formatLegendValue(selectedRangeHeatScale.max)} {sensorMeta.unit || ""}
                   </div>
                 </div>
               )}
@@ -2696,8 +2799,8 @@ const stats = useMemo(() => {
     <div className="legend-gradient-wrap">
       <div className="legend-gradient-bar" />
       <div className="legend-labels legend-labels-strong legend-labels-wide">
-        <span>น้อย</span>
-        <span>มาก</span>
+        <span>{formatLegendValue(selectedRangeHeatScale?.min)} {sensorMeta.unit || ""}</span>
+        <span>{formatLegendValue(selectedRangeHeatScale?.max)} {sensorMeta.unit || ""}</span>
       </div>
     </div>
 

@@ -1318,8 +1318,8 @@ export default function NodeSensorPage() {
           lang === "en"
             ? "You are currently adding or editing data.\nDo you want to discard the current changes and switch pages, or stay on this page?"
             : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
-        secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
-        confirmText: lang === "en" ? "Discard changes" : "ยกเลิกการแก้ไข",
+        secondaryText: lang === "en" ? "Cancel" : "ยกเลิก",
+        confirmText: lang === "en" ? "Confirm" : "ยืนยัน",
         confirmClassName: "confirm-warn",
         onSecondary: async () => {
           pendingLeaveUrlRef.current = "";
@@ -1384,8 +1384,8 @@ export default function NodeSensorPage() {
           lang === "en"
             ? "You are currently adding or editing data.\nDo you want to discard the current changes and switch pages, or stay on this page?"
             : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
-                secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
-        confirmText: lang === "en" ? "Discard changes" : "ยกเลิกการแก้ไข",
+                secondaryText: lang === "en" ? "Cancel" : "ยกเลิก",
+        confirmText: lang === "en" ? "Confirm" : "ยืนยัน",
         confirmClassName: "confirm-warn",
         onSecondary: async () => {
           pendingLeaveUrlRef.current = "";
@@ -1438,8 +1438,8 @@ export default function NodeSensorPage() {
           lang === "en"
             ? "You are currently adding or editing data.\nDo you want to discard the current changes and switch pages, or stay on this page?"
             : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
-                secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
-        confirmText: lang === "en" ? "Discard changes" : "ยกเลิกการแก้ไข",
+                secondaryText: lang === "en" ? "Cancel" : "ยกเลิก",
+        confirmText: lang === "en" ? "Confirm" : "ยืนยัน",
         confirmClassName: "confirm-warn",
         onSecondary: async () => {
           closeConfirm();
@@ -1541,8 +1541,8 @@ export default function NodeSensorPage() {
         lang === "en"
           ? "You are currently adding or editing data.\nDo you want to discard the current changes and switch pages, or stay on this page?"
           : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล\nต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ",
-            secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
-      confirmText: lang === "en" ? "Discard changes" : "ยกเลิกการแก้ไข",
+            secondaryText: lang === "en" ? "Cancel" : "ยกเลิก",
+      confirmText: lang === "en" ? "Confirm" : "ยืนยัน",
       confirmClassName: "confirm-warn",
       onSecondary: async () => {
         closeConfirm();
@@ -1651,8 +1651,8 @@ export default function NodeSensorPage() {
         lang === "en"
           ? "You are currently adding or editing node data. Do you want to go back and leave this form?"
           : "คุณกำลังอยู่ระหว่างเพิ่ม Node หรือแก้ไขข้อมูล ต้องการย้อนกลับและออกจากฟอร์มนี้ใช่หรือไม่?",
-      secondaryText: lang === "en" ? "Stay on this page" : "อยู่หน้าเดิม",
-      confirmText: lang === "en" ? "Go back" : "ย้อนกลับ",
+      secondaryText: lang === "en" ? "Cancel" : "ยกเลิก",
+      confirmText: lang === "en" ? "Confirm" : "ยืนยัน",
       confirmClassName: "confirm-warn",
       onSecondary: async () => {
         closeConfirm();

@@ -177,7 +177,7 @@ function FitBounds({ leaflet, coords }) {
   return null;
 }
 
-function CurrentLocationLayer({ leaflet, locateTick, onStatus, t }) {
+function CurrentLocationLayer({ leaflet, locateTick, onStatus, t, tt }) {
   const map = leaflet.RL.useMap();
   const [pos, setPos] = useState(null);
 
@@ -185,11 +185,11 @@ function CurrentLocationLayer({ leaflet, locateTick, onStatus, t }) {
     if (!locateTick) return;
 
     if (!navigator.geolocation) {
-      onStatus(t.locationNotSupported || "อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง");
+      onStatus(t.locationNotSupported || tt("locationNotSupported", "อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง", "This device does not support location access"));
       return;
     }
 
-    onStatus(t.findingLocation || "กำลังค้นหาตำแหน่ง...");
+    onStatus(t.findingLocation || tt("findingLocation", "กำลังค้นหาตำแหน่ง...", "Finding your location..."));
     navigator.geolocation.getCurrentPosition(
       (p) => {
         const lat = p.coords.latitude;
@@ -199,17 +199,17 @@ function CurrentLocationLayer({ leaflet, locateTick, onStatus, t }) {
         map.setView([lat, lng], Math.max(map.getZoom() || 16, 17), {
           animate: true,
         });
-        onStatus(t.locationFound || "พบตำแหน่งแล้ว");
+        onStatus(t.locationFound || tt("locationFound", "พบตำแหน่งแล้ว", "Location found"));
       },
       (err) =>
         onStatus(
-          `${t.locationFailed || "ไม่สามารถหาตำแหน่งได้"}: ${
+          `${t.locationFailed || tt("locationFailed", "ไม่สามารถหาตำแหน่งได้", "Unable to get location")}: ${
             err?.message || ""
           }`
         ),
       { enableHighAccuracy: true, timeout: 10000 }
     );
-  }, [locateTick, map, onStatus, t]);
+  }, [locateTick, map, onStatus, t, tt]);
 
   if (!pos) return null;
 
@@ -257,6 +257,34 @@ export default function Page() {
   const mapRef = useRef(null);
   const { t } = useDuwimsT();
   const router = useRouter();
+
+  const isEnglish = useMemo(() => {
+    const sample = [
+      t?.plotInfo,
+      t?.noticeTitle,
+      t?.successTitle,
+      t?.cancel,
+      t?.confirm,
+      t?.myLocation,
+      t?.loadingMap,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    return /\b(plot|notice|success|cancel|confirm|location|loading|map)\b/.test(sample);
+  }, [t]);
+
+  const tt = useCallback(
+    (key, th, en) => {
+      const value = t?.[key];
+      if (value !== undefined && value !== null && String(value).trim()) {
+        return value;
+      }
+      return isEnglish ? en : th;
+    },
+    [t, isEnglish]
+  );
 
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -439,7 +467,7 @@ export default function Page() {
     try {
       await Promise.all([loadEmployees(), loadPlots()]);
     } catch (e) {
-      const msg = e?.message || t.loadDataFailed || "โหลดข้อมูลไม่สำเร็จ";
+      const msg = e?.message || t.loadDataFailed || tt("loadDataFailed", "โหลดข้อมูลไม่สำเร็จ", "Failed to load data");
 
       if (
         /401|unauthorized|missing token|jwt|forbidden/i.test(String(msg || ""))
@@ -458,7 +486,7 @@ export default function Page() {
     return (
       safeText(plot?.plotName || plot?.alias || plot?.name || "", "").trim() ||
       t.plotWord ||
-      "แปลง"
+      tt("plotWord", "แปลง", "Plot")
     );
   }
 
@@ -477,7 +505,7 @@ export default function Page() {
 
   function enterEditMode() {
     if (!selectedPlotId || !selectedPlot) {
-      setError(t.selectPlotFirst || "กรุณาเลือกแปลงก่อน");
+      setError(t.selectPlotFirst || tt("selectPlotFirst", "กรุณาเลือกแปลงก่อน", "Please select a plot first"));
       return;
     }
 
@@ -533,17 +561,17 @@ export default function Page() {
     const coords = normalizeCoords(draftPolygon);
 
     if (!plotName) {
-      setError("กรุณาตั้งชื่อแปลง");
+      setError(tt("pleaseNamePlot", "กรุณาตั้งชื่อแปลง", "Please enter plot name"));
       return false;
     }
 
     if (coords.length < 3) {
-      setError(t.drawPolygonFirst || "กรุณาวาดขอบเขตแปลงก่อน");
+      setError(t.drawPolygonFirst || tt("drawPolygonFirst", "กรุณาวาดขอบเขตแปลงก่อน", "Please draw the plot boundary first"));
       return false;
     }
 
     if (polygonArea(coords) < 0.00000001) {
-      setError(t.polygonTooSmall || "พื้นที่ polygon เล็กเกินไป");
+      setError(t.polygonTooSmall || tt("polygonTooSmall", "พื้นที่ polygon เล็กเกินไป", "The polygon area is too small"));
       return false;
     }
 
@@ -576,7 +604,7 @@ export default function Page() {
 
       const created = normalizePlot(createdRes?.item || createdRes || {});
       if (!created?.id) {
-        throw new Error(t.createPlotFailed || "เพิ่มแปลงไม่สำเร็จ");
+        throw new Error(t.createPlotFailed || tt("createPlotFailed", "เพิ่มแปลงไม่สำเร็จ", "Failed to create plot"));
       }
 
       setPlots((prev) => [created, ...prev]);
@@ -585,9 +613,9 @@ export default function Page() {
       setDraftCaretaker(created.caretaker);
       setDraftPolygon(created.polygon);
       setMode("view");
-      setSuccess(t.createPlotSuccess || "เพิ่มแปลงสำเร็จ");
+      setSuccess(t.createPlotSuccess || tt("createPlotSuccess", "เพิ่มแปลงสำเร็จ", "Plot created successfully"));
     } catch (e) {
-      const msg = e?.message || t.createPlotFailed || "เพิ่มแปลงไม่สำเร็จ";
+      const msg = e?.message || t.createPlotFailed || tt("createPlotFailed", "เพิ่มแปลงไม่สำเร็จ", "Failed to create plot");
       if (/401|unauthorized|missing token|jwt|forbidden/i.test(String(msg))) {
         router.replace("/");
         return;
@@ -600,7 +628,7 @@ export default function Page() {
 
   async function saveExistingPlot() {
     if (!selectedPlotId) {
-      setError(t.selectPlotFirst || "กรุณาเลือกแปลงก่อน");
+      setError(t.selectPlotFirst || tt("selectPlotFirst", "กรุณาเลือกแปลงก่อน", "Please select a plot first"));
       return;
     }
 
@@ -642,9 +670,9 @@ export default function Page() {
       setDraftCaretaker(updatedPlot.caretaker);
       setDraftPolygon(updatedPlot.polygon);
       setMode("view");
-      setSuccess(t.saveSuccess || "บันทึกสำเร็จ");
+      setSuccess(t.saveSuccess || tt("saveSuccess", "บันทึกสำเร็จ", "Saved successfully"));
     } catch (e) {
-      const msg = e?.message || t.saveFailed || "บันทึกไม่สำเร็จ";
+      const msg = e?.message || t.saveFailed || tt("saveFailed", "บันทึกไม่สำเร็จ", "Failed to save");
       if (/401|unauthorized|missing token|jwt|forbidden/i.test(String(msg))) {
         router.replace("/");
         return;
@@ -668,7 +696,7 @@ export default function Page() {
       return;
     }
 
-    setError(t.needPressAddOrEditFirst || "กรุณากดเพิ่มหรือแก้ไขก่อน");
+    setError(t.needPressAddOrEditFirst || tt("needPressAddOrEditFirst", "กรุณากดเพิ่มหรือแก้ไขก่อน", "Please click Add or Edit first"));
   }
 
   function handleSaveClick() {
@@ -679,7 +707,7 @@ export default function Page() {
 
   function handleDeleteClick() {
     if (!selectedPlotId) {
-      setError(t.selectPlotFirst || "กรุณาเลือกแปลงก่อน");
+      setError(t.selectPlotFirst || tt("selectPlotFirst", "กรุณาเลือกแปลงก่อน", "Please select a plot first"));
       return;
     }
 
@@ -691,7 +719,7 @@ export default function Page() {
   async function doDeleteConfirmed() {
     if (!selectedPlotId) {
       setShowDeletePopup(false);
-      setError(t.selectPlotFirst || "กรุณาเลือกแปลงก่อน");
+      setError(t.selectPlotFirst || tt("selectPlotFirst", "กรุณาเลือกแปลงก่อน", "Please select a plot first"));
       return;
     }
 
@@ -712,9 +740,9 @@ export default function Page() {
       setSelectedPlotId("");
       resetDraft();
       setMode("view");
-      setSuccess(t.deleteSuccess || "ลบข้อมูลสำเร็จ");
+      setSuccess(t.deleteSuccess || tt("deleteSuccess", "ลบข้อมูลสำเร็จ", "Deleted successfully"));
     } catch (e) {
-      const msg = e?.message || t.deleteFailed || "ลบข้อมูลไม่สำเร็จ";
+      const msg = e?.message || t.deleteFailed || tt("deleteFailed", "ลบข้อมูลไม่สำเร็จ", "Failed to delete");
       if (/401|unauthorized|missing token|jwt|forbidden/i.test(String(msg))) {
         router.replace("/");
         return;
@@ -732,7 +760,7 @@ export default function Page() {
   }
 
   function onCreated(e) {
-    if (!requireEditable(t.needEditBeforeDraw || "กรุณากดเพิ่มหรือแก้ไขก่อน")) {
+    if (!requireEditable(t.needEditBeforeDraw || tt("needPressAddOrEditFirst", "กรุณากดเพิ่มหรือแก้ไขก่อน", "Please click Add or Edit first"))) {
       return;
     }
 
@@ -755,7 +783,7 @@ export default function Page() {
   function onEdited(e) {
     if (
       !requireEditable(
-        t.needEditBeforeEditPolygon || "กรุณากดเพิ่มหรือแก้ไขก่อน"
+        t.needEditBeforeEditPolygon || tt("needPressAddOrEditFirst", "กรุณากดเพิ่มหรือแก้ไขก่อน", "Please click Add or Edit first")
       )
     ) {
       return;
@@ -786,7 +814,7 @@ export default function Page() {
   function onDeleted() {
     if (
       !requireEditable(
-        t.needEditBeforeDeletePolygon || "กรุณากดเพิ่มหรือแก้ไขก่อน"
+        t.needEditBeforeDeletePolygon || tt("needPressAddOrEditFirst", "กรุณากดเพิ่มหรือแก้ไขก่อน", "Please click Add or Edit first")
       )
     ) {
       return;
@@ -795,18 +823,18 @@ export default function Page() {
   }
 
   const formTitle = isCreateMode
-    ? "เพิ่มแปลงปลูก"
+    ? tt("createPlotTitle", "เพิ่มแปลงปลูก", "Create Planting Plot")
     : isEditMode
-      ? "แก้ไขแปลงปลูก"
-      : t.plotInfo || "ข้อมูลแปลง";
+      ? tt("editPlotTitle", "แก้ไขแปลงปลูก", "Edit Planting Plot")
+      : t.plotInfo || tt("plotInfo", "ข้อมูลแปลง", "Plot Information");
 
   const pageTitleText = isCreateMode
-    ? "เพิ่มแปลงปลูก"
+    ? tt("createPlotTitle", "เพิ่มแปลงปลูก", "Create Planting Plot")
     : isEditMode
-      ? "แก้ไขแปลงปลูก"
-      : "🗺 แปลงปลูก";
+      ? tt("editPlotTitle", "แก้ไขแปลงปลูก", "Edit Planting Plot")
+      : tt("plotPageTitle", "🗺 แปลงปลูก", "🗺 Planting Plot");
 
-  const infoPlotLabel = plotNameTrimmed || "กรุณาตั้งชื่อแปลง";
+  const infoPlotLabel = plotNameTrimmed || tt("pleaseNamePlot", "กรุณาตั้งชื่อแปลง", "Please enter plot name");
 
   if (!mounted) return null;
 
@@ -815,14 +843,14 @@ export default function Page() {
       <div className="polygon-page">
         {error ? (
           <div className="alert-box error">
-            <div className="alert-title">{t.noticeTitle || "แจ้งเตือน"}</div>
+            <div className="alert-title">{t.noticeTitle || tt("noticeTitle", "แจ้งเตือน", "Notice")}</div>
             <div className="alert-text">{error}</div>
           </div>
         ) : null}
 
         {success ? (
           <div className="alert-box success">
-            <div className="alert-title">{t.successTitle || "สำเร็จ"}</div>
+            <div className="alert-title">{t.successTitle || tt("successTitle", "สำเร็จ", "Success")}</div>
             <div className="alert-text">{success}</div>
           </div>
         ) : null}
@@ -852,7 +880,7 @@ export default function Page() {
                   onClick={enterCreateMode}
                   disabled={busy}
                 >
-                  + เพิ่มแปลง
+                  {tt("addPlot", "+ เพิ่มแปลง", "+ Add Plot")}
                 </button>
 
                 {selectedPlotId ? (
@@ -863,7 +891,7 @@ export default function Page() {
                       onClick={enterEditMode}
                       disabled={busy}
                     >
-                      แก้ไข
+                      {tt("edit", "แก้ไข", "Edit")}
                     </button>
 
                     <button
@@ -872,7 +900,7 @@ export default function Page() {
                       onClick={handleDeleteClick}
                       disabled={busy}
                     >
-                      ลบ
+                      {tt("delete", "ลบ", "Delete")}
                     </button>
                   </>
                 ) : null}
@@ -882,7 +910,7 @@ export default function Page() {
         </div>
 
         <div className="top-select-wrap">
-          <div className="top-label">เลือกแปลง</div>
+          <div className="top-label">{tt("selectPlot", "เลือกแปลง", "Select Plot")}</div>
           <select
             className="top-select"
             value={isCreateMode ? "__creating__" : selectedPlotId}
@@ -900,9 +928,9 @@ export default function Page() {
             disabled={busy || loading || false}
           >
             {isCreateMode ? (
-              <option value="__creating__">กำลังเพิ่มแปลงใหม่</option>
+              <option value="__creating__">{tt("creatingPlot", "กำลังเพิ่มแปลงใหม่", "Creating new plot")}</option>
             ) : (
-              <option value="">กรุณาเลือกแปลง</option>
+              <option value="">{tt("pleaseSelectPlot", "กรุณาเลือกแปลง", "Please select a plot")}</option>
             )}
 
             {plots.map((plot) => (
@@ -923,7 +951,7 @@ export default function Page() {
                   <div
                     className={`field-label ${showPlotNameError ? "error-text" : ""}`}
                   >
-                    {t.plotInfoLabel || "ชื่อแปลง"}{" "}
+                    {t.plotInfoLabel || tt("plotInfoLabel", "ชื่อแปลง", "Plot Name")}{" "}
                     <span
                       className={`field-sub ${showPlotNameError ? "error-text" : ""}`}
                     >
@@ -936,9 +964,9 @@ export default function Page() {
                     value={draftPlotName}
                     onChange={(e) => {
                       setDraftPlotName(e.target.value);
-                      if (error === "กรุณาตั้งชื่อแปลง") setError("");
+                      if (error === tt("pleaseNamePlot", "กรุณาตั้งชื่อแปลง", "Please enter plot name")) setError("");
                     }}
-                    placeholder="กรุณาตั้งชื่อแปลง"
+                    placeholder={tt("pleaseNamePlot", "กรุณาตั้งชื่อแปลง", "Please enter plot name")}
                     disabled={busy || !isEditable}
                     readOnly={!isEditable}
                   />
@@ -946,7 +974,7 @@ export default function Page() {
 
                 <div className="field field-full">
                   <div className="field-label">
-                    {t.caretakerInfoLabel || "ผู้ดูแล"}
+                    {t.caretakerInfoLabel || tt("caretakerInfoLabel", "ผู้ดูแล", "Caretaker")}
                   </div>
                   <select
                     className="field-select"
@@ -954,7 +982,7 @@ export default function Page() {
                     onChange={(e) => setDraftCaretaker(e.target.value)}
                     disabled={busy || !isEditable}
                   >
-                    <option value="">ไม่เลือก</option>
+                    <option value="">{tt("notSelected", "ไม่เลือก", "Not selected")}</option>
                     {caretakerOptions.map((item) => (
                       <option key={item.value} value={item.value}>
                         {item.label}
@@ -964,7 +992,7 @@ export default function Page() {
 
                   {!isEditable && selectedCaretakerLabel ? (
                     <div className="caretaker-hint">
-                      {t.currentCaretaker || "ผู้ดูแลปัจจุบัน"}: {selectedCaretakerLabel}
+                      {t.currentCaretaker || tt("currentCaretaker", "ผู้ดูแลปัจจุบัน", "Current caretaker")}: {selectedCaretakerLabel}
                     </div>
                   ) : null}
                 </div>
@@ -974,20 +1002,20 @@ export default function Page() {
             <div className="map-card">
               <div className="map-head">
                 <div className="map-title">
-                  {t.drawPolygonOnMap || "วาดขอบเขตแปลงบนแผนที่"}
+                  {t.drawPolygonOnMap || tt("drawPolygonOnMap", "วาดขอบเขตแปลงบนแผนที่", "Draw plot boundary on the map")}
                 </div>
 
                 <div className={`lock-hint ${isEditable ? "unlock" : "lock"}`}>
                   {isEditable
-                    ? t.editModeOn || "โหมดแก้ไขเปิดอยู่"
-                    : t.pressEditOrAddFirst || "กด +เพิ่มแปลง หรือ ลบ/แก้ไข ก่อน"}
+                    ? t.editModeOn || tt("editModeOn", "โหมดแก้ไขเปิดอยู่", "Edit mode is on")
+                    : t.pressEditOrAddFirst || tt("pressEditOrAddFirst", "กด +เพิ่มแปลง หรือ ลบ/แก้ไข ก่อน", "Click Add Plot or Edit first")}
                 </div>
               </div>
 
               <div className="map-shell">
                 <div className="map-box">
                   {!leaflet?.RL ? (
-                    <div className="map-loading">{t.loadingMap || "กำลังโหลดแผนที่..."}</div>
+                    <div className="map-loading">{t.loadingMap || tt("loadingMap", "กำลังโหลดแผนที่...", "Loading map...")}</div>
                   ) : (
                     <leaflet.RL.MapContainer
                       key={
@@ -1012,6 +1040,7 @@ export default function Page() {
                         locateTick={locateTick}
                         onStatus={setLocateStatus}
                         t={t}
+                        tt={tt}
                       />
 
                       <DrawGuide leaflet={leaflet} />
@@ -1067,7 +1096,7 @@ export default function Page() {
                   className="locate-btn"
                   onClick={() => setLocateTick((v) => v + 1)}
                 >
-                  {t.myLocation || "ตำแหน่งของฉัน"}
+                  {t.myLocation || tt("myLocation", "ตำแหน่งของฉัน", "My Location")}
                 </button>
               </div>
 
@@ -1084,7 +1113,7 @@ export default function Page() {
                   onClick={() => requestLeave(() => cancelEditOrCreate())}
                   disabled={busy}
                 >
-                  ยกเลิก
+                  {tt("cancel", "ยกเลิก", "Cancel")}
                 </button>
 
                 <button
@@ -1093,7 +1122,7 @@ export default function Page() {
                   onClick={handleSaveClick}
                   disabled={busy}
                 >
-                  บันทึก
+                  {tt("save", "บันทึก", "Save")}
                 </button>
               </div>
             ) : null}
@@ -1107,11 +1136,11 @@ export default function Page() {
           >
             <div className="confirm-box" onClick={(e) => e.stopPropagation()}>
               <div className="confirm-icon">🗑</div>
-              <div className="confirm-title">{t.confirmDeleteTitle || "ยืนยันการลบ"}</div>
+              <div className="confirm-title">{t.confirmDeleteTitle || tt("confirmDeleteTitle", "ยืนยันการลบ", "Confirm Delete")}</div>
               <div className="confirm-sub">
-                {t.confirmDeleteSub1 || "คุณต้องการลบข้อมูลนี้ใช่หรือไม่"}
+                {t.confirmDeleteSub1 || tt("confirmDeleteSub1", "คุณต้องการลบข้อมูลนี้ใช่หรือไม่", "Do you want to delete this data?")}
                 <br />
-                {t.confirmDeleteSub2 || "เมื่อยืนยันแล้วจะไม่สามารถย้อนกลับได้"}
+                {t.confirmDeleteSub2 || tt("confirmDeleteSub2", "เมื่อยืนยันแล้วจะไม่สามารถย้อนกลับได้", "This action cannot be undone after confirmation.")}
               </div>
               <div className="confirm-actions">
                 <button
@@ -1120,7 +1149,7 @@ export default function Page() {
                   onClick={() => setShowDeletePopup(false)}
                   disabled={busy}
                 >
-                  {t.cancel || "ยกเลิก"}
+                  {t.cancel || tt("cancel", "ยกเลิก", "Cancel")}
                 </button>
                 <button
                   type="button"
@@ -1128,7 +1157,7 @@ export default function Page() {
                   onClick={doDeleteConfirmed}
                   disabled={busy}
                 >
-                  {t.confirm || "ยืนยัน"}
+                  {t.confirm || tt("confirm", "ยืนยัน", "Confirm")}
                 </button>
               </div>
             </div>
@@ -1142,11 +1171,11 @@ export default function Page() {
           >
             <div className="confirm-box" onClick={(e) => e.stopPropagation()}>
               <div className="confirm-icon">💾</div>
-              <div className="confirm-title">{t.confirmSaveTitle || "ยืนยันการบันทึก"}</div>
+              <div className="confirm-title">{t.confirmSaveTitle || tt("confirmSaveTitle", "ยืนยันการบันทึก", "Confirm Save")}</div>
               <div className="confirm-sub">
-                {t.confirmSaveSub1 || "ตรวจสอบข้อมูลเรียบร้อยแล้วใช่หรือไม่"}
+                {t.confirmSaveSub1 || tt("confirmSaveSub1", "ตรวจสอบข้อมูลเรียบร้อยแล้วใช่หรือไม่", "Have you checked all information?")}
                 <br />
-                {t.confirmSaveSub2 || "กดยืนยันเพื่อบันทึกข้อมูล"}
+                {t.confirmSaveSub2 || tt("confirmSaveSub2", "กดยืนยันเพื่อบันทึกข้อมูล", "Click confirm to save the data.")}
               </div>
               <div className="confirm-actions">
                 <button
@@ -1155,7 +1184,7 @@ export default function Page() {
                   onClick={() => setShowSavePopup(false)}
                   disabled={busy}
                 >
-                  {t.cancel || "ยกเลิก"}
+                  {t.cancel || tt("cancel", "ยกเลิก", "Cancel")}
                 </button>
                 <button
                   type="button"
@@ -1163,7 +1192,7 @@ export default function Page() {
                   onClick={doSaveConfirmed}
                   disabled={busy}
                 >
-                  {t.confirm || "ยืนยัน"}
+                  {t.confirm || tt("confirm", "ยืนยัน", "Confirm")}
                 </button>
               </div>
             </div>
@@ -1174,11 +1203,11 @@ export default function Page() {
           <div className="confirm-overlay open" onClick={stayOnCurrentPage}>
             <div className="confirm-box" onClick={(e) => e.stopPropagation()}>
               <div className="confirm-icon warn">⚠️</div>
-              <div className="confirm-title">มีการแก้ไขที่ยังไม่บันทึก</div>
+              <div className="confirm-title">{tt("unsavedChangesTitle", "มีการแก้ไขที่ยังไม่บันทึก", "Unsaved Changes")}</div>
               <div className="confirm-sub">
-                คุณกำลังอยู่ระหว่างเพิ่มแปลงหรือแก้ไขข้อมูล
+                {tt("unsavedChangesSub1", "คุณกำลังอยู่ระหว่างเพิ่มแปลงหรือแก้ไขข้อมูล", "You are currently creating or editing plot data.")}
                 <br />
-                ต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ
+                {tt("unsavedChangesSub2", "ต้องการยกเลิกการแก้ไขแล้วเปลี่ยนหน้า หรืออยู่หน้าเดิมต่อ", "Do you want to discard changes and leave, or stay on this page?")}
               </div>
               <div className="confirm-actions two-line">
                 <button
@@ -1187,7 +1216,7 @@ export default function Page() {
                   onClick={stayOnCurrentPage}
                   disabled={busy}
                 >
-                  อยู่หน้าเดิม
+                  {tt("cancel", "ยกเลิก", "Cancel")}
                 </button>
                 <button
                   type="button"
@@ -1195,7 +1224,7 @@ export default function Page() {
                   onClick={confirmLeaveAndProceed}
                   disabled={busy}
                 >
-                  ยกเลิกการแก้ไข
+                  {tt("confirm", "ยืนยัน", "Confirm")}
                 </button>
               </div>
             </div>
