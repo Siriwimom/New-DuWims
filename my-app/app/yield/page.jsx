@@ -85,6 +85,7 @@ function createEmptyForm() {
     startDate: "",
     harvestDate: "",
     volume: "",
+    note: "",
   };
 }
 
@@ -165,6 +166,8 @@ export default function YieldPage() {
       plantingDate: lang === "en" ? "Planting Date" : "วันที่ปลูก",
       harvestDate: lang === "en" ? "Harvest Date" : "วันที่เก็บเกี่ยว",
       volume: lang === "en" ? "Volume (tons)" : "ปริมาณ (ตัน)",
+      note: lang === "en" ? "Note" : "หมายเหตุ",
+      notePlaceholder: lang === "en" ? "Enter note" : "กรอกหมายเหตุ",
       manage: lang === "en" ? "Manage" : "จัดการ",
 
       loading: lang === "en" ? "Loading data..." : "กำลังโหลดข้อมูล...",
@@ -529,6 +532,7 @@ export default function YieldPage() {
       startDate: "",
       harvestDate: "",
       volume: "",
+      note: "",
     });
     setCreateOpen(true);
   }
@@ -543,6 +547,7 @@ export default function YieldPage() {
       harvestDate: toDateInputValue(item?.harvestDate),
       volume:
         item?.volume === null || item?.volume === undefined ? "" : String(item.volume),
+      note: item?.note || "",
     });
     setEditOpen(true);
   }
@@ -626,6 +631,7 @@ export default function YieldPage() {
         lang === "en" ? "Planting Date" : "วันที่ปลูก",
         lang === "en" ? "Harvest Date" : "วันที่เก็บเกี่ยว",
         lang === "en" ? "Volume (tons)" : "ปริมาณ (ตัน)",
+        lang === "en" ? "Note" : "หมายเหตุ",
       ];
 
       const rows = filteredItems.map((item) => [
@@ -636,6 +642,7 @@ export default function YieldPage() {
         item?.volume === null || item?.volume === undefined || item?.volume === ""
           ? ""
           : String(Number(item.volume)),
+        item?.note || "",
       ]);
 
       const exportRows = [
@@ -646,6 +653,7 @@ export default function YieldPage() {
           row[2] ? `="${row[2]}"` : "",
           row[3] ? `="${row[3]}"` : "",
           row[4] === "" ? "" : `="${row[4]}"`,
+          row[5],
         ]),
       ];
 
@@ -693,6 +701,7 @@ export default function YieldPage() {
             startDate: createForm.startDate || null,
             harvestDate: createForm.harvestDate || null,
             volume: createForm.volume === "" ? null : Number(createForm.volume),
+            note: createForm.note.trim(),
           }),
         });
         setCreateOpen(false);
@@ -705,6 +714,7 @@ export default function YieldPage() {
             startDate: editForm.startDate || null,
             harvestDate: editForm.harvestDate || null,
             volume: editForm.volume === "" ? null : Number(editForm.volume),
+            note: editForm.note.trim(),
           }),
         });
         setEditOpen(false);
@@ -851,19 +861,20 @@ export default function YieldPage() {
                   <th>{tx.plantingDate}</th>
                   <th>{tx.harvestDate}</th>
                   <th>{tx.volume}</th>
+                  <th>{tx.note}</th>
                   <th>{tx.manage}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={6} className="yield-empty-cell">
+                    <td colSpan={7} className="yield-empty-cell">
                       {tx.loading}
                     </td>
                   </tr>
                 ) : filteredItems.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="yield-empty-cell">
+                    <td colSpan={7} className="yield-empty-cell">
                       {tx.noData}
                     </td>
                   </tr>
@@ -885,6 +896,7 @@ export default function YieldPage() {
                         <td>
                           <strong>{formatVolume(item?.volume, lang)}</strong>
                         </td>
+                        <td>{item?.note || "-"}</td>
                         <td className="yield-actions-cell">
                           <div className="yield-actions-inner">
                             <button
@@ -1014,6 +1026,19 @@ export default function YieldPage() {
                 />
               </div>
 
+              <div className="form-field">
+                <div className="form-field-label">{tx.note}</div>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder={tx.notePlaceholder}
+                  value={createForm.note}
+                  onChange={(e) =>
+                    setCreateForm((prev) => ({ ...prev, note: e.target.value }))
+                  }
+                />
+              </div>
+
               <div className="popup-actions">
                 <button
                   className="btn-cancel"
@@ -1139,6 +1164,19 @@ export default function YieldPage() {
                   value={editForm.volume}
                   onChange={(e) =>
                     setEditForm((prev) => ({ ...prev, volume: e.target.value }))
+                  }
+                />
+              </div>
+
+              <div className="form-field">
+                <div className="form-field-label">{tx.note}</div>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder={tx.notePlaceholder}
+                  value={editForm.note}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, note: e.target.value }))
                   }
                 />
               </div>
@@ -1276,6 +1314,44 @@ export default function YieldPage() {
         )}
 
         <style jsx>{`
+          .popup-overlay.open {
+            position: fixed;
+            left: 0;
+            right: 0;
+            top: var(--topbar-height, 86px);
+            bottom: 0;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            padding: 24px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            z-index: 9999;
+            box-sizing: border-box;
+          }
+
+          .popup-box {
+            position: relative;
+            margin: auto !important;
+            max-width: calc(100vw - 48px);
+            max-height: none !important;
+            overflow: visible !important;
+            transform: none !important;
+          }
+
+          @media (max-height: 820px) {
+            .popup-overlay.open {
+              align-items: flex-start !important;
+              padding-top: 18px;
+              padding-bottom: 18px;
+            }
+
+            .popup-box {
+              margin-top: 0 !important;
+              margin-bottom: 0 !important;
+            }
+          }
+
           .yield-page-title {
             font-size: 21px !important;
             font-weight: 800;
@@ -1461,7 +1537,7 @@ export default function YieldPage() {
 
           .yield-table th,
           .yield-table td {
-            width: calc(100% / 6);
+            width: calc(100% / 7);
           }
 
           .yield-table th:nth-child(1),
@@ -1476,7 +1552,7 @@ export default function YieldPage() {
           .yield-table td:nth-child(5),
           .yield-table th:nth-child(6),
           .yield-table td:nth-child(6) {
-            width: calc(100% / 6);
+            width: calc(100% / 7);
           }
 
           .yield-table th:nth-child(1) {
@@ -1573,7 +1649,7 @@ export default function YieldPage() {
             }
 
              .yield-table {
-              min-width: 1040px;
+              min-width: 920px;
             }
           }
 
@@ -1635,7 +1711,7 @@ export default function YieldPage() {
             }
 
              .yield-table {
-              min-width: 900px;
+              min-width: 940px;
             }
 
             .yield-table thead th {
@@ -1662,7 +1738,7 @@ export default function YieldPage() {
 
           @media (max-width: 480px) {
              .yield-table {
-              min-width: 860px;
+              min-width: 920px;
             }
 
             .yield-table thead th,
@@ -1706,8 +1782,8 @@ export default function YieldPage() {
           .yield-table td:nth-child(4),
           .yield-table th:nth-child(5),
           .yield-table td:nth-child(5),
-          .yield-table th:nth-child(6),
-          .yield-table td:nth-child(6) {
+          .yield-table th:nth-child(7),
+          .yield-table td:nth-child(7) {
             white-space: nowrap;
             word-break: normal;
             overflow-wrap: normal;
@@ -1715,34 +1791,40 @@ export default function YieldPage() {
 
           .yield-table th:nth-child(1),
           .yield-table td:nth-child(1) {
-            width: 180px;
-            min-width: 180px;
+            width: 170px;
+            min-width: 170px;
           }
 
           .yield-table th:nth-child(2),
           .yield-table td:nth-child(2) {
-            width: 150px;
-            min-width: 150px;
+            width: 140px;
+            min-width: 140px;
           }
 
           .yield-table th:nth-child(3),
           .yield-table td:nth-child(3),
           .yield-table th:nth-child(4),
           .yield-table td:nth-child(4) {
-            width: 130px;
-            min-width: 130px;
+            width: 125px;
+            min-width: 125px;
           }
 
           .yield-table th:nth-child(5),
           .yield-table td:nth-child(5) {
-            width: 140px;
-            min-width: 140px;
+            width: 135px;
+            min-width: 135px;
           }
 
           .yield-table th:nth-child(6),
           .yield-table td:nth-child(6) {
-            width: 210px;
-            min-width: 210px;
+            width: 140px;
+            min-width: 140px;
+          }
+
+          .yield-table th:nth-child(7),
+          .yield-table td:nth-child(7) {
+            width: 185px;
+            min-width: 185px;
           }
 
           @media (max-width: 640px) {
@@ -1786,8 +1868,8 @@ export default function YieldPage() {
 
           @media (max-width: 480px) {
             .yield-table {
-              width: 900px;
-              min-width: 900px;
+              width: 920px;
+              min-width: 920px;
             }
 
             .yield-table thead th,

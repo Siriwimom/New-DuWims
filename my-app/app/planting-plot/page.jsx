@@ -133,6 +133,46 @@ function polygonArea(coords = []) {
   return Math.abs(area / 2);
 }
 
+function calculatePolygonAreaSqm(coords = []) {
+  const pts = normalizeCoords(coords);
+  if (pts.length < 3) return 0;
+
+  const earthRadius = 6378137;
+  const centerLat =
+    pts.reduce((sum, [lat]) => sum + lat, 0) / Math.max(pts.length, 1);
+  const centerLatRad = (centerLat * Math.PI) / 180;
+
+  const projected = pts.map(([lat, lng]) => {
+    const x = earthRadius * ((lng * Math.PI) / 180) * Math.cos(centerLatRad);
+    const y = earthRadius * ((lat * Math.PI) / 180);
+    return [x, y];
+  });
+
+  let area = 0;
+  for (let i = 0; i < projected.length; i++) {
+    const [x1, y1] = projected[i];
+    const [x2, y2] = projected[(i + 1) % projected.length];
+    area += x1 * y2 - x2 * y1;
+  }
+
+  return Math.abs(area / 2);
+}
+
+function calculateRaiFromPolygon(coords = []) {
+  const areaSqm = calculatePolygonAreaSqm(coords);
+  if (!Number.isFinite(areaSqm) || areaSqm <= 0) return 0;
+  return Number((areaSqm / 1600).toFixed(2));
+}
+
+function formatRaiValue(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "";
+  return num.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function normalizePlot(plot = {}) {
   return {
     ...plot,
@@ -142,6 +182,8 @@ function normalizePlot(plot = {}) {
     name: safeText(plot.name || plot.plotName || plot.alias || ""),
     caretaker: safeText(plot.caretaker || ""),
     polygon: normalizeCoords(plot.polygon || plot?.polygon?.coords || []),
+    areaRai: Number(plot.areaRai || plot.rai || plot.sizeRai || 0) || 0,
+    areaSqm: Number(plot.areaSqm || plot.squareMeter || plot.squareMeters || 0) || 0,
     createdAt: safeText(plot.createdAt || ""),
     updatedAt: safeText(plot.updatedAt || ""),
   };
@@ -333,7 +375,21 @@ export default function Page() {
     return normalizeCoords(selectedPlot?.polygon || []);
   }, [isCreateMode, isEditMode, draftPolygon, selectedPlot]);
 
+  const calculatedAreaRai = useMemo(() => {
+    return calculateRaiFromPolygon(displayedPolygon);
+  }, [displayedPolygon]);
+
+  const formattedCalculatedRai = useMemo(() => {
+    return formatRaiValue(calculatedAreaRai);
+  }, [calculatedAreaRai]);
+
   const plotNameTrimmed = draftPlotName.trim();
+
+  const displayPlotNameWithArea = useMemo(() => {
+    if (!plotNameTrimmed) return "";
+    if (!formattedCalculatedRai) return plotNameTrimmed;
+    return `${plotNameTrimmed} (${formattedCalculatedRai} ${tt("rai", "ไร่", "rai")})`;
+  }, [plotNameTrimmed, formattedCalculatedRai, tt]);
   const showPlotNameError = isEditable && !plotNameTrimmed;
   const shouldShowDetails = isCreateMode || isEditMode || !!selectedPlotId;
 
@@ -483,11 +539,17 @@ export default function Page() {
   }
 
   function getPlotDisplayName(plot) {
-    return (
+    const name =
       safeText(plot?.plotName || plot?.alias || plot?.name || "", "").trim() ||
       t.plotWord ||
-      tt("plotWord", "แปลง", "Plot")
-    );
+      tt("plotWord", "แปลง", "Plot");
+
+    const polygonRai = calculateRaiFromPolygon(plot?.polygon || []);
+    const savedRai = Number(plot?.areaRai || 0) || 0;
+    const raiText = formatRaiValue(polygonRai || savedRai);
+
+    if (!raiText) return name;
+    return `${name} (${raiText} ${tt("rai", "ไร่", "rai")})`;
   }
 
   function resetDraft() {
@@ -589,10 +651,14 @@ export default function Page() {
       const safePlotName = draftPlotName.trim();
       const safeCaretaker = draftCaretaker.trim();
       const safePolygon = coordsToPolygonPayload(draftPolygon);
+      const safeAreaSqm = calculatePolygonAreaSqm(safePolygon);
+      const safeAreaRai = calculateRaiFromPolygon(safePolygon);
 
       const payload = {
         plotName: safePlotName,
         polygon: safePolygon,
+        areaSqm: safeAreaSqm,
+        areaRai: safeAreaRai,
         nodes: [],
         ...(safeCaretaker ? { caretaker: safeCaretaker } : {}),
       };
@@ -642,10 +708,14 @@ export default function Page() {
       const safePlotName = draftPlotName.trim();
       const safeCaretaker = draftCaretaker.trim();
       const safePolygon = coordsToPolygonPayload(draftPolygon);
+      const safeAreaSqm = calculatePolygonAreaSqm(safePolygon);
+      const safeAreaRai = calculateRaiFromPolygon(safePolygon);
 
       const payload = {
         plotName: safePlotName,
         polygon: safePolygon,
+        areaSqm: safeAreaSqm,
+        areaRai: safeAreaRai,
         ...(safeCaretaker ? { caretaker: safeCaretaker } : {}),
       };
 
@@ -834,8 +904,6 @@ export default function Page() {
       ? tt("editPlotTitle", "แก้ไขแปลงปลูก", "Edit Planting Plot")
       : tt("plotPageTitle", "🗺 แปลงปลูก", "🗺 Planting Plot");
 
-  const infoPlotLabel = plotNameTrimmed || tt("pleaseNamePlot", "กรุณาตั้งชื่อแปลง", "Please enter plot name");
-
   if (!mounted) return null;
 
   return (
@@ -952,11 +1020,9 @@ export default function Page() {
                     className={`field-label ${showPlotNameError ? "error-text" : ""}`}
                   >
                     {t.plotInfoLabel || tt("plotInfoLabel", "ชื่อแปลง", "Plot Name")}{" "}
-                    <span
-                      className={`field-sub ${showPlotNameError ? "error-text" : ""}`}
-                    >
-                      {infoPlotLabel}
-                    </span>
+                    {displayPlotNameWithArea ? (
+                      <span className="field-sub">{displayPlotNameWithArea}</span>
+                    ) : null}
                   </div>
 
                   <input

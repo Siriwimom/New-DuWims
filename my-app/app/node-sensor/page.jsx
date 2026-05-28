@@ -85,6 +85,53 @@ function normalizeCoords(coords) {
     .filter(Boolean);
 }
 
+function calculatePolygonAreaSqm(coords = []) {
+  const pts = normalizeCoords(coords);
+  if (pts.length < 3) return 0;
+
+  const earthRadius = 6378137;
+  const centerLat =
+    pts.reduce((sum, [lat]) => sum + lat, 0) / Math.max(pts.length, 1);
+  const centerLatRad = (centerLat * Math.PI) / 180;
+
+  const projected = pts.map(([lat, lng]) => {
+    const x = earthRadius * ((lng * Math.PI) / 180) * Math.cos(centerLatRad);
+    const y = earthRadius * ((lat * Math.PI) / 180);
+    return [x, y];
+  });
+
+  let area = 0;
+  for (let i = 0; i < projected.length; i++) {
+    const [x1, y1] = projected[i];
+    const [x2, y2] = projected[(i + 1) % projected.length];
+    area += x1 * y2 - x2 * y1;
+  }
+
+  return Math.abs(area / 2);
+}
+
+function calculateRaiFromPolygon(coords = []) {
+  const areaSqm = calculatePolygonAreaSqm(coords);
+  if (!Number.isFinite(areaSqm) || areaSqm <= 0) return 0;
+  return Number((areaSqm / 1600).toFixed(2));
+}
+
+function formatRaiValue(value = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatPlotNameWithArea(plotName = "", areaRai = 0) {
+  const name = safeText(plotName || "-", "-");
+  const raiText = formatRaiValue(areaRai);
+  if (!raiText) return name;
+  return `${name} (${raiText} ไร่ )`;
+}
+
 function normalizeSensor(sensor = {}) {
   const uid = safeText(sensor.uid || sensor._id || "");
   const rawName = safeText(sensor.name || sensor.sensorType || uid || "Sensor");
@@ -130,7 +177,52 @@ function normalizeSensor(sensor = {}) {
   };
 }
 
+function getLatestReadingForSensor(latestReadings = {}, sensor = {}) {
+  if (!latestReadings || typeof latestReadings !== "object") return null;
+
+  const rawName = sensor.rawName || sensor.name || sensor.sensorKey || "";
+  const uid = sensor.uid || sensor._id || "";
+  const key = sensor.sensorKey || canonicalizeSensorName(rawName, uid);
+
+  const possibleKeys = [
+    key,
+    String(key).replace(/-/g, "_"),
+    String(key).replace(/_/g, " "),
+    canonicalizeSensorName(rawName, uid),
+    canonicalizeSensorName(sensor.name || "", uid),
+    canonicalizeSensorName(sensor.rawName || "", uid),
+  ]
+    .filter(Boolean)
+    .map((item) => String(item).trim().toLowerCase());
+
+  const uniqueKeys = Array.from(new Set(possibleKeys));
+
+  for (const itemKey of uniqueKeys) {
+    if (latestReadings[itemKey]) return latestReadings[itemKey];
+  }
+
+  return null;
+}
+
+function mergeSensorWithLatestReading(sensor = {}, latestReadings = {}) {
+  const normalized = normalizeSensor(sensor);
+  const latest = getLatestReadingForSensor(latestReadings, normalized);
+  const latestValue = toNum(latest?.latestValue);
+  const latestTimestamp = safeText(latest?.latestTimestamp || "");
+
+  return {
+    ...normalized,
+    latestValue: latestValue !== null ? latestValue : normalized.latestValue,
+    latestTimestamp: latestTimestamp || normalized.latestTimestamp,
+  };
+}
+
 function normalizeNode(node = {}) {
+  const latestReadings =
+    node.latestReadings && typeof node.latestReadings === "object"
+      ? node.latestReadings
+      : {};
+
   return {
     _id: safeText(node._id || node.id || ""),
     uid: safeText(node.uid || node._id || node.id || ""),
@@ -140,22 +232,36 @@ function normalizeNode(node = {}) {
     lng: toNum(node.lng),
     plotId: safeText(node.plotId || ""),
     ownerRef: safeText(node.ownerRef || ""),
+    latestReadings,
     sensors: Array.isArray(node.sensors)
-      ? node.sensors.map(normalizeSensor)
+      ? node.sensors.map((sensor) =>
+          mergeSensorWithLatestReading(sensor, latestReadings),
+        )
       : [],
   };
 }
 
 function normalizePlot(plot = {}) {
   const polygon = plot?.polygon?.coords || plot?.polygon || plot?.coords || [];
+  const safePolygon = normalizeCoords(polygon);
   const nodes = plot?.nodes || plot?.node_air || plot?.node_soil || [];
+  const rawAreaRai = toNum(plot.areaRai || plot.rai || plot.sizeRai);
+  const rawAreaSqm = toNum(plot.areaSqm || plot.squareMeter || plot.squareMeters);
+  const calculatedAreaSqm = calculatePolygonAreaSqm(safePolygon);
+  const areaSqm = rawAreaSqm !== null && rawAreaSqm > 0 ? rawAreaSqm : calculatedAreaSqm;
+  const areaRai =
+    rawAreaRai !== null && rawAreaRai > 0
+      ? Number(rawAreaRai.toFixed(2))
+      : Number((areaSqm / 1600).toFixed(2));
 
   return {
     id: safeText(plot.id || plot._id || ""),
     plotName: safeText(
       plot.plotName || plot.name || plot.alias || "ไม่ระบุชื่อแปลง",
     ),
-    polygon: normalizeCoords(polygon),
+    polygon: safePolygon,
+    areaSqm,
+    areaRai,
     caretaker: safeText(plot.caretaker || plot.ownerName || ""),
     nodes: Array.isArray(nodes) ? nodes.map(normalizeNode) : [],
   };
@@ -816,6 +922,10 @@ function NodeMap({
                   {node.nodeName || "-"}
                 </div>
                 <div>
+                  {(t.plot || (lang === "en" ? "Plot" : "แปลง")) + ": "}
+                  {node.plotDisplayName || formatPlotNameWithArea(node.plotName, node.plotAreaRai)}
+                </div>
+                <div>
                   {(t.type || (lang === "en" ? "Type" : "ประเภท")) + ": "}
                   {inferNodeTypeFromUid(node.uid) === "soil"
                     ? t.soilNode || "Soil Node"
@@ -1122,10 +1232,17 @@ export default function NodeSensorPage() {
   const allNodes = useMemo(() => {
   return nodes.map((node) => {
     const plot = plots.find((p) => String(p.id) === String(node.plotId));
+    const plotName = plot?.plotName || "-";
+    const plotAreaRai =
+      Number(plot?.areaRai || 0) ||
+      calculateRaiFromPolygon(plot?.polygon || []);
+
     return {
       ...node,
       plotId: node.plotId || "",
-      plotName: plot?.plotName || "-",
+      plotName,
+      plotAreaRai,
+      plotDisplayName: formatPlotNameWithArea(plotName, plotAreaRai),
       nodeType: inferNodeTypeFromUid(node.uid, node.sensors, node.nodeName),
     };
   });
@@ -2137,8 +2254,8 @@ export default function NodeSensorPage() {
                             {(t.plot || (lang === "en" ? "Plot" : "แปลง")) +
                               " :"}
                           </span>
-                          <span className="node-summary-value" title={node.plotName || "-"}>
-                            {node.plotName || "-"}
+                          <span className="node-summary-value" title={node.plotDisplayName || node.plotName || "-"}>
+                            {node.plotDisplayName || node.plotName || "-"}
                           </span>
                         </span>
 
@@ -2344,7 +2461,7 @@ export default function NodeSensorPage() {
                   </option>
                   {plots.map((plot) => (
                     <option key={plot.id} value={plot.id}>
-                      {plot.plotName}
+                      {formatPlotNameWithArea(plot.plotName, plot.areaRai)}
                     </option>
                   ))}
                 </select>
@@ -2660,7 +2777,7 @@ export default function NodeSensorPage() {
                   </option>
                   {plots.map((plot) => (
                     <option key={plot.id} value={plot.id}>
-                      {plot.plotName}
+                      {formatPlotNameWithArea(plot.plotName, plot.areaRai)}
                     </option>
                   ))}
                 </select>

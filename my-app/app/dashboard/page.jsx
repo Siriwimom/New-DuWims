@@ -93,6 +93,60 @@ function normalizeCoords(input) {
   return input.map(normalizeCoord).filter(Boolean);
 }
 
+function calculatePolygonAreaSqm(coords = []) {
+  const pts = normalizeCoords(coords);
+  if (pts.length < 3) return 0;
+
+  const earthRadius = 6378137;
+  const centerLat =
+    pts.reduce((sum, [lat]) => sum + lat, 0) / Math.max(pts.length, 1);
+  const centerLatRad = (centerLat * Math.PI) / 180;
+
+  const projected = pts.map(([lat, lng]) => {
+    const x = earthRadius * ((lng * Math.PI) / 180) * Math.cos(centerLatRad);
+    const y = earthRadius * ((lat * Math.PI) / 180);
+    return [x, y];
+  });
+
+  let area = 0;
+  for (let i = 0; i < projected.length; i++) {
+    const [x1, y1] = projected[i];
+    const [x2, y2] = projected[(i + 1) % projected.length];
+    area += x1 * y2 - x2 * y1;
+  }
+
+  return Math.abs(area / 2);
+}
+
+function getPlotAreaRai(plot = {}) {
+  const storedRai = toNum(plot?.areaRai ?? plot?.rai ?? plot?.sizeRai);
+  if (storedRai !== null && storedRai > 0) return storedRai;
+
+  const storedSqm = toNum(plot?.areaSqm ?? plot?.squareMeter ?? plot?.squareMeters);
+  if (storedSqm !== null && storedSqm > 0) return storedSqm / 1600;
+
+  const polygon = plot?.polygon?.coords || plot?.polygon || plot?.coords || [];
+  const areaSqm = calculatePolygonAreaSqm(polygon);
+  if (!Number.isFinite(areaSqm) || areaSqm <= 0) return 0;
+
+  return areaSqm / 1600;
+}
+
+function formatRai(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n.toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function getPlotDisplayNameWithArea(plot, idx, t, lang) {
+  const name = plotNameOf(plot, idx, t, lang);
+  const raiText = formatRai(getPlotAreaRai(plot));
+  return raiText ? `${name} (${raiText} ไร่ )` : name;
+}
+
 function plotNameOf(plot, idx, t, lang) {
   return (
     plot?.plotName ||
@@ -687,17 +741,56 @@ async function fetchWeather7Days(lat, lng) {
   return res.json();
 }
 
+function getPlotId(plot, plotIndex = 0) {
+  return String(plot?.id || plot?._id || plot?.plotId || `plot-${plotIndex}`);
+}
+
+function getNodeId(node, plotIndex = 0, nodeIndex = 0) {
+  return String(
+    node?._id ||
+      node?.id ||
+      node?.uid ||
+      node?.nodeId ||
+      `${plotIndex}-${nodeIndex}`
+  );
+}
+
+function filterPlotsBySelection(plotsRaw = [], selectedPlotId = "all", selectedNodeId = "all") {
+  const plotsArray = Array.isArray(plotsRaw) ? plotsRaw : [];
+
+  return plotsArray
+    .map((plot, plotIndex) => {
+      const plotId = getPlotId(plot, plotIndex);
+      if (selectedPlotId !== "all" && plotId !== selectedPlotId) return null;
+
+      const nodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
+      const filteredNodes =
+        selectedNodeId === "all"
+          ? nodes
+          : nodes.filter((node, nodeIndex) => getNodeId(node, plotIndex, nodeIndex) === selectedNodeId);
+
+      if (selectedNodeId !== "all" && filteredNodes.length === 0) return null;
+
+      return {
+        ...plot,
+        nodes: filteredNodes,
+      };
+    })
+    .filter(Boolean);
+}
+
 function buildMapData(plotsRaw, t, lang) {
   const polygons = [];
   const pins = [];
 
   (Array.isArray(plotsRaw) ? plotsRaw : []).forEach((plot, plotIndex) => {
-    const plotName = plotNameOf(plot, plotIndex, t, lang);
+    const plotId = getPlotId(plot, plotIndex);
+    const plotName = getPlotDisplayNameWithArea(plot, plotIndex, t, lang);
     const polygonCoords = normalizeCoords(plot?.polygon || []);
 
     if (polygonCoords.length >= 3) {
       polygons.push({
-        id: plot?.id || plot?._id || `plot-${plotIndex}`,
+        id: plotId,
         name: plotName,
         color: "#6c8f5d",
         coords: polygonCoords,
@@ -712,11 +805,9 @@ function buildMapData(plotsRaw, t, lang) {
       if (lat == null || lng == null) return;
 
       pins.push({
-        id:
-          node?._id ||
-          node?.id ||
-          `${plotIndex}-${nodeIndex}-${lat.toFixed(6)}-${lng.toFixed(6)}`,
+        id: getNodeId(node, plotIndex, nodeIndex),
         pinName: node?.nodeName || node?.uid || `${t.node} ${nodeIndex + 1}`,
+        plotId,
         plotName,
         lat,
         lng,
@@ -911,6 +1002,10 @@ function buildHtmlContent(t, weatherView, weatherLoading, weatherError, lang, ro
       }
 
       @media (max-width: 820px) {
+        #p1 .card > div[style*="grid-template-columns:repeat(2"] {
+          grid-template-columns:1fr !important;
+        }
+
         #p1 .grid-top {
           grid-template-columns: 1fr;
           gap: 12px;
@@ -1037,10 +1132,51 @@ function buildHtmlContent(t, weatherView, weatherLoading, weatherError, lang, ro
   </div>
 
   <div class="card" style="margin-bottom:16px">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:12px;flex-wrap:wrap">
       <div class="card-title">${t.mapAndResources}</div>
       <div style="font-size:11px;color:var(--muted)">${t.mapHint}</div>
     </div>
+
+    <div style="
+      display:grid;
+      grid-template-columns:repeat(2,minmax(180px,1fr));
+      gap:10px;
+      margin-bottom:12px;
+      align-items:end;
+    ">
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:800;color:#334155">
+        ${lang === "en" ? "Plot" : "แปลง"}
+        <select id="dashboardPlotSelect" style="
+          width:100%;
+          border:1px solid rgba(15,23,42,.16);
+          border-radius:12px;
+          padding:10px 12px;
+          background:#fff;
+          font-size:14px;
+          font-family:'Sarabun',sans-serif;
+          outline:none;
+        ">
+          <option value="all">${lang === "en" ? "All plots" : "ทุกแปลง"}</option>
+        </select>
+      </label>
+
+      <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:800;color:#334155">
+        Node
+        <select id="dashboardNodeSelect" style="
+          width:100%;
+          border:1px solid rgba(15,23,42,.16);
+          border-radius:12px;
+          padding:10px 12px;
+          background:#fff;
+          font-size:14px;
+          font-family:'Sarabun',sans-serif;
+          outline:none;
+        ">
+          <option value="all">${lang === "en" ? "All nodes" : "ทุก node"}</option>
+        </select>
+      </label>
+    </div>
+
     <div id="dashboardMapHost" style="width:100%;min-height:320px;border-radius:18px;overflow:hidden;position:relative;background:#dfeecf;border:1px solid rgba(0,0,0,.08)">
       <div id="dashboardMap" style="width:100%;height:320px;min-height:320px;display:block;border-radius:18px;overflow:hidden;background:#dfeecf"></div>
     </div>
@@ -1077,8 +1213,8 @@ function buildHtmlContent(t, weatherView, weatherLoading, weatherError, lang, ro
 function buildSensorCards(plots = [], t, lang) {
   const cards = [];
 
-  for (const plot of plots) {
-    const plotName = plot?.plotName || t.unknownPlotName;
+  for (const [plotIndex, plot] of plots.entries()) {
+    const plotName = getPlotDisplayNameWithArea(plot, plotIndex, t, lang) || t.unknownPlotName;
     const nodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
 
     for (const node of nodes) {
@@ -1278,7 +1414,7 @@ function buildSensorCards(plots = [], t, lang) {
 function buildIssueSummary(plots = [], t, lang) {
   const issues = [];
 
-  for (const plot of plots) {
+  for (const [plotIndex, plot] of plots.entries()) {
     const nodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
     for (const node of nodes) {
       const sensors = Array.isArray(node?.sensors) ? node.sensors : [];
@@ -1291,7 +1427,7 @@ function buildIssueSummary(plots = [], t, lang) {
 
         if (info.isOut) {
           issues.push({
-            plotName: plot?.plotName || t.plot,
+            plotName: getPlotDisplayNameWithArea(plot, plotIndex, t, lang) || t.plot,
             nodeName: node?.nodeName || node?.uid || t.node,
             sensorName,
             latestValue: info.latest,
@@ -1318,8 +1454,15 @@ export default function Page() {
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState("");
   const [role, setRole] = useState("");
+  const [selectedPlotId, setSelectedPlotId] = useState("all");
+  const [selectedNodeId, setSelectedNodeId] = useState("all");
 
-  const mapData = useMemo(() => buildMapData(plots, t, lang), [plots, t, lang]);
+  const filteredPlots = useMemo(
+    () => filterPlotsBySelection(plots, selectedPlotId, selectedNodeId),
+    [plots, selectedPlotId, selectedNodeId]
+  );
+
+  const mapData = useMemo(() => buildMapData(filteredPlots, t, lang), [filteredPlots, t, lang]);
 
   const weatherView = useMemo(() => {
     const daily = weatherData?.daily;
@@ -1476,10 +1619,10 @@ export default function Page() {
     const issueListEl = document.getElementById("dashboardIssueList");
 
     if (cardsEl) {
-      cardsEl.innerHTML = buildSensorCards(plots, t, lang);
+      cardsEl.innerHTML = buildSensorCards(filteredPlots, t, lang);
     }
 
-    const allNodes = plots.flatMap((p) => (Array.isArray(p?.nodes) ? p.nodes : []));
+    const allNodes = filteredPlots.flatMap((p) => (Array.isArray(p?.nodes) ? p.nodes : []));
     const onCount = allNodes.filter((n) => {
       const s = String(n?.status || "").toUpperCase();
       return s === "ONLINE" || s === "ACTIVE" || s === "ON";
@@ -1489,7 +1632,7 @@ export default function Page() {
     if (onCountEl) onCountEl.textContent = String(onCount);
     if (offCountEl) offCountEl.textContent = String(offCount);
 
-    const issues = buildIssueSummary(plots, t, lang);
+    const issues = buildIssueSummary(filteredPlots, t, lang);
     if (issueCountEl) {
       issueCountEl.textContent = t.issuesCount(issues.length);
     }
@@ -1518,7 +1661,82 @@ export default function Page() {
             .join("")
         : `<div class="alert-pill">${t.noIssues}</div>`;
     }
-  }, [plots, t, lang, htmlContent]);
+  }, [filteredPlots, t, lang, htmlContent]);
+
+  useEffect(() => {
+    const plotSelect = document.getElementById("dashboardPlotSelect");
+    const nodeSelect = document.getElementById("dashboardNodeSelect");
+
+    if (!plotSelect || !nodeSelect) return;
+
+    const plotOptions = [
+      `<option value="all">${lang === "en" ? "All plots" : "ทุกแปลง"}</option>`,
+      ...(Array.isArray(plots) ? plots : []).map((plot, plotIndex) => {
+        const id = getPlotId(plot, plotIndex);
+        const name = getPlotDisplayNameWithArea(plot, plotIndex, t, lang);
+        return `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`;
+      }),
+    ];
+
+    plotSelect.innerHTML = plotOptions.join("");
+    plotSelect.value = selectedPlotId;
+
+    const nodeSourcePlots =
+      selectedPlotId === "all"
+        ? plots
+        : (Array.isArray(plots) ? plots : []).filter(
+            (plot, plotIndex) => getPlotId(plot, plotIndex) === selectedPlotId
+          );
+
+    const nodeOptions = [
+      `<option value="all">${lang === "en" ? "All nodes" : "ทุก node"}</option>`,
+      ...(Array.isArray(nodeSourcePlots) ? nodeSourcePlots : []).flatMap((plot, plotIndex) => {
+        const originalPlotIndex = (Array.isArray(plots) ? plots : []).findIndex(
+          (p) => getPlotId(p, 0) === getPlotId(plot, plotIndex)
+        );
+        const safePlotIndex = originalPlotIndex >= 0 ? originalPlotIndex : plotIndex;
+        const plotName = getPlotDisplayNameWithArea(plot, safePlotIndex, t, lang);
+        const nodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
+
+        return nodes.map((node, nodeIndex) => {
+          const id = getNodeId(node, safePlotIndex, nodeIndex);
+          const name = node?.nodeName || node?.uid || `${t.node} ${nodeIndex + 1}`;
+          const label = selectedPlotId === "all" ? `${plotName} • ${name}` : name;
+          return `<option value="${escapeHtml(id)}">${escapeHtml(label)}</option>`;
+        });
+      }),
+    ];
+
+    nodeSelect.innerHTML = nodeOptions.join("");
+
+    const hasSelectedNode =
+      selectedNodeId === "all" ||
+      Array.from(nodeSelect.options).some((option) => option.value === selectedNodeId);
+
+    if (!hasSelectedNode) {
+      setSelectedNodeId("all");
+      nodeSelect.value = "all";
+    } else {
+      nodeSelect.value = selectedNodeId;
+    }
+
+    const handlePlotChange = (event) => {
+      setSelectedPlotId(event.target.value || "all");
+      setSelectedNodeId("all");
+    };
+
+    const handleNodeChange = (event) => {
+      setSelectedNodeId(event.target.value || "all");
+    };
+
+    plotSelect.addEventListener("change", handlePlotChange);
+    nodeSelect.addEventListener("change", handleNodeChange);
+
+    return () => {
+      plotSelect.removeEventListener("change", handlePlotChange);
+      nodeSelect.removeEventListener("change", handleNodeChange);
+    };
+  }, [plots, selectedPlotId, selectedNodeId, t, lang, htmlContent]);
 
   useEffect(() => {
     let mounted = true;
