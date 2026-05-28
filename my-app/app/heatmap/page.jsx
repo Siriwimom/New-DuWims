@@ -544,6 +544,76 @@ function normalizeCoords(input) {
     .filter((pt) => pt.lat != null && pt.lng != null);
 }
 
+function calculatePolygonAreaSqm(coords = []) {
+  const pts = normalizeCoords(coords);
+  if (pts.length < 3) return 0;
+
+  const earthRadius = 6378137;
+  const centerLat =
+    pts.reduce((sum, point) => sum + Number(point.lat || 0), 0) /
+    Math.max(pts.length, 1);
+  const centerLatRad = (centerLat * Math.PI) / 180;
+
+  const projected = pts.map((point) => {
+    const x =
+      earthRadius *
+      ((Number(point.lng || 0) * Math.PI) / 180) *
+      Math.cos(centerLatRad);
+    const y = earthRadius * ((Number(point.lat || 0) * Math.PI) / 180);
+    return { x, y };
+  });
+
+  let area = 0;
+  for (let i = 0; i < projected.length; i += 1) {
+    const a = projected[i];
+    const b = projected[(i + 1) % projected.length];
+    area += a.x * b.y - b.x * a.y;
+  }
+
+  return Math.abs(area / 2);
+}
+
+function getPlotAreaRai(plot = {}) {
+  const storedRai = toNum(plot?.areaRai ?? plot?.rai ?? plot?.sizeRai);
+  if (storedRai != null && storedRai > 0) return storedRai;
+
+  const storedSqm = toNum(
+    plot?.areaSqm ?? plot?.squareMeter ?? plot?.squareMeters
+  );
+  if (storedSqm != null && storedSqm > 0) return storedSqm / 1600;
+
+  const coords =
+    plot?.coords ||
+    plot?.polygon?.coords ||
+    plot?.polygon ||
+    plot?.geometry ||
+    [];
+
+  const areaSqm = calculatePolygonAreaSqm(coords);
+  if (!Number.isFinite(areaSqm) || areaSqm <= 0) return 0;
+
+  return areaSqm / 1600;
+}
+
+function formatRai(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n.toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function removePlotAreaSuffix(name = "") {
+  return toText(name).replace(/\s*\([^)]*ไร่\s*\)\s*$/i, "").trim();
+}
+
+function formatPlotNameWithArea(name = "", areaRai = 0) {
+  const cleanName = removePlotAreaSuffix(name);
+  const raiText = formatRai(areaRai);
+  return raiText ? `${cleanName} (${raiText} ไร่ )` : cleanName;
+}
+
 function normalizeSensorName(name) {
   const raw = toText(name).toLowerCase();
 
@@ -1886,9 +1956,17 @@ export default function Page() {
             );
             const rawNodes = Array.isArray(plot?.nodes) ? plot.nodes : [];
 
+            const rawPlotName = toText(
+              plot?.plotName || plot?.name || `แปลง ${plotIndex + 1}`
+            );
+            const areaRai = getPlotAreaRai({ ...plot, coords });
+            const displayPlotName = formatPlotNameWithArea(rawPlotName, areaRai);
+
             return {
               id: toText(plot?.id || plot?._id || `plot-${plotIndex + 1}`),
-              name: toText(plot?.plotName || plot?.name || `แปลง ${plotIndex + 1}`),
+              name: displayPlotName,
+              baseName: removePlotAreaSuffix(rawPlotName),
+              areaRai,
               caretaker: toText(plot?.caretaker),
               coords,
               nodes: rawNodes

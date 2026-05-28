@@ -165,6 +165,88 @@ function toNum(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function normalizePlotCoord(c) {
+  if (!c) return null;
+
+  if (Array.isArray(c) && c.length >= 2) {
+    const lat = toNum(c[0]);
+    const lng = toNum(c[1]);
+    if (lat !== null && lng !== null) return [lat, lng];
+  }
+
+  const lat = toNum(c.lat) ?? toNum(c.latitude) ?? toNum(c._lat);
+  const lng =
+    toNum(c.lng) ?? toNum(c.lon) ?? toNum(c.longitude) ?? toNum(c._lng);
+
+  if (lat !== null && lng !== null) return [lat, lng];
+  return null;
+}
+
+function normalizePlotCoords(input) {
+  if (!Array.isArray(input)) return [];
+  return input.map(normalizePlotCoord).filter(Boolean);
+}
+
+function calculatePlotAreaSqm(coords = []) {
+  const pts = normalizePlotCoords(coords);
+  if (pts.length < 3) return 0;
+
+  const earthRadius = 6378137;
+  const centerLat =
+    pts.reduce((sum, [lat]) => sum + lat, 0) / Math.max(pts.length, 1);
+  const centerLatRad = (centerLat * Math.PI) / 180;
+
+  const projected = pts.map(([lat, lng]) => {
+    const x = earthRadius * ((lng * Math.PI) / 180) * Math.cos(centerLatRad);
+    const y = earthRadius * ((lat * Math.PI) / 180);
+    return [x, y];
+  });
+
+  let area = 0;
+  for (let i = 0; i < projected.length; i++) {
+    const [x1, y1] = projected[i];
+    const [x2, y2] = projected[(i + 1) % projected.length];
+    area += x1 * y2 - x2 * y1;
+  }
+
+  return Math.abs(area / 2);
+}
+
+function getPlotAreaRai(plot = {}) {
+  const storedRai = toNum(plot?.areaRai ?? plot?.rai ?? plot?.sizeRai);
+  if (storedRai !== null && storedRai > 0) return storedRai;
+
+  const storedSqm = toNum(plot?.areaSqm ?? plot?.squareMeter ?? plot?.squareMeters);
+  if (storedSqm !== null && storedSqm > 0) return storedSqm / 1600;
+
+  const polygon = plot?.polygon?.coords || plot?.polygon || plot?.coords || [];
+  const areaSqm = calculatePlotAreaSqm(polygon);
+  if (!Number.isFinite(areaSqm) || areaSqm <= 0) return 0;
+
+  return areaSqm / 1600;
+}
+
+function formatRai(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  return n.toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function getPlotDisplayNameWithArea(plot = {}, fallbackName = "") {
+  const baseName =
+    plot?.plotName ||
+    plot?.name ||
+    plot?.alias ||
+    fallbackName ||
+    "Unknown plot";
+
+  const raiText = formatRai(getPlotAreaRai(plot));
+  return raiText ? `${baseName} (${raiText} ไร่ )` : baseName;
+}
+
 function average(nums) {
   const arr = nums.filter((n) => Number.isFinite(n));
   if (!arr.length) return null;
@@ -795,9 +877,13 @@ function normalizePlot(plot, t) {
     })),
   }));
 
+  const fallbackName = t?.unknownPlot || "Unknown plot";
+
   return {
     id: getId(plot),
-    plotName: plot?.plotName || plot?.name || plot?.alias || t?.unknownPlot || "Unknown plot",
+    plotName: getPlotDisplayNameWithArea(plot, fallbackName),
+    plotNameBase: plot?.plotName || plot?.name || plot?.alias || fallbackName,
+    areaRai: getPlotAreaRai(plot),
     nodes,
   };
 }
