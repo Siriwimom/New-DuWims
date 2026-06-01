@@ -159,6 +159,144 @@ function sameText(a, b) {
   return String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 }
 
+function normalizeIdentity(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function collectUserIdentityValues(user = {}) {
+  const values = [
+    user?.id,
+    user?._id,
+    user?.uid,
+    user?.userId,
+    user?.employeeId,
+    user?.email,
+    user?.nickname,
+    user?.name,
+    user?.displayName,
+    user?.fullName,
+    user?.username,
+  ];
+
+  return values.map(normalizeIdentity).filter(Boolean);
+}
+
+function collectCaretakerValues(plot = {}) {
+  const directValues = [
+    plot?.caretaker,
+    plot?.caretakerName,
+    plot?.caretakerEmail,
+    plot?.caretakerId,
+    plot?.caretakerUid,
+    plot?.manager,
+    plot?.managerName,
+    plot?.managerEmail,
+    plot?.managerId,
+    plot?.managerUid,
+    plot?.supervisor,
+    plot?.supervisorName,
+    plot?.supervisorEmail,
+    plot?.supervisorId,
+    plot?.supervisorUid,
+    plot?.admin,
+    plot?.adminName,
+    plot?.adminEmail,
+    plot?.adminId,
+    plot?.adminUid,
+    plot?.employee,
+    plot?.employeeName,
+    plot?.employeeEmail,
+    plot?.employeeId,
+    plot?.employeeUid,
+    plot?.staff,
+    plot?.staffName,
+    plot?.staffEmail,
+    plot?.staffId,
+    plot?.staffUid,
+    plot?.ดูแล,
+    plot?.ผู้ดูแล,
+    plot?.ชื่อผู้ดูแล,
+  ];
+
+  const arrayValues = [
+    plot?.caretakers,
+    plot?.caretakerList,
+    plot?.managers,
+    plot?.managerList,
+    plot?.supervisors,
+    plot?.admins,
+    plot?.employees,
+    plot?.employeeList,
+    plot?.staffs,
+    plot?.staffList,
+    plot?.assignedEmployees,
+    plot?.assignedUsers,
+    plot?.ผู้ดูแลทั้งหมด,
+  ];
+
+  const values = [];
+
+  const pushIdentity = (item) => {
+    if (Array.isArray(item)) {
+      item.forEach(pushIdentity);
+      return;
+    }
+
+    if (item && typeof item === "object") {
+      values.push(
+        item?.id,
+        item?._id,
+        item?.uid,
+        item?.userId,
+        item?.employeeId,
+        item?.email,
+        item?.nickname,
+        item?.name,
+        item?.displayName,
+        item?.fullName,
+        item?.username
+      );
+      return;
+    }
+
+    values.push(item);
+  };
+
+  directValues.forEach(pushIdentity);
+  arrayValues.forEach(pushIdentity);
+
+  return values.map(normalizeIdentity).filter(Boolean);
+}
+
+function isEmployeeCaretakerOfPlot(plot = {}, user = {}) {
+  const userValues = collectUserIdentityValues(user);
+  if (!userValues.length) return false;
+
+  const caretakerValues = collectCaretakerValues(plot);
+  if (!caretakerValues.length) return false;
+
+  return caretakerValues.some((caretakerValue) =>
+    userValues.some(
+      (userValue) =>
+        caretakerValue === userValue ||
+        caretakerValue.includes(userValue) ||
+        userValue.includes(caretakerValue)
+    )
+  );
+}
+
+function filterPlotsByEmployeeCaretaker(plotsRaw = [], role = "", user = {}) {
+  const plotsArray = Array.isArray(plotsRaw) ? plotsRaw : [];
+  const isEmployee = String(role || "").toLowerCase() === "employee";
+
+  if (!isEmployee) return plotsArray;
+
+  return plotsArray.filter((plot) => isEmployeeCaretakerOfPlot(plot, user));
+}
+
+
 function toNum(v) {
   if (v === null || v === undefined || v === "") return null;
   const n = Number(v);
@@ -880,6 +1018,7 @@ function normalizePlot(plot, t) {
   const fallbackName = t?.unknownPlot || "Unknown plot";
 
   return {
+    ...plot,
     id: getId(plot),
     plotName: getPlotDisplayNameWithArea(plot, fallbackName),
     plotNameBase: plot?.plotName || plot?.name || plot?.alias || fallbackName,
@@ -1034,16 +1173,40 @@ export default function HistoryPage() {
   const apiBase = getApiBase();
 
   const [authChecked, setAuthChecked] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [role, setRole] = useState("");
 
   useEffect(() => {
-    const token = getToken();
+    let alive = true;
 
-    if (!token) {
-      router.replace("/");
-      return;
+    async function checkAuth() {
+      const token = getToken();
+
+      if (!token) {
+        router.replace("/");
+        return;
+      }
+
+      try {
+        const me = await apiGet("/auth/me");
+        if (!alive) return;
+        const user = me?.user || me?.data?.user || me || {};
+        setCurrentUser(user);
+        setRole(user?.role || "");
+      } catch {
+        if (!alive) return;
+        setCurrentUser(null);
+        setRole("");
+      } finally {
+        if (alive) setAuthChecked(true);
+      }
     }
 
-    setAuthChecked(true);
+    checkAuth();
+
+    return () => {
+      alive = false;
+    };
   }, [router]);
 
   const txt = {
@@ -1134,7 +1297,13 @@ export default function HistoryPage() {
     let alive = true;
 
     async function loadPlots() {
-      const cachedPlots = readBrowserCache(HISTORY_PLOTS_CACHE_KEY);
+      if (!authChecked) return;
+
+      const cachedPlots = filterPlotsByEmployeeCaretaker(
+        readBrowserCache(HISTORY_PLOTS_CACHE_KEY),
+        role,
+        currentUser
+      );
       if (Array.isArray(cachedPlots) && cachedPlots.length > 0) {
         setPlots(cachedPlots);
         setLoadingPlots(false);
@@ -1150,7 +1319,8 @@ export default function HistoryPage() {
         if (!alive) return;
         const plotItems = Array.isArray(plotsData?.items) ? plotsData.items : Array.isArray(plotsData) ? plotsData : [];
         const nodeItems = Array.isArray(nodesData?.items) ? nodesData.items : Array.isArray(nodesData) ? nodesData : [];
-        const normalizedPlots = attachNodesToPlots(plotItems, nodeItems, txt);
+        const accessiblePlotItems = filterPlotsByEmployeeCaretaker(plotItems, role, currentUser);
+        const normalizedPlots = attachNodesToPlots(accessiblePlotItems, nodeItems, txt);
         setPlots(normalizedPlots);
         writeBrowserCache(HISTORY_PLOTS_CACHE_KEY, "default", normalizedPlots);
       } catch (err) {
@@ -1169,7 +1339,7 @@ export default function HistoryPage() {
     return () => {
       alive = false;
     };
-  }, [txt.loadPlotsFailed, txt.unknownPlot]);
+  }, [authChecked, role, currentUser, txt.loadPlotsFailed, txt.unknownPlot]);
 
   useEffect(() => {
     const onDocMouseDown = (e) => {
@@ -2304,8 +2474,15 @@ export default function HistoryPage() {
     };
   }, [isMobileChart]);
 
+  const shouldHideHistoryBody =
+    authChecked &&
+    !loadingPlots &&
+    String(role || "").toLowerCase() === "employee" &&
+    plots.length === 0;
+
   return (
     <DuwimsStaticPage current="history">
+      {shouldHideHistoryBody ? null : (
       <div id="history-page-root" className="history-page-shell">
         <div className="history-card filter-card">
           <div className="history-title">{txt.historyFilterTitle}</div>
@@ -3629,6 +3806,7 @@ export default function HistoryPage() {
           }
         `}</style>
       </div>
+      )}
     </DuwimsStaticPage>
   );
 }

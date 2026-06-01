@@ -755,6 +755,141 @@ function getNodeId(node, plotIndex = 0, nodeIndex = 0) {
   );
 }
 
+
+function normalizeIdentity(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function collectUserIdentityValues(user = {}) {
+  const values = [
+    user?.id,
+    user?._id,
+    user?.uid,
+    user?.userId,
+    user?.employeeId,
+    user?.email,
+    user?.nickname,
+    user?.name,
+    user?.displayName,
+    user?.fullName,
+    user?.username,
+  ];
+
+  return values.map(normalizeIdentity).filter(Boolean);
+}
+
+function collectCaretakerValues(plot = {}) {
+  const directValues = [
+    plot?.caretaker,
+    plot?.caretakerName,
+    plot?.caretakerEmail,
+    plot?.caretakerId,
+    plot?.caretakerUid,
+    plot?.manager,
+    plot?.managerName,
+    plot?.managerEmail,
+    plot?.managerId,
+    plot?.managerUid,
+    plot?.supervisor,
+    plot?.supervisorName,
+    plot?.supervisorEmail,
+    plot?.supervisorId,
+    plot?.supervisorUid,
+    plot?.admin,
+    plot?.adminName,
+    plot?.adminEmail,
+    plot?.adminId,
+    plot?.adminUid,
+    plot?.employee,
+    plot?.employeeName,
+    plot?.employeeEmail,
+    plot?.employeeId,
+    plot?.employeeUid,
+    plot?.staff,
+    plot?.staffName,
+    plot?.staffEmail,
+    plot?.staffId,
+    plot?.staffUid,
+    plot?.ดูแล,
+    plot?.ผู้ดูแล,
+    plot?.ชื่อผู้ดูแล,
+  ];
+
+  const arrayValues = [
+    plot?.caretakers,
+    plot?.caretakerList,
+    plot?.managers,
+    plot?.managerList,
+    plot?.supervisors,
+    plot?.admins,
+    plot?.employees,
+    plot?.employeeList,
+    plot?.staffs,
+    plot?.staffList,
+    plot?.assignedEmployees,
+    plot?.assignedUsers,
+    plot?.ผู้ดูแลทั้งหมด,
+  ];
+
+  const values = [];
+
+  const pushIdentity = (item) => {
+    if (Array.isArray(item)) {
+      item.forEach(pushIdentity);
+      return;
+    }
+
+    if (item && typeof item === "object") {
+      values.push(
+        item?.id,
+        item?._id,
+        item?.uid,
+        item?.userId,
+        item?.employeeId,
+        item?.email,
+        item?.nickname,
+        item?.name,
+        item?.displayName,
+        item?.fullName,
+        item?.username
+      );
+      return;
+    }
+
+    values.push(item);
+  };
+
+  directValues.forEach(pushIdentity);
+  arrayValues.forEach(pushIdentity);
+
+  return values.map(normalizeIdentity).filter(Boolean);
+}
+
+function isEmployeeCaretakerOfPlot(plot = {}, user = {}) {
+  const userValues = collectUserIdentityValues(user);
+  if (!userValues.length) return false;
+
+  const caretakerValues = collectCaretakerValues(plot);
+  if (!caretakerValues.length) return false;
+
+  return caretakerValues.some((caretakerValue) =>
+    userValues.some(
+      (userValue) => caretakerValue === userValue || caretakerValue.includes(userValue) || userValue.includes(caretakerValue)
+    )
+  );
+}
+
+function filterPlotsByEmployeeCaretaker(plotsRaw = [], role = "", user = {}) {
+  const plotsArray = Array.isArray(plotsRaw) ? plotsRaw : [];
+  const isEmployee = String(role || "").toLowerCase() === "employee";
+
+  if (!isEmployee) return plotsArray;
+
+  return plotsArray.filter((plot) => isEmployeeCaretakerOfPlot(plot, user));
+}
+
 function filterPlotsBySelection(plotsRaw = [], selectedPlotId = "all", selectedNodeId = "all") {
   const plotsArray = Array.isArray(plotsRaw) ? plotsRaw : [];
 
@@ -1454,15 +1589,34 @@ export default function Page() {
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState("");
   const [role, setRole] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
   const [selectedPlotId, setSelectedPlotId] = useState("all");
   const [selectedNodeId, setSelectedNodeId] = useState("all");
 
+  const accessiblePlots = useMemo(
+    () => filterPlotsByEmployeeCaretaker(plots, role, currentUser),
+    [plots, role, currentUser]
+  );
+
   const filteredPlots = useMemo(
-    () => filterPlotsBySelection(plots, selectedPlotId, selectedNodeId),
-    [plots, selectedPlotId, selectedNodeId]
+    () => filterPlotsBySelection(accessiblePlots, selectedPlotId, selectedNodeId),
+    [accessiblePlots, selectedPlotId, selectedNodeId]
   );
 
   const mapData = useMemo(() => buildMapData(filteredPlots, t, lang), [filteredPlots, t, lang]);
+
+  const shouldHideDashboardBody =
+    !loadingMap && String(role || "").toLowerCase() === "employee" && accessiblePlots.length === 0;
+
+  useEffect(() => {
+    if (selectedPlotId === "all") return;
+    const exists = accessiblePlots.some((plot, plotIndex) => getPlotId(plot, plotIndex) === selectedPlotId);
+    if (!exists) {
+      setSelectedPlotId("all");
+      setSelectedNodeId("all");
+    }
+  }, [accessiblePlots, selectedPlotId]);
+
 
   const weatherView = useMemo(() => {
     const daily = weatherData?.daily;
@@ -1488,8 +1642,11 @@ export default function Page() {
   }, [weatherData, lang]);
 
   const htmlContent = useMemo(
-    () => buildHtmlContent(t, weatherView, weatherLoading, weatherError, lang, role),
-    [t, weatherView, weatherLoading, weatherError, lang, role]
+    () =>
+      shouldHideDashboardBody
+        ? ""
+        : buildHtmlContent(t, weatherView, weatherLoading, weatherError, lang, role),
+    [shouldHideDashboardBody, t, weatherView, weatherLoading, weatherError, lang, role]
   );
 
   useEffect(() => {
@@ -1519,15 +1676,35 @@ export default function Page() {
         }
 
         const payload = parseJwt(token);
+        let authUser = payload?.user || payload?.data?.user || payload || null;
+        let nextRole = String(
+          authUser?.role ||
+            payload?.role ||
+            payload?.user?.role ||
+            payload?.data?.role ||
+            ""
+        ).toLowerCase();
+
+        try {
+          const meRes = await fetch(`${getApiBase()}/auth/me`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            cache: "no-store",
+          });
+
+          if (meRes.ok) {
+            const meData = await meRes.json().catch(() => ({}));
+            authUser = meData?.user || meData?.data?.user || meData || authUser;
+            nextRole = String(authUser?.role || nextRole || "").toLowerCase();
+          }
+        } catch {}
+
         if (alive) {
-          setRole(
-            String(
-              payload?.role ||
-                payload?.user?.role ||
-                payload?.data?.role ||
-                ""
-            ).toLowerCase()
-          );
+          setRole(nextRole);
+          setCurrentUser(authUser || null);
         }
 
         const res = await fetch(`${getApiBase()}/api/plots`, {
@@ -1576,12 +1753,12 @@ export default function Page() {
         setWeatherLoading(true);
         setWeatherError("");
 
-        if (!Array.isArray(plots) || !plots.length) {
+        if (!Array.isArray(accessiblePlots) || !accessiblePlots.length) {
           if (alive) setWeatherData(null);
           return;
         }
 
-        const firstPlot = plots[0];
+        const firstPlot = accessiblePlots[0];
         const center = getPlotCenterLatLng(firstPlot);
 
         if (!center) {
@@ -1609,9 +1786,11 @@ export default function Page() {
     return () => {
       alive = false;
     };
-  }, [plots]);
+  }, [accessiblePlots]);
 
   useEffect(() => {
+    if (shouldHideDashboardBody) return;
+
     const cardsEl = document.getElementById("dashboardSensorCards");
     const onCountEl = document.getElementById("dashboardNodeOnCount");
     const offCountEl = document.getElementById("dashboardNodeOffCount");
@@ -1661,9 +1840,11 @@ export default function Page() {
             .join("")
         : `<div class="alert-pill">${t.noIssues}</div>`;
     }
-  }, [filteredPlots, t, lang, htmlContent]);
+  }, [filteredPlots, t, lang, htmlContent, shouldHideDashboardBody]);
 
   useEffect(() => {
+    if (shouldHideDashboardBody) return;
+
     const plotSelect = document.getElementById("dashboardPlotSelect");
     const nodeSelect = document.getElementById("dashboardNodeSelect");
 
@@ -1671,7 +1852,7 @@ export default function Page() {
 
     const plotOptions = [
       `<option value="all">${lang === "en" ? "All plots" : "ทุกแปลง"}</option>`,
-      ...(Array.isArray(plots) ? plots : []).map((plot, plotIndex) => {
+      ...(Array.isArray(accessiblePlots) ? accessiblePlots : []).map((plot, plotIndex) => {
         const id = getPlotId(plot, plotIndex);
         const name = getPlotDisplayNameWithArea(plot, plotIndex, t, lang);
         return `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`;
@@ -1683,15 +1864,15 @@ export default function Page() {
 
     const nodeSourcePlots =
       selectedPlotId === "all"
-        ? plots
-        : (Array.isArray(plots) ? plots : []).filter(
+        ? accessiblePlots
+        : (Array.isArray(accessiblePlots) ? accessiblePlots : []).filter(
             (plot, plotIndex) => getPlotId(plot, plotIndex) === selectedPlotId
           );
 
     const nodeOptions = [
       `<option value="all">${lang === "en" ? "All nodes" : "ทุก node"}</option>`,
       ...(Array.isArray(nodeSourcePlots) ? nodeSourcePlots : []).flatMap((plot, plotIndex) => {
-        const originalPlotIndex = (Array.isArray(plots) ? plots : []).findIndex(
+        const originalPlotIndex = (Array.isArray(accessiblePlots) ? accessiblePlots : []).findIndex(
           (p) => getPlotId(p, 0) === getPlotId(plot, plotIndex)
         );
         const safePlotIndex = originalPlotIndex >= 0 ? originalPlotIndex : plotIndex;
@@ -1736,7 +1917,7 @@ export default function Page() {
       plotSelect.removeEventListener("change", handlePlotChange);
       nodeSelect.removeEventListener("change", handleNodeChange);
     };
-  }, [plots, selectedPlotId, selectedNodeId, t, lang, htmlContent]);
+  }, [accessiblePlots, selectedPlotId, selectedNodeId, t, lang, htmlContent, shouldHideDashboardBody]);
 
   useEffect(() => {
     let mounted = true;
@@ -1744,6 +1925,16 @@ export default function Page() {
     let resizeTimer = null;
 
     async function initLeaflet() {
+      if (shouldHideDashboardBody) {
+        if (mapRef.current) {
+          try {
+            mapRef.current.remove();
+          } catch {}
+          mapRef.current = null;
+        }
+        return;
+      }
+
       if (loadingMap) return;
 
       const hostEl = document.getElementById("dashboardMapHost");
@@ -1990,7 +2181,7 @@ export default function Page() {
         } catch {}
       }
     };
-  }, [loadingMap, mapError, mapData, t, lang, htmlContent]);
+  }, [loadingMap, mapError, mapData, t, lang, htmlContent, shouldHideDashboardBody]);
 
   return <DuwimsStaticPage current="dashboard" htmlContent={htmlContent} />;
 }
